@@ -3,6 +3,8 @@ import { Avatar } from "@/components/Avatar";
 import { getContacts } from "@/lib/contacts";
 import { daysSince, describeGap, formatDate } from "@/lib/format";
 
+export const dynamic = "force-dynamic";
+
 export default function Dashboard() {
   const contacts = getContacts();
   return (

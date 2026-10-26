@@ -10,7 +10,7 @@ Next.js (App Router), TypeScript, Tailwind CSS, Vitest.
 
 ## Getting started
 
-Requires Node.js 20+.
+Requires Node.js ^22.12.0, ^24.0.0, or >=26.0.0.
 
 ```bash
 npm install
