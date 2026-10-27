@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { loadConfig } from "@/lib/gmail/config";
 import { fetchSample, type GmailSummary } from "@/lib/gmail/messages";
-import { AuthError, refresh } from "@/lib/gmail/oauth";
+import { AuthError } from "@/lib/gmail/oauth";
 import { CRED_COOKIE, readCreds } from "@/lib/gmail/session";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +22,10 @@ async function load(error?: string): Promise<View> {
   const cfg = loadConfig();
   if (!cfg.ok) return { kind: "disconnected", error: "not_configured" };
   const store = await cookies();
-  let creds = readCreds(store.get(CRED_COOKIE)?.value, cfg.config.sessionSecret);
+  const creds = readCreds(store.get(CRED_COOKIE)?.value, cfg.config.sessionSecret);
   if (!creds) return { kind: "disconnected", error };
+  if (creds.expiresAt - 60_000 < Date.now()) redirect("/api/gmail/refresh");
   try {
-    if (creds.expiresAt - 60_000 < Date.now()) creds = await refresh(cfg.config, creds);
     const summary = await fetchSample(creds.accessToken, cfg.config.sampleSize);
     return { kind: "connected", summary, limit: cfg.config.sampleSize };
   } catch (e) {
@@ -71,11 +72,11 @@ export default async function GmailPage({
               {view.summary.topSenderDomains.map((d) => `${d.domain} (${d.count})`).join(", ") || "none"}
             </div>
           </dl>
-          <form action="/api/gmail/disconnect" method="post" className="mt-4">
-            <button className="rounded-lg border border-stone-300 px-4 py-2">Disconnect</button>
-          </form>
         </section>
       )}
+      <form action="/api/gmail/disconnect" method="post" className="mt-4">
+        <button className="rounded-lg border border-stone-300 px-4 py-2">Disconnect</button>
+      </form>
     </div>
   );
 }

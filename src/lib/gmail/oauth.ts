@@ -36,13 +36,20 @@ async function tokenRequest(body: Record<string, string>): Promise<Credentials> 
     body: new URLSearchParams(body),
     cache: "no-store",
   });
-  if (!res.ok) throw new AuthError(`Token endpoint returned ${res.status}`);
+  if (!res.ok) {
+    let error: unknown;
+    try {
+      error = ((await res.json()) as { error?: unknown }).error;
+    } catch {}
+    if (error === "invalid_grant") throw new AuthError("Refresh token rejected");
+    throw new Error(`Token endpoint returned ${res.status}`);
+  }
   const json = (await res.json()) as {
     access_token?: string;
     refresh_token?: string;
     expires_in?: number;
   };
-  if (!json.access_token) throw new AuthError("Token response missing access token");
+  if (!json.access_token) throw new Error("Token response missing access token");
   return {
     accessToken: json.access_token,
     refreshToken: json.refresh_token,
