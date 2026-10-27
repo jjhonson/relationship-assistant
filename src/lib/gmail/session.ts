@@ -4,6 +4,16 @@ import type { Credentials } from "./oauth";
 export const CRED_COOKIE = "gmail_creds";
 export const FLOW_COOKIE = "gmail_oauth_flow";
 
+export function credentialPageAction(
+  creds: Credentials | null,
+  error?: string,
+  now = Date.now(),
+): "error" | "disconnected" | "refresh" | "load" {
+  if (error) return "error";
+  if (!creds) return "disconnected";
+  return creds.expiresAt - 60_000 < now ? "refresh" : "load";
+}
+
 export const cookieOptions = (maxAge?: number) => ({
   httpOnly: true,
   sameSite: "lax" as const,

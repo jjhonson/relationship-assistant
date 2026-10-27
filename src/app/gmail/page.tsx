@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { loadConfig } from "@/lib/gmail/config";
 import { fetchSample, type GmailSummary } from "@/lib/gmail/messages";
 import { AuthError } from "@/lib/gmail/oauth";
-import { CRED_COOKIE, readCreds } from "@/lib/gmail/session";
+import { CRED_COOKIE, credentialPageAction, readCreds } from "@/lib/gmail/session";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +23,11 @@ async function load(error?: string): Promise<View> {
   if (!cfg.ok) return { kind: "disconnected", error: "not_configured" };
   const store = await cookies();
   const creds = readCreds(store.get(CRED_COOKIE)?.value, cfg.config.sessionSecret);
+  const action = credentialPageAction(creds, error);
+  if (action === "error") return { kind: "disconnected", error };
+  if (action === "disconnected") return { kind: "disconnected", error };
+  if (action === "refresh") redirect("/api/gmail/refresh");
   if (!creds) return { kind: "disconnected", error };
-  if (creds.expiresAt - 60_000 < Date.now()) redirect("/api/gmail/refresh");
   try {
     const summary = await fetchSample(creds.accessToken, cfg.config.sampleSize);
     return { kind: "connected", summary, limit: cfg.config.sampleSize };
@@ -57,9 +60,16 @@ export default async function GmailPage({
         <p role="alert" className="mt-4 rounded-lg bg-amber-100 p-3 text-amber-900">{message}</p>
       )}
       {view.kind === "disconnected" ? (
-        <a href="/api/gmail/connect" className="mt-6 inline-block rounded-lg bg-indigo-700 px-4 py-2 font-medium text-white">
-          Connect Gmail
-        </a>
+        <div className="mt-6 flex gap-3">
+          <a href="/api/gmail/connect" className="inline-block rounded-lg bg-indigo-700 px-4 py-2 font-medium text-white">
+            Connect Gmail
+          </a>
+          {view.error === "api_error" && (
+            <a href="/gmail" className="inline-block rounded-lg border border-stone-300 px-4 py-2">
+              Retry
+            </a>
+          )}
+        </div>
       ) : (
         <section className="mt-6 rounded-2xl border border-stone-200 bg-white p-5">
           <p className="font-semibold text-green-700">Connected</p>

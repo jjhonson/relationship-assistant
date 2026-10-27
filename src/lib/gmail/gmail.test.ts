@@ -3,7 +3,7 @@ import { clampSampleSize, loadConfig } from "./config";
 import { seal, unseal } from "./crypto";
 import { summarize } from "./messages";
 import { AuthError, buildAuthUrl, refresh } from "./oauth";
-import { readCreds, sealCreds } from "./session";
+import { credentialPageAction, readCreds, sealCreds } from "./session";
 
 const secret = "x".repeat(32);
 const env = {
@@ -45,6 +45,11 @@ describe("crypto/session", () => {
     expect(readCreds(sealCreds(c, secret), secret)).toEqual(c);
     expect(readCreds("garbage", secret)).toBeNull();
     expect(readCreds(undefined, secret)).toBeNull();
+  });
+  it("keeps refresh errors stable until the user retries", () => {
+    const expired = { accessToken: "a", refreshToken: "r", expiresAt: 0 };
+    expect(credentialPageAction(expired, "api_error", 100_000)).toBe("error");
+    expect(credentialPageAction(expired, undefined, 100_000)).toBe("refresh");
   });
 });
 
