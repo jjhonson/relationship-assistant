@@ -18,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span aria-hidden className="text-xl">♡</span>
               Relationship Assistant
             </Link>
+            <Link href="/gmail" className="text-sm text-indigo-700 underline">Gmail PoC</Link>
             <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
               Prototype · sample data
             </span>
