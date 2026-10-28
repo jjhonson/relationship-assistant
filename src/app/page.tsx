@@ -16,6 +16,12 @@ export default function Dashboard() {
           to see context and thoughtful next steps.
         </p>
       </div>
+      <Link
+        href="/discover"
+        className="mb-6 inline-block rounded-lg bg-indigo-700 px-4 py-2 font-medium text-white hover:bg-indigo-800"
+      >
+        Discover relationships
+      </Link>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {contacts.map((c) => (
           <li key={c.id}>

@@ -1,5 +1,6 @@
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 export const MAX_SAMPLE = 50;
+export const MAX_DISCOVERY_SAMPLE = 200;
 
 export type GmailConfig = {
   clientId: string;
@@ -7,12 +8,19 @@ export type GmailConfig = {
   redirectUri: string;
   sessionSecret: string;
   sampleSize: number;
+  discoverySampleSize: number;
 };
 
 export function clampSampleSize(raw: string | number | undefined | null): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 1) return MAX_SAMPLE;
   return Math.min(Math.floor(n), MAX_SAMPLE);
+}
+
+export function clampDiscoverySampleSize(raw: string | number | undefined | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return MAX_DISCOVERY_SAMPLE;
+  return Math.min(Math.floor(n), MAX_DISCOVERY_SAMPLE);
 }
 
 /** Returns config, or the names of missing environment variables. */
@@ -33,6 +41,7 @@ export function loadConfig(
       redirectUri: env.GOOGLE_REDIRECT_URI!,
       sessionSecret: env.SESSION_SECRET!,
       sampleSize: clampSampleSize(env.GMAIL_SAMPLE_SIZE),
+      discoverySampleSize: clampDiscoverySampleSize(env.GMAIL_DISCOVERY_SAMPLE_SIZE),
     },
   };
 }

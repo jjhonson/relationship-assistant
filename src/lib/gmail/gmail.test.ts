@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clampSampleSize, loadConfig } from "./config";
+import { clampDiscoverySampleSize, clampSampleSize, loadConfig } from "./config";
 import { seal, unseal } from "./crypto";
 import { summarize } from "./messages";
 import { AuthError, buildAuthUrl, refresh } from "./oauth";
@@ -21,6 +21,14 @@ describe("config", () => {
     expect(clampSampleSize("5")).toBe(5);
     expect(clampSampleSize("abc")).toBe(50);
     expect(clampSampleSize(undefined)).toBe(50);
+  });
+  it("clamps discovery sample size to 1..200", () => {
+    expect(clampDiscoverySampleSize("500")).toBe(200);
+    expect(clampDiscoverySampleSize("5")).toBe(5);
+    expect(clampDiscoverySampleSize("abc")).toBe(200);
+    expect(clampDiscoverySampleSize(undefined)).toBe(200);
+    const config = loadConfig(env);
+    expect(config.ok && config.config.discoverySampleSize).toBe(200);
   });
   it("reports missing variables by name only", () => {
     const r = loadConfig({});

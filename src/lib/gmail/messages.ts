@@ -12,16 +12,46 @@ export type GmailSummary = {
 
 type Meta = { labelIds?: string[]; payload?: { headers?: { name: string; value: string }[] } };
 
+export type DiscoveryMessage = {
+  id: string;
+  threadId?: string;
+  internalDate?: string;
+  labelIds?: string[];
+  payload?: { headers?: { name: string; value: string }[] };
+};
+
 export class ApiError extends Error {}
 
 async function get<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
-    headers: { Authorization: ["Bearer", token].join(" ") },
-    cache: "no-store",
-  });
-  if (res.status === 401) throw new AuthError("Unauthorized");
-  if (!res.ok) throw new ApiError(`Gmail API returned ${res.status}`);
-  return (await res.json()) as T;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(`${API}${path}`, {
+      headers: { Authorization: ["Bearer", token].join(" ") },
+      cache: "no-store",
+    });
+    if (res.status === 401) throw new AuthError("Unauthorized");
+    if (res.ok) return (await res.json()) as T;
+
+    let rateLimited = res.status === 429;
+    if (res.status === 403) {
+      try {
+        const body = (await res.json()) as {
+          error?: { errors?: { reason?: string }[] };
+        };
+        rateLimited = body.error?.errors?.some((e) =>
+          ["rateLimitExceeded", "userRateLimitExceeded"].includes(e.reason ?? ""),
+        ) ?? false;
+      } catch {}
+    }
+    const retryable = rateLimited || [500, 502, 503, 504].includes(res.status);
+    if (!retryable || attempt === 2) throw new ApiError(`Gmail API returned ${res.status}`);
+
+    const retryAfter = Number(res.headers.get("Retry-After"));
+    const delay = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 2000)
+      : 250 * 2 ** attempt;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  throw new ApiError("Gmail API request failed");
 }
 
 /** Aggregates only; no subjects, addresses, snippets, or bodies are returned. */
@@ -63,4 +93,74 @@ export async function fetchSample(token: string, limit: number): Promise<GmailSu
     ),
   );
   return summarize(items);
+}
+
+const DISCOVERY_YEARS = 10;
+
+export async function fetchHistoricalMessages(
+  token: string,
+  limit: number,
+  now = new Date(),
+): Promise<DiscoveryMessage[]> {
+  const cap = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 200)) : 200;
+  const years = Math.min(DISCOVERY_YEARS, cap);
+  const basePerYear = Math.floor(cap / years);
+  const extraYears = cap % years;
+  const summaries: { id: string; threadId?: string }[] = [];
+
+  for (let offset = 0; offset < years && summaries.length < cap; offset++) {
+    const year = now.getUTCFullYear() - offset;
+    const yearLimit = basePerYear + (offset < extraYears ? 1 : 0);
+    let pageToken: string | undefined;
+    let found = 0;
+    do {
+      const remaining = Math.min(yearLimit - found, cap - summaries.length);
+      if (remaining <= 0) break;
+      const params = new URLSearchParams({
+        maxResults: String(remaining),
+        q: `after:${year}/01/01 before:${year + 1}/01/01`,
+      });
+      if (pageToken) params.set("pageToken", pageToken);
+      const page = await get<{
+        messages?: { id: string; threadId?: string }[];
+        nextPageToken?: string;
+      }>(`/messages?${params}`, token);
+      const messages = page.messages ?? [];
+      summaries.push(...messages.slice(0, remaining));
+      found += messages.length;
+      pageToken = page.nextPageToken;
+    } while (pageToken && found < yearLimit && summaries.length < cap);
+  }
+
+  const results: DiscoveryMessage[] = [];
+  for (let start = 0; start < summaries.length; start += 5) {
+    const batch = summaries.slice(start, start + 5);
+    const fetched = await Promise.all(
+      batch.map(({ id, threadId }) => {
+        const params = new URLSearchParams({
+          format: "metadata",
+          fields: "id,threadId,internalDate,labelIds,payload(headers)",
+        });
+        for (const header of [
+          "From",
+          "To",
+          "Cc",
+          "Date",
+          "List-Id",
+          "List-Unsubscribe",
+          "Precedence",
+          "Auto-Submitted",
+          "X-Auto-Response-Suppress",
+        ]) {
+          params.append("metadataHeaders", header);
+        }
+        return get<DiscoveryMessage>(
+          `/messages/${encodeURIComponent(id)}?${params}`,
+          token,
+        ).then((message) => ({ ...message, threadId: message.threadId ?? threadId }));
+      }),
+    );
+    results.push(...fetched);
+  }
+  return results;
 }
