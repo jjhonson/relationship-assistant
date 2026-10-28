@@ -58,7 +58,7 @@ export function DiscoveryResults({
                 <p className="mt-2 text-sm text-stone-600">
                   Last observed exchange: {candidate.lastExchange ?? "date unavailable"}
                 </p>
-                <div className="mt-4 flex flex-wrap items-center gap-2" aria-label={`Feedback for ${candidate.address}`}>
+                <div role="group" className="mt-4 flex flex-wrap items-center gap-2" aria-label={`Feedback for ${candidate.address}`}>
                   <span className="mr-1 text-sm text-stone-600">Is this useful?</span>
                   <button
                     type="button"

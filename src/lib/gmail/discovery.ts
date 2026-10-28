@@ -18,16 +18,66 @@ function header(message: DiscoveryMessage, name: string): string {
   return message.payload?.headers?.find((item) => item.name.toLowerCase() === name.toLowerCase())?.value ?? "";
 }
 
-function addresses(value: string): Address[] {
-  const found: Address[] = [];
-  const pattern = /(?:"?([^"<]*?)"?\s*)?<([^<>]+)>|([A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,})/gi;
-  for (const match of value.matchAll(pattern)) {
-    const address = (match[2] ?? match[3] ?? "").trim().toLowerCase();
-    if (!address.includes("@")) continue;
-    const name = (match[1] ?? "").trim().replace(/^["']|["']$/g, "");
-    found.push({ address, name });
+function splitMailboxes(value: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let quoted = false;
+  let angle = false;
+  let comment = 0;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (quoted && char === "\\") {
+      current += char + (value[i + 1] ?? "");
+      i++;
+      continue;
+    }
+    if (char === '"' && !comment) quoted = !quoted;
+    else if (!quoted && char === "(") comment++;
+    else if (!quoted && char === ")" && comment) comment--;
+    else if (!quoted && !comment && char === "<") angle = true;
+    else if (!quoted && !comment && char === ">") angle = false;
+    if (char === "," && !quoted && !angle && !comment) {
+      parts.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
   }
-  return found;
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+const bareAddress = /^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}$/i;
+
+type ParsedAddresses = { people: Address[]; reliable: boolean };
+
+function parseAddresses(value: string): ParsedAddresses {
+  const people: Address[] = [];
+  let reliable = true;
+  for (const part of splitMailboxes(value)) {
+    const named = part.match(/^([\s\S]*)<([^<>]+)>\s*(?:\([^)]*\))?$/);
+    const raw = (named ? named[2] : part.replace(/\([^)]*\)/g, "")).trim().toLowerCase();
+    if (!bareAddress.test(raw)) {
+      reliable = false;
+      continue;
+    }
+    const name = named ? named[1].trim().replace(/^"([\s\S]*)"$/, "$1").replace(/\\(.)/g, "$1").trim() : "";
+    people.push({ address: raw, name });
+  }
+  return { people, reliable };
+}
+
+function distinctPeople(people: Address[]): Address[] {
+  const seen = new Map<string, Address>();
+  for (const person of people) {
+    const existing = seen.get(person.address);
+    if (!existing || (!existing.name && person.name)) seen.set(person.address, person);
+  }
+  return [...seen.values()];
+}
+
+function addresses(value: string): Address[] {
+  return parseAddresses(value).people;
 }
 
 function isAutomationAddress(address: string): boolean {
@@ -35,12 +85,17 @@ function isAutomationAddress(address: string): boolean {
   return /^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer[-_.]?daemon|notifications?|newsletter|updates?|billing|receipts?|orders?|alerts?|automated|auto[-_.]?reply)(?:[+._-].*)?$/.test(local);
 }
 
+function isAutoSubmitted(value: string): boolean {
+  const token = value.split(";", 1)[0].trim().toLowerCase();
+  return token !== "" && token !== "no";
+}
+
 function isBulk(message: DiscoveryMessage): boolean {
   return Boolean(
     header(message, "List-Id") ||
     header(message, "List-Unsubscribe") ||
     /^(?:bulk|list|junk)$/i.test(header(message, "Precedence").trim()) ||
-    /^(?:auto-generated|auto-replied|auto-notified)$/i.test(header(message, "Auto-Submitted").trim()) ||
+    isAutoSubmitted(header(message, "Auto-Submitted")) ||
     header(message, "X-Auto-Response-Suppress"),
   );
 }
@@ -63,6 +118,7 @@ type Aggregate = {
 };
 
 export function rankCandidates(messages: DiscoveryMessage[], maximum = 10): DiscoveryCandidate[] {
+  messages = messages.filter((message) => !message.labelIds?.includes("DRAFT"));
   const self = new Set(
     messages
       .filter((message) => message.labelIds?.includes("SENT"))
@@ -73,18 +129,14 @@ export function rankCandidates(messages: DiscoveryMessage[], maximum = 10): Disc
   for (const message of messages) {
     if (isBulk(message)) continue;
     const sent = message.labelIds?.includes("SENT") ?? false;
-    const sender = addresses(header(message, "From"));
-    const recipients = [...addresses(header(message, "To")), ...addresses(header(message, "Cc"))]
-      .filter((person) => !self.has(person.address) && !isAutomationAddress(person.address));
-    let person: Address | undefined;
-
-    if (sent) {
-      if (recipients.length !== 1) continue;
-      person = recipients[0];
-    } else {
-      if (sender.length !== 1 || recipients.length > 1) continue;
-      person = sender[0];
-    }
+    const from = parseAddresses(header(message, "From"));
+    const to = parseAddresses(header(message, "To"));
+    const cc = parseAddresses(header(message, "Cc"));
+    if (!from.reliable || !to.reliable || !cc.reliable) continue;
+    const sender = distinctPeople(from.people);
+    const recipients = distinctPeople([...to.people, ...cc.people]);
+    if (recipients.length !== 1 || sender.length !== 1) continue;
+    const person: Address | undefined = sent ? recipients[0] : sender[0];
 
     if (!person || self.has(person.address) || isAutomationAddress(person.address)) continue;
     const current = candidates.get(person.address) ?? {

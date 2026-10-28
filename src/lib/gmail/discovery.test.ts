@@ -29,6 +29,46 @@ function message(
 }
 
 describe("relationship discovery ranking", () => {
+  const owner = "Owner <owner@example.test>";
+  const out = (id: string, to: string, extra: { name: string; value: string }[] = []) =>
+    message(id, owner, to, "Mon, 01 Jan 2024 10:00:00 +0000", extra, true);
+  const inc = (id: string, to: string, from = "Alex <alex@example.test>") =>
+    message(id, from, to, "Tue, 02 Jan 2024 10:00:00 +0000");
+
+  it("treats mixed bare and named multi-recipient headers as group mail", () => {
+    const header = 'first@example.test, "Person, Second" <second@example.test>';
+    expect(rankCandidates([out("o", header), inc("i", header)])).toEqual([]);
+  });
+
+  it("preserves quoted commas in a single display name", () => {
+    const [candidate] = rankCandidates([out("o", '"Morgan, Alex" <alex@example.test>')]);
+    expect(candidate).toMatchObject({ address: "alex@example.test", name: "Morgan, Alex" });
+  });
+
+  it("excludes Auto-Submitted values with parameters but allows no", () => {
+    const auto = { name: "Auto-Submitted", value: 'auto-generated; owner-email="service@example.test"' };
+    expect(rankCandidates([inc("a", owner, "Pat <pat@example.test>")].map((m) => ({ ...m, payload: { headers: [...(m.payload?.headers ?? []), auto] } })))).toEqual([]);
+    const no = { name: "Auto-Submitted", value: "no" };
+    expect(rankCandidates([out("n", "Pat <pat@example.test>", [no])])).toHaveLength(1);
+  });
+
+  it("ignores drafts when determining self addresses and aggregating", () => {
+    const draft = { ...inc("d", "Alex <alex@example.test>", owner), labelIds: ["DRAFT"] };
+    expect(rankCandidates([draft, inc("i", "Owner <owner@example.test>")]).map((c) => c.address)).toEqual(["alex@example.test"]);
+    expect(rankCandidates([draft])).toEqual([]);
+  });
+
+  it("does not count incoming or outgoing group messages as direct correspondence", () => {
+    const groupIn = inc("gi", "Owner <owner@example.test>, Sam <sam@example.test>");
+    const groupOut = out("go", "Alex <alex@example.test>, Sam <sam@example.test>");
+    const ccOut = out("co", "Alex <alex@example.test>", [{ name: "Cc", value: "Sam <sam@example.test>" }]);
+    expect(rankCandidates([out("self", "Owner <owner@example.test>"), groupIn, groupOut, ccOut])).toEqual([]);
+  });
+
+  it("skips messages with unparseable address headers", () => {
+    expect(rankCandidates([out("o", "undisclosed-recipients:;"), out("p", "not an address")])).toEqual([]);
+  });
+
   it("prioritizes direct correspondence and excludes mailing lists and automated senders", () => {
     const candidates = rankCandidates([
       message("out", "Owner <owner@example.test>", "Alex Morgan <alex@example.test>", "Mon, 01 Jan 2024 10:00:00 +0000", [], true),
