@@ -34,6 +34,27 @@ export type DiscoveryAnalysis = {
   diagnostics: DiscoveryDiagnostics;
 };
 
+export type AnalysisOptions = {
+  /** Account-owner addresses known from the Gmail profile; suppressed as candidates. */
+  ownerAddresses?: string[];
+};
+
+export type ProbeOutcome = "counted" | "self" | "otherRole" | "bulk" | "group" | "automated" | "unparseable" | "draft";
+
+/** Contains no address; safe to render, but still private to the local user. */
+export type ProbeReport = {
+  status: "displayed" | "viable-below-cutoff" | "excluded" | "not-sampled" | "inconclusive";
+  /** 1-based position among all viable candidates when viable. */
+  rank: number | null;
+  viableCount: number;
+  displayLimit: number;
+  messagesMentioning: number;
+  outcomes: Record<ProbeOutcome, number>;
+  /** Aggregate-level exclusion applied after per-message counting. */
+  aggregateExclusion: "high-volume-one-way" | "single-inbound" | null;
+  explanation: string;
+};
+
 /** Inbound-only senders with more messages than this and no reply from the user look automated. */
 const ONE_WAY_INBOUND_LIMIT = 5;
 
@@ -166,12 +187,40 @@ const emptyDiagnostics = (): DiscoveryDiagnostics => ({
   candidatesSurviving: 0,
 });
 
-function selfAddresses(messages: DiscoveryMessage[]): Set<string> {
-  return new Set(
-    messages
+function selfAddresses(messages: DiscoveryMessage[], owner: string[] = []): Set<string> {
+  return new Set([
+    ...owner.map((address) => address.trim().toLowerCase()).filter(Boolean),
+    ...messages
       .filter((message) => message.labelIds?.includes("SENT") && !message.labelIds.includes("DRAFT"))
       .flatMap((message) => addresses(header(message, "From")).map((person) => person.address)),
-  );
+  ]);
+}
+
+const emptyOutcomes = (): Record<ProbeOutcome, number> => ({
+  counted: 0,
+  self: 0,
+  otherRole: 0,
+  bulk: 0,
+  group: 0,
+  automated: 0,
+  unparseable: 0,
+  draft: 0,
+});
+
+/** Does this message's From/To/Cc mention the address (including in headers that failed to parse)? */
+function mentions(message: DiscoveryMessage, address: string): boolean {
+  return ["From", "To", "Cc"].some((name) => {
+    const value = header(message, name);
+    const parsed = parseAddresses(value);
+    if (parsed.people.some((person) => person.address === address)) return true;
+    if (parsed.reliable) return false;
+    const escaped = address.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const addressChars = "A-Z0-9.!#$%&'*+/=?^_\u0060{|}~-";
+    const completeAddress = new RegExp(`(?:^|[^${addressChars}])${escaped}(?:$|[^${addressChars}])`, "i");
+    return splitMailboxes(value).some((part) =>
+      parseAddresses(part).people.length === 0 && completeAddress.test(part),
+    );
+  });
 }
 
 /**
@@ -179,8 +228,8 @@ function selfAddresses(messages: DiscoveryMessage[]): Set<string> {
  * (single recipient, not bulk or automated), ordered by how many distinct years
  * and messages they appear in. Only used in memory to build Gmail search queries.
  */
-export function enrichmentTargets(messages: DiscoveryMessage[], maximum: number): string[] {
-  const self = selfAddresses(messages);
+export function enrichmentTargets(messages: DiscoveryMessage[], maximum: number, ownerAddresses: string[] = []): string[] {
+  const self = selfAddresses(messages, ownerAddresses);
   const seen = new Map<string, { sent: number; years: Set<number> }>();
   for (const message of messages) {
     if (!message.labelIds?.includes("SENT") || message.labelIds.includes("DRAFT") || isBulk(message)) continue;
@@ -204,12 +253,36 @@ export function enrichmentTargets(messages: DiscoveryMessage[], maximum: number)
     .map(([address]) => address);
 }
 
-export function analyzeDiscovery(messages: DiscoveryMessage[], maximum = 10): DiscoveryAnalysis {
+const DISPLAY_LIMIT = 10;
+
+/** Single implementation of filtering and ranking, shared by discovery and the positive-control diagnostic. */
+function analyze(
+  allMessages: DiscoveryMessage[],
+  maximum: number,
+  options: AnalysisOptions = {},
+  probe?: string,
+): DiscoveryAnalysis & {
+  viableCount: number;
+  probe: Omit<ProbeReport, "status" | "explanation" | "rank" | "viableCount" | "displayLimit"> & {
+    rank: number | null;
+    sentMessagesMentioning: number;
+  };
+} {
   const diagnostics = emptyDiagnostics();
-  diagnostics.excludedDraft = messages.filter((message) => message.labelIds?.includes("DRAFT")).length;
-  messages = messages.filter((message) => !message.labelIds?.includes("DRAFT"));
+  const outcomes = emptyOutcomes();
+  let messagesMentioning = 0;
+  let sentMessagesMentioning = 0;
+  let aggregateExclusion: ProbeReport["aggregateExclusion"] = null;
+  const drafts = allMessages.filter((message) => message.labelIds?.includes("DRAFT"));
+  diagnostics.excludedDraft = drafts.length;
+  if (probe) {
+    const mentioned = drafts.filter((message) => mentions(message, probe)).length;
+    outcomes.draft += mentioned;
+    messagesMentioning += mentioned;
+  }
+  const messages = allMessages.filter((message) => !message.labelIds?.includes("DRAFT"));
   diagnostics.messagesExamined = messages.length;
-  const self = selfAddresses(messages);
+  const self = selfAddresses(messages, options.ownerAddresses);
   const candidates = new Map<string, Aggregate>();
   const months = new Set<string>();
 
@@ -219,8 +292,17 @@ export function analyzeDiscovery(messages: DiscoveryMessage[], maximum = 10): Di
     else diagnostics.receivedExamined++;
     const when = messageDate(message);
     if (when) months.add(when.toISOString().slice(0, 7));
+    const mentioned = probe ? mentions(message, probe) : false;
+    if (mentioned) {
+      messagesMentioning++;
+      if (sent) sentMessagesMentioning++;
+    }
+    const note = (outcome: ProbeOutcome) => {
+      if (mentioned) outcomes[outcome]++;
+    };
     if (isBulk(message)) {
       diagnostics.excludedBulk++;
+      note("bulk");
       continue;
     }
     const from = parseAddresses(header(message, "From"));
@@ -228,21 +310,28 @@ export function analyzeDiscovery(messages: DiscoveryMessage[], maximum = 10): Di
     const cc = parseAddresses(header(message, "Cc"));
     if (!from.reliable || !to.reliable || !cc.reliable) {
       diagnostics.excludedUnparseable++;
+      note("unparseable");
       continue;
     }
     const sender = distinctPeople(from.people);
     const recipients = distinctPeople([...to.people, ...cc.people]);
     if (recipients.length !== 1 || sender.length !== 1) {
       diagnostics.excludedGroup++;
+      note("group");
       continue;
     }
     const person: Address | undefined = sent ? recipients[0] : sender[0];
 
-    if (!person || self.has(person.address)) continue;
-    if (isAutomationAddress(person.address, person.name)) {
-      diagnostics.excludedAutomated++;
+    if (!person || self.has(person.address)) {
+      note(self.has(probe ?? "") ? "self" : "otherRole");
       continue;
     }
+    if (isAutomationAddress(person.address, person.name)) {
+      diagnostics.excludedAutomated++;
+      note("automated");
+      continue;
+    }
+    if (mentioned) outcomes[person.address === probe ? "counted" : self.has(probe ?? "") ? "self" : "otherRole"]++;
     const current = candidates.get(person.address) ?? {
       address: person.address,
       name: person.name || person.address,
@@ -268,16 +357,18 @@ export function analyzeDiscovery(messages: DiscoveryMessage[], maximum = 10): Di
     if (candidate.sent > 0) return true;
     if (candidate.received > ONE_WAY_INBOUND_LIMIT) {
       diagnostics.excludedOneWayHighVolume++;
+      if (candidate.address === probe) aggregateExclusion = "high-volume-one-way";
       return false;
     }
     if (candidate.threads.size < 2 || candidate.dates.size < 2) {
       diagnostics.excludedSingleInbound++;
+      if (candidate.address === probe) aggregateExclusion = "single-inbound";
       return false;
     }
     return true;
   });
 
-  const ranked = viable
+  const rankedAll = viable
     .map((candidate) => {
       const bilateral = candidate.sent > 0 && candidate.received > 0;
       const repeated = bilateral && candidate.threads.size > 1 && candidate.dates.size > 1;
@@ -311,10 +402,96 @@ export function analyzeDiscovery(messages: DiscoveryMessage[], maximum = 10): Di
       b.threads - a.threads ||
       b.dates - a.dates ||
       a.address.localeCompare(b.address),
-    )
-    .slice(0, Math.max(0, Math.min(Math.floor(maximum), 10)));
+    );
+  const ranked = rankedAll.slice(0, Math.max(0, Math.min(Math.floor(maximum), DISPLAY_LIMIT)));
   diagnostics.candidatesSurviving = viable.length;
-  return { candidates: ranked, diagnostics };
+  const position = probe ? rankedAll.findIndex((candidate) => candidate.address === probe) : -1;
+  return {
+    candidates: ranked,
+    diagnostics,
+    viableCount: viable.length,
+    probe: { rank: position >= 0 ? position + 1 : null, messagesMentioning, sentMessagesMentioning, outcomes, aggregateExclusion },
+  };
+}
+
+export function analyzeDiscovery(
+  messages: DiscoveryMessage[],
+  maximum = DISPLAY_LIMIT,
+  options: AnalysisOptions = {},
+): DiscoveryAnalysis {
+  const { candidates, diagnostics } = analyze(messages, maximum, options);
+  return { candidates, diagnostics };
+}
+
+const OUTCOME_TEXT: Record<Exclude<ProbeOutcome, "counted">, string> = {
+  self: "an address recognized as yours",
+  otherRole: "a role that does not identify them as the other party",
+  bulk: "mailing-list or automated-delivery headers",
+  group: "messages with several recipients or senders",
+  automated: "the automated-sender rules",
+  unparseable: "an address header that could not be parsed reliably",
+  draft: "drafts",
+};
+
+/**
+ * Positive-control diagnostic: classifies one address against the same analysis used for real
+ * discovery. The address is only compared in memory; the report never contains it.
+ */
+export function diagnoseAddress(
+  messages: DiscoveryMessage[],
+  address: string,
+  maximum = DISPLAY_LIMIT,
+  options: AnalysisOptions = {},
+): ProbeReport {
+  const probe = address.trim().toLowerCase();
+  const result = analyze(messages, maximum, options, probe);
+  const { rank, messagesMentioning, sentMessagesMentioning, outcomes, aggregateExclusion } = result.probe;
+  const sentExplanation = sentMessagesMentioning === 0
+    ? "No sent message to this address was observed in the sample."
+    : "No sent message to this address passed the direct-contact filters.";
+  const base = { rank, viableCount: result.viableCount, displayLimit: Math.min(Math.floor(maximum), DISPLAY_LIMIT), messagesMentioning, outcomes, aggregateExclusion };
+  const reasons = (Object.keys(OUTCOME_TEXT) as (keyof typeof OUTCOME_TEXT)[])
+    .filter((key) => outcomes[key] > 0)
+    .map((key) => `${outcomes[key]} involved ${OUTCOME_TEXT[key]}`);
+
+  if (rank !== null) {
+    const displayed = rank <= base.displayLimit;
+    return {
+      ...base,
+      status: displayed ? "displayed" : "viable-below-cutoff",
+      explanation: displayed
+        ? `This address is displayed (rank ${rank} of ${base.viableCount} viable candidates).`
+        : `This address is a viable candidate ranked ${rank} of ${base.viableCount}, below the display cutoff of ${base.displayLimit}.`,
+    };
+  }
+  if (messagesMentioning === 0) {
+    return {
+      ...base,
+      status: "not-sampled",
+      explanation: "This address does not appear in the From, To or Cc headers of any sampled message. It was not sampled; this does not show that no correspondence exists.",
+    };
+  }
+  if (aggregateExclusion) {
+    return {
+      ...base,
+      status: "excluded",
+      explanation: aggregateExclusion === "high-volume-one-way"
+        ? `More than the one-way limit of incoming messages was observed, so the address looks automated. ${sentExplanation}`
+        : `Only a single inbound message (or one date or thread) passed the direct-contact filters, which is not enough to recommend. ${sentExplanation}`,
+    };
+  }
+  if (outcomes.self > 0 && outcomes.counted === 0) {
+    return { ...base, status: "excluded", explanation: "This address is recognized as belonging to the account owner and is suppressed." };
+  }
+  const exclusive = outcomes.bulk + outcomes.group + outcomes.automated + outcomes.draft;
+  if (exclusive > 0 && outcomes.unparseable === 0 && outcomes.otherRole === 0 && outcomes.counted === 0) {
+    return { ...base, status: "excluded", explanation: `${messagesMentioning} sampled message${messagesMentioning === 1 ? "" : "s"} mentioned this address, all excluded: ${reasons.join("; ")}.` };
+  }
+  return {
+    ...base,
+    status: "inconclusive",
+    explanation: `${messagesMentioning} sampled message${messagesMentioning === 1 ? "" : "s"} mentioned this address but the evidence is insufficient to classify it${reasons.length ? ` (${reasons.join("; ")})` : ""}.`,
+  };
 }
 
 export function rankCandidates(messages: DiscoveryMessage[], maximum = 10): DiscoveryCandidate[] {

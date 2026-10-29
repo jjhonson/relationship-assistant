@@ -38,9 +38,10 @@ export function DiscoveryResults({
             {diagnostics.excludedUnparseable} unparseable, {diagnostics.excludedOneWayHighVolume} high-volume one-way,{" "}
             {diagnostics.excludedSingleInbound} lone inbound
           </div>
-          <div>Candidates surviving: {diagnostics.candidatesSurviving}</div>
+          <div>Viable candidates: {diagnostics.candidatesSurviving}; displayed: {candidates.length} (the shortlist is capped at 10)</div>
+          <div>Sent budget: {sampling.sentBudget} ({sampling.monthWindowsQueried} monthly windows, {sampling.windowsQueried - sampling.monthWindowsQueried} quarterly top-up windows); reply-lookup budget: {sampling.enrichmentBudget}</div>
           <div className="sm:col-span-2">
-            Sent mail is sampled across up to 40 calendar quarters, then a few incoming messages are looked up for the most frequent sent contacts. This is an on-demand, biased and incomplete sample, not a mailbox sync; a missing contact may reflect sampling limits, other accounts, or filtering.
+            Sent mail is sampled first with one message per calendar month for up to 10 years, then any remaining budget is spent on calendar quarters, and a few incoming messages are looked up for the most frequent sent contacts. This is an on-demand, biased and incomplete sample, not a mailbox sync; a missing contact may reflect sampling limits, other accounts, or filtering.
           </div>
         </dl>
       </section>
