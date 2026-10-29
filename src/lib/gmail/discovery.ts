@@ -210,8 +210,16 @@ const emptyOutcomes = (): Record<ProbeOutcome, number> => ({
 /** Does this message's From/To/Cc mention the address (including in headers that failed to parse)? */
 function mentions(message: DiscoveryMessage, address: string): boolean {
   return ["From", "To", "Cc"].some((name) => {
-    const value = header(message, name).toLowerCase();
-    return value.includes(address) && (addresses(value).some((p) => p.address === address) || !parseAddresses(value).reliable);
+    const value = header(message, name);
+    const parsed = parseAddresses(value);
+    if (parsed.people.some((person) => person.address === address)) return true;
+    if (parsed.reliable) return false;
+    const escaped = address.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const addressChars = "A-Z0-9.!#$%&'*+/=?^_\u0060{|}~-";
+    const completeAddress = new RegExp(`(?:^|[^${addressChars}])${escaped}(?:$|[^${addressChars}])`, "i");
+    return splitMailboxes(value).some((part) =>
+      parseAddresses(part).people.length === 0 && completeAddress.test(part),
+    );
   });
 }
 
@@ -253,10 +261,17 @@ function analyze(
   maximum: number,
   options: AnalysisOptions = {},
   probe?: string,
-): DiscoveryAnalysis & { viableCount: number; probe: Omit<ProbeReport, "status" | "explanation" | "rank" | "viableCount" | "displayLimit"> & { rank: number | null } } {
+): DiscoveryAnalysis & {
+  viableCount: number;
+  probe: Omit<ProbeReport, "status" | "explanation" | "rank" | "viableCount" | "displayLimit"> & {
+    rank: number | null;
+    sentMessagesMentioning: number;
+  };
+} {
   const diagnostics = emptyDiagnostics();
   const outcomes = emptyOutcomes();
   let messagesMentioning = 0;
+  let sentMessagesMentioning = 0;
   let aggregateExclusion: ProbeReport["aggregateExclusion"] = null;
   const drafts = allMessages.filter((message) => message.labelIds?.includes("DRAFT"));
   diagnostics.excludedDraft = drafts.length;
@@ -278,7 +293,10 @@ function analyze(
     const when = messageDate(message);
     if (when) months.add(when.toISOString().slice(0, 7));
     const mentioned = probe ? mentions(message, probe) : false;
-    if (mentioned) messagesMentioning++;
+    if (mentioned) {
+      messagesMentioning++;
+      if (sent) sentMessagesMentioning++;
+    }
     const note = (outcome: ProbeOutcome) => {
       if (mentioned) outcomes[outcome]++;
     };
@@ -305,7 +323,7 @@ function analyze(
     const person: Address | undefined = sent ? recipients[0] : sender[0];
 
     if (!person || self.has(person.address)) {
-      note("self");
+      note(self.has(probe ?? "") ? "self" : "otherRole");
       continue;
     }
     if (isAutomationAddress(person.address, person.name)) {
@@ -392,7 +410,7 @@ function analyze(
     candidates: ranked,
     diagnostics,
     viableCount: viable.length,
-    probe: { rank: position >= 0 ? position + 1 : null, messagesMentioning, outcomes, aggregateExclusion },
+    probe: { rank: position >= 0 ? position + 1 : null, messagesMentioning, sentMessagesMentioning, outcomes, aggregateExclusion },
   };
 }
 
@@ -427,7 +445,10 @@ export function diagnoseAddress(
 ): ProbeReport {
   const probe = address.trim().toLowerCase();
   const result = analyze(messages, maximum, options, probe);
-  const { rank, messagesMentioning, outcomes, aggregateExclusion } = result.probe;
+  const { rank, messagesMentioning, sentMessagesMentioning, outcomes, aggregateExclusion } = result.probe;
+  const sentExplanation = sentMessagesMentioning === 0
+    ? "No sent message to this address was observed in the sample."
+    : "No sent message to this address passed the direct-contact filters.";
   const base = { rank, viableCount: result.viableCount, displayLimit: Math.min(Math.floor(maximum), DISPLAY_LIMIT), messagesMentioning, outcomes, aggregateExclusion };
   const reasons = (Object.keys(OUTCOME_TEXT) as (keyof typeof OUTCOME_TEXT)[])
     .filter((key) => outcomes[key] > 0)
@@ -455,8 +476,8 @@ export function diagnoseAddress(
       ...base,
       status: "excluded",
       explanation: aggregateExclusion === "high-volume-one-way"
-        ? "Sampled messages were incoming only and more numerous than the one-way limit, which looks automated; no sent message to this address was in the sample."
-        : "Only a single inbound message (or one date or thread) was sampled and no sent message to this address, which is not enough to recommend.",
+        ? `More than the one-way limit of incoming messages was observed, so the address looks automated. ${sentExplanation}`
+        : `Only a single inbound message (or one date or thread) passed the direct-contact filters, which is not enough to recommend. ${sentExplanation}`,
     };
   }
   if (outcomes.self > 0 && outcomes.counted === 0) {

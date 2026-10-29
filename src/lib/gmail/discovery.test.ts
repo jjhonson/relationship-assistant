@@ -235,7 +235,7 @@ describe("historical metadata sampling", () => {
     const { messages, stats } = await fetchDiscoverySample("fake-token", 100, NOW);
     const details = requests.filter((url) => /\/messages\/[^/]+$/.test(url.pathname));
 
-    expect(messages.length).toBeLessThanOrEqual(160);
+    expect(messages.length).toBeLessThanOrEqual(100);
     expect(details).toHaveLength(messages.length);
     expect(stats.monthWindowsQueried).toBe(60);
     expect(stats.windowsQueried).toBeGreaterThanOrEqual(60);
@@ -283,6 +283,40 @@ describe("historical metadata sampling", () => {
     const report = diagnoseAddress(messages, "riley@example.test");
     expect(report.status).toBe("displayed");
     expect(report.outcomes.counted).toBeGreaterThanOrEqual(30);
+  });
+
+  it("caps quarterly top-ups after deduplication so overlapping samples do not starve older quarters", async () => {
+    const box: Box[] = [];
+    const addQuarter = (depth: number, prefix: string) => {
+      const index = NOW.getUTCFullYear() * 4 + Math.floor(NOW.getUTCMonth() / 3) - depth;
+      const year = Math.floor(index / 4);
+      const quarter = index % 4;
+      const month = quarter * 3 + (quarter === 1 || quarter === 3 ? 1 : 0);
+      for (let i = 0; i < 5; i++) {
+        box.push({
+          id: `${prefix}-${i}`,
+          date: Date.UTC(year, month, 5 + i),
+          labelIds: ["SENT"],
+          from: owner,
+          to: `Person ${prefix}-${i} <${prefix}-${i}@example.test>`,
+        });
+      }
+    };
+    for (let depth = 0; depth < 14; depth++) addQuarter(depth, `recent-${depth}`);
+    addQuarter(39, "oldest");
+    box.push({
+      id: "monthly-overlap",
+      date: Date.UTC(2025, 5, 14),
+      labelIds: ["SENT"],
+      from: owner,
+      to: "Monthly <monthly@example.test>",
+    });
+
+    mockGmail(box, []);
+    const { messages, stats } = await fetchDiscoverySample("fake-token", 100, NOW);
+    expect(messages.some((item) => item.id.startsWith("oldest-"))).toBe(true);
+    expect(new Set(messages.map((item) => item.id)).size).toBe(messages.length);
+    expect(stats.sentFetched).toBeLessThanOrEqual(60);
   });
 
   it("honors a small ceiling and wrapper", async () => {
@@ -354,6 +388,47 @@ describe("positive-control diagnostic", () => {
     const bystander = inc("x", "Sam <sam@example.test>");
     bystander.payload!.headers!.find((h) => h.name === "To")!.value = "Pat <pat@example.test>";
     expect(diagnoseAddress([bystander], "pat@example.test").status).toBe("inconclusive");
+  });
+
+  it("matches exact parsed addresses and only uses complete tokens in malformed headers", () => {
+    const substring = out("substring", "Not Pat <notpat@example.test>, broken");
+    expect(diagnoseAddress([substring], "pat@example.test")).toMatchObject({
+      status: "not-sampled",
+      messagesMentioning: 0,
+    });
+
+    const malformed = out("malformed", "not a mailbox (pat@example.test) broken");
+    expect(diagnoseAddress([malformed], "pat@example.test")).toMatchObject({
+      status: "inconclusive",
+      messagesMentioning: 1,
+      outcomes: { unparseable: 1 },
+    });
+  });
+
+  it("does not classify a third party as self when an owner address is the selected party", () => {
+    const ownerCopy = message(
+      "owner-copy",
+      owner,
+      "Pat <pat@example.test>",
+      "Tue, 02 Jan 2024 10:00:00 +0000",
+    );
+    expect(diagnoseAddress([ownerCopy], "pat@example.test", 10, {
+      ownerAddresses: ["owner@example.test"],
+    })).toMatchObject({
+      status: "inconclusive",
+      outcomes: { self: 0, otherRole: 1 },
+    });
+  });
+
+  it("distinguishes unobserved Sent mail from Sent mail filtered out of direct contact", () => {
+    const inbound = inc("inbound", "Pat <pat@example.test>");
+    const noSent = diagnoseAddress([inbound], "pat@example.test");
+    expect(noSent.explanation).toContain("No sent message to this address was observed in the sample.");
+
+    const filteredSent = out("group-sent", "Pat <pat@example.test>, Lee <lee@example.test>");
+    const filtered = diagnoseAddress([inbound, filteredSent], "pat@example.test");
+    expect(filtered.explanation).toContain("No sent message to this address passed the direct-contact filters.");
+    expect(filtered.explanation).not.toContain("No sent message to this address was observed in the sample.");
   });
 
   it("never includes the probed address in the report", () => {

@@ -204,11 +204,13 @@ export async function fetchDiscoverySample(
 
   const sentSummaries: Summary[] = [];
   const seen = new Set<string>();
-  const add = (ids: Summary[]) => {
+  const add = (ids: Summary[], maximumNew = Number.POSITIVE_INFINITY) => {
+    let added = 0;
     for (const summary of ids) {
-      if (!seen.has(summary.id) && sentSummaries.length < sentBudget) {
+      if (!seen.has(summary.id) && sentSummaries.length < sentBudget && added < maximumNew) {
         seen.add(summary.id);
         sentSummaries.push(summary);
+        added++;
       }
     }
   };
@@ -222,7 +224,7 @@ export async function fetchDiscoverySample(
   for (let i = 0; i < quarters.length && sentSummaries.length < sentBudget; i++) {
     const quota = Math.ceil((sentBudget - sentSummaries.length) / (quarters.length - i));
     // The breadth pass may already hold up to three messages from this quarter; ask for extra to dedupe.
-    add(await listIds(token, sentQuery(quarters[i]), quota + 3));
+    add(await listIds(token, sentQuery(quarters[i]), quota + 3), quota);
     quartersQueried++;
   }
   const messages = await fetchDetails(token, sentSummaries);
