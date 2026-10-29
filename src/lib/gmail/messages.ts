@@ -97,7 +97,6 @@ export async function fetchSample(token: string, limit: number): Promise<GmailSu
 }
 
 const DISCOVERY_YEARS = 10;
-const WINDOWS_PER_YEAR = 4;
 const SENT_SHARE = 0.6;
 const MAX_ENRICHED_CONTACTS = 20;
 const ENRICHMENT_PER_CONTACT = 4;
@@ -116,6 +115,10 @@ const DETAIL_HEADERS = [
 /** Request counts only; never contains addresses. */
 export type SamplingStats = {
   windowsQueried: number;
+  /** Monthly breadth-pass windows queried (one message each, newest first). */
+  monthWindowsQueried: number;
+  sentBudget: number;
+  enrichmentBudget: number;
   sentFetched: number;
   enrichedContacts: number;
   enrichmentFetched: number;
@@ -156,24 +159,31 @@ async function fetchDetails(token: string, summaries: Summary[]): Promise<Discov
   return results;
 }
 
-/** Quarter windows (UTC epoch seconds), newest first, covering the last DISCOVERY_YEARS years. */
-function quarterWindows(now: Date): { after: number; before: number }[] {
-  const windows: { after: number; before: number }[] = [];
-  const quarter = Math.floor(now.getUTCMonth() / 3);
-  for (let i = 0; i < DISCOVERY_YEARS * WINDOWS_PER_YEAR; i++) {
-    const index = now.getUTCFullYear() * 4 + quarter - i;
-    const year = Math.floor(index / 4);
-    const start = Date.UTC(year, (index % 4) * 3, 1);
-    const end = Date.UTC(year, (index % 4) * 3 + 3, 1);
+type Window = { after: number; before: number };
+
+/** Calendar windows (UTC epoch seconds), newest first, covering the last DISCOVERY_YEARS years. */
+function calendarWindows(now: Date, perYear: number): Window[] {
+  const months = 12 / perYear;
+  const windows: Window[] = [];
+  const current = Math.floor(now.getUTCMonth() / months);
+  for (let i = 0; i < DISCOVERY_YEARS * perYear; i++) {
+    const index = now.getUTCFullYear() * perYear + current - i;
+    const year = Math.floor(index / perYear);
+    const start = Date.UTC(year, (index % perYear) * months, 1);
+    const end = Date.UTC(year, (index % perYear) * months + months, 1);
     windows.push({ after: start / 1000, before: Math.min(end, now.getTime() + 1000) / 1000 });
   }
   return windows;
 }
 
+const sentQuery = ({ after, before }: Window) => `in:sent -in:drafts after:${after} before:${before}`;
+
 /**
  * Two-stage, bounded, metadata-only sampling (still biased and incomplete):
- *  1. Sent mail (`in:sent`) is sampled per calendar quarter with an adaptive quota so
- *     sparse quarters donate unused budget to older ones, instead of taking the newest N per year.
+ *  1. Sent mail (`in:sent`) is sampled in two passes. A breadth pass takes the newest Sent
+ *     message of each calendar month (so a correspondent who writes once a month is not
+ *     crowded out by busy periods); a depth pass then spends any remaining budget on
+ *     calendar quarters with an adaptive quota, so sparse periods donate budget to busy ones.
  *  2. For the top Sent-derived contacts, a bounded per-contact lookup fetches a few
  *     incoming messages to look for evidence of replies.
  * Total message detail fetches never exceed `limit` (max 200).
@@ -182,31 +192,45 @@ export async function fetchDiscoverySample(
   token: string,
   limit: number,
   now = new Date(),
+  ownerAddresses: string[] = [],
 ): Promise<{ messages: DiscoveryMessage[]; stats: SamplingStats }> {
   const cap = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 200)) : 200;
   const sentBudget = cap >= 2 ? Math.max(1, Math.ceil(cap * SENT_SHARE)) : cap;
-  let windows = quarterWindows(now);
-  if (windows.length > sentBudget) {
-    const step = windows.length / sentBudget;
-    windows = Array.from({ length: sentBudget }, (_, i) => windows[Math.floor(i * step)]);
+  let months = calendarWindows(now, 12);
+  if (months.length > sentBudget) {
+    const step = months.length / sentBudget;
+    months = Array.from({ length: sentBudget }, (_, i) => months[Math.floor(i * step)]);
   }
 
   const sentSummaries: Summary[] = [];
   const seen = new Set<string>();
-  for (let i = 0; i < windows.length && sentSummaries.length < sentBudget; i++) {
-    const quota = Math.ceil((sentBudget - sentSummaries.length) / (windows.length - i));
-    const { after, before } = windows[i];
-    const ids = await listIds(token, `in:sent -in:drafts after:${after} before:${before}`, quota);
+  const add = (ids: Summary[]) => {
     for (const summary of ids) {
-      if (!seen.has(summary.id)) {
+      if (!seen.has(summary.id) && sentSummaries.length < sentBudget) {
         seen.add(summary.id);
         sentSummaries.push(summary);
       }
     }
+  };
+  for (let start = 0; start < months.length; start += 6) {
+    const batch = await Promise.all(months.slice(start, start + 6).map((w) => listIds(token, sentQuery(w), 1)));
+    batch.forEach(add);
+  }
+
+  const quarters = calendarWindows(now, 4);
+  let quartersQueried = 0;
+  for (let i = 0; i < quarters.length && sentSummaries.length < sentBudget; i++) {
+    const quota = Math.ceil((sentBudget - sentSummaries.length) / (quarters.length - i));
+    // The breadth pass may already hold up to three messages from this quarter; ask for extra to dedupe.
+    add(await listIds(token, sentQuery(quarters[i]), quota + 3));
+    quartersQueried++;
   }
   const messages = await fetchDetails(token, sentSummaries);
   const stats: SamplingStats = {
-    windowsQueried: windows.length,
+    windowsQueried: months.length + quartersQueried,
+    monthWindowsQueried: months.length,
+    sentBudget,
+    enrichmentBudget: cap - sentSummaries.length,
     sentFetched: messages.length,
     enrichedContacts: 0,
     enrichmentFetched: 0,
@@ -214,7 +238,7 @@ export async function fetchDiscoverySample(
 
   const budget = cap - messages.length;
   if (budget > 0) {
-    const targets = enrichmentTargets(messages, Math.min(MAX_ENRICHED_CONTACTS, budget));
+    const targets = enrichmentTargets(messages, Math.min(MAX_ENRICHED_CONTACTS, budget), ownerAddresses);
     const incoming: Summary[] = [];
     for (const address of targets) {
       const room = Math.min(ENRICHMENT_PER_CONTACT, budget - incoming.length);
@@ -241,4 +265,44 @@ export async function fetchHistoricalMessages(
   now = new Date(),
 ): Promise<DiscoveryMessage[]> {
   return (await fetchDiscoverySample(token, limit, now)).messages;
+}
+
+/** The account owner's own address (Gmail profile; no mailbox content). Null if unavailable. */
+export async function fetchOwnerAddress(token: string): Promise<string | null> {
+  try {
+    const profile = await get<{ emailAddress?: string }>("/profile", token);
+    return profile.emailAddress?.toLowerCase() ?? null;
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    return null;
+  }
+}
+
+export const LOOKUP_LIMIT = 10;
+const LOOKUP_ADDRESS = /^[A-Z0-9._%+-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}$/i;
+
+export function isLookupAddress(value: string): boolean {
+  return value.length <= 254 && LOOKUP_ADDRESS.test(value);
+}
+
+/**
+ * Optional, user-triggered coverage check: one list request plus at most LOOKUP_LIMIT
+ * metadata-header fetches. `truncated` means more results may exist. Verifies that Gmail
+ * holds matching metadata, not relationship quality; an empty result is not proof of absence.
+ */
+export async function fetchAddressLookup(
+  token: string,
+  address: string,
+): Promise<{ messages: DiscoveryMessage[]; truncated: boolean }> {
+  if (!isLookupAddress(address)) throw new ApiError("Invalid address");
+  const params = new URLSearchParams({
+    maxResults: String(LOOKUP_LIMIT),
+    q: `(from:${address} OR to:${address} OR cc:${address}) -in:drafts`,
+  });
+  const page = await get<{ messages?: Summary[]; nextPageToken?: string }>(`/messages?${params}`, token);
+  const found = (page.messages ?? []).slice(0, LOOKUP_LIMIT);
+  return {
+    messages: await fetchDetails(token, found),
+    truncated: Boolean(page.nextPageToken) || (page.messages ?? []).length > LOOKUP_LIMIT,
+  };
 }

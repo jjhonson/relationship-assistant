@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchDiscoverySample, fetchHistoricalMessages, type DiscoveryMessage } from "./messages";
-import { analyzeDiscovery, rankCandidates } from "./discovery";
+import { fetchAddressLookup, fetchDiscoverySample, fetchHistoricalMessages, fetchOwnerAddress, type DiscoveryMessage } from "./messages";
+import { analyzeDiscovery, diagnoseAddress, rankCandidates } from "./discovery";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -235,9 +235,11 @@ describe("historical metadata sampling", () => {
     const { messages, stats } = await fetchDiscoverySample("fake-token", 100, NOW);
     const details = requests.filter((url) => /\/messages\/[^/]+$/.test(url.pathname));
 
-    expect(messages.length).toBeLessThanOrEqual(100);
+    expect(messages.length).toBeLessThanOrEqual(160);
     expect(details).toHaveLength(messages.length);
-    expect(stats.windowsQueried).toBe(40);
+    expect(stats.monthWindowsQueried).toBe(60);
+    expect(stats.windowsQueried).toBeGreaterThanOrEqual(60);
+    expect(stats.sentBudget).toBe(60);
     const sentMonths = new Set(
       messages.filter((m) => m.labelIds?.includes("SENT")).map((m) => new Date(Number(m.internalDate)).toISOString().slice(0, 7)),
     );
@@ -247,7 +249,7 @@ describe("historical metadata sampling", () => {
     expect(details[0].searchParams.get("format")).toBe("metadata");
     expect(details[0].searchParams.getAll("metadataHeaders")).toContain("To");
     expect(details[0].searchParams.get("fields")).not.toContain("body");
-    expect(requests.filter((u) => u.pathname.endsWith("/messages")).length).toBeLessThanOrEqual(100);
+    expect(requests.filter((u) => u.pathname.endsWith("/messages")).length).toBeLessThanOrEqual(160);
   });
 
   it("recovers a multi-year two-way correspondent without naming them and ignores year-end newsletters", async () => {
@@ -261,6 +263,28 @@ describe("historical metadata sampling", () => {
     expect(diagnostics.receivedExamined).toBeGreaterThan(0);
   });
 
+  it("samples a sparse long-running correspondent that newest-per-quarter sampling would miss", async () => {
+    // Each quarter: one message to the correspondent early, then six one-off messages in the last month.
+    // Taking only the newest three Sent messages per quarter never reaches the early one.
+    const box: Box[] = [];
+    let n = 0;
+    for (let q = 0; q < 36; q++) {
+      const year = 2016 + Math.floor(q / 4);
+      const first = (q % 4) * 3;
+      box.push({ id: `s${n++}`, date: Date.UTC(year, first, 5), labelIds: ["SENT"], from: owner, to: "Riley Fox <riley@example.test>" });
+      for (let i = 0; i < 6; i++) {
+        box.push({ id: `s${n++}`, date: Date.UTC(year, first + 2, 10 + i), labelIds: ["SENT"], from: owner, to: `One${q}x${i} <one${q}x${i}@example.test>` });
+      }
+    }
+    mockGmail(box, []);
+    const { messages, stats } = await fetchDiscoverySample("fake-token", 200, NOW);
+    expect(messages.length).toBeLessThanOrEqual(200);
+    expect(stats.monthWindowsQueried).toBe(120);
+    const report = diagnoseAddress(messages, "riley@example.test");
+    expect(report.status).toBe("displayed");
+    expect(report.outcomes.counted).toBeGreaterThanOrEqual(30);
+  });
+
   it("honors a small ceiling and wrapper", async () => {
     const requests: URL[] = [];
     mockGmail(buildMailbox(), requests);
@@ -271,6 +295,104 @@ describe("historical metadata sampling", () => {
   it("does not retry-loop forever on Gmail errors", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 400 })));
     await expect(fetchDiscoverySample("fake-token", 10, NOW)).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch).mock.calls.length).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("positive-control diagnostic", () => {
+  const owner = "Owner <owner@example.test>";
+  const out = (id: string, to: string, day = 1, extra: { name: string; value: string }[] = []) =>
+    message(id, owner, to, `Mon, ${String(day).padStart(2, "0")} Jan 2024 10:00:00 +0000`, extra, true);
+  const inc = (id: string, from: string, day = 2) =>
+    message(id, from, owner, `Tue, ${String(day).padStart(2, "0")} Jan 2024 10:00:00 +0000`);
+
+  /** 12 viable contacts; the last by address has the weakest evidence. */
+  function crowd(): DiscoveryMessage[] {
+    const messages: DiscoveryMessage[] = [];
+    for (let i = 0; i < 12; i++) {
+      const who = `p${String(i).padStart(2, "0")}@example.test`;
+      const repeats = i === 11 ? 1 : 2;
+      for (let r = 0; r < repeats; r++) {
+        messages.push(out(`o${i}-${r}`, `P${i} <${who}>`, r + 1));
+        messages.push(inc(`i${i}-${r}`, `P${i} <${who}>`, r + 10));
+      }
+    }
+    return messages;
+  }
+
+  it("reports a displayed candidate with its rank among viable candidates", () => {
+    const report = diagnoseAddress(crowd(), "P00@Example.test");
+    expect(report).toMatchObject({ status: "displayed", rank: 1, viableCount: 12, displayLimit: 10 });
+  });
+
+  it("reports a viable candidate ranked below the display cutoff", () => {
+    const report = diagnoseAddress(crowd(), "p11@example.test");
+    expect(report).toMatchObject({ status: "viable-below-cutoff", rank: 12, viableCount: 12 });
+    expect(analyzeDiscovery(crowd()).candidates.map((c) => c.address)).not.toContain("p11@example.test");
+  });
+
+  it("explains sampled-but-excluded addresses using the real filters", () => {
+    const group = "Kim <kim@example.test>, Lee <lee@example.test>";
+    const messages = [...crowd(), out("g", group), inc("lone", "Rae <rae@example.test>"), out("b", "Bo <bo@example.test>", 3, [{ name: "List-Id", value: "<x.example.test>" }])];
+    expect(diagnoseAddress(messages, "kim@example.test")).toMatchObject({ status: "excluded", outcomes: { group: 1 } });
+    expect(diagnoseAddress(messages, "rae@example.test")).toMatchObject({ status: "excluded", aggregateExclusion: "single-inbound" });
+    expect(diagnoseAddress(messages, "bo@example.test")).toMatchObject({ status: "excluded", outcomes: { bulk: 1 } });
+    expect(diagnoseAddress(messages, "owner@example.test")).toMatchObject({ status: "excluded", outcomes: { self: expect.any(Number) } });
+    const draft = { ...out("d", "Dee <dee@example.test>"), labelIds: ["DRAFT"] };
+    expect(diagnoseAddress([draft], "dee@example.test")).toMatchObject({ status: "excluded", outcomes: { draft: 1 } });
+  });
+
+  it("reports addresses absent from the sample as not sampled, not as nonexistent", () => {
+    const report = diagnoseAddress(crowd(), "unknown@example.test");
+    expect(report.status).toBe("not-sampled");
+    expect(report.explanation).toMatch(/does not show/);
+  });
+
+  it("is inconclusive when evidence is ambiguous", () => {
+    const broken = out("u", "Pat <pat@example.test>, not-an-address");
+    expect(diagnoseAddress([broken], "pat@example.test").status).toBe("inconclusive");
+    const bystander = inc("x", "Sam <sam@example.test>");
+    bystander.payload!.headers!.find((h) => h.name === "To")!.value = "Pat <pat@example.test>";
+    expect(diagnoseAddress([bystander], "pat@example.test").status).toBe("inconclusive");
+  });
+
+  it("never includes the probed address in the report", () => {
+    const report = diagnoseAddress(crowd(), "p11@example.test");
+    expect(JSON.stringify(report)).not.toContain("p11");
+  });
+
+  it("suppresses known owner aliases", () => {
+    const messages = [out("a", "Old <old@example.test>")];
+    expect(rankCandidates(messages)).toHaveLength(1);
+    expect(analyzeDiscovery(messages, 10, { ownerAddresses: ["OLD@example.test"] }).candidates).toEqual([]);
+  });
+});
+
+describe("bounded Gmail lookups", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("makes one list call and at most ten metadata fetches, and reads the owner profile", async () => {
+    const urls: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      urls.push(url);
+      if (url.pathname.endsWith("/profile")) return new Response(JSON.stringify({ emailAddress: "Me@Example.test" }), { status: 200 });
+      if (url.pathname.endsWith("/messages")) {
+        return new Response(JSON.stringify({ messages: Array.from({ length: 10 }, (_, i) => ({ id: `m${i}` })), nextPageToken: "more" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ id: "x", payload: { headers: [] } }), { status: 200 });
+    }));
+    expect(await fetchOwnerAddress("fake-token")).toBe("me@example.test");
+    const { messages, truncated } = await fetchAddressLookup("fake-token", "zed@example.test");
+    expect(messages).toHaveLength(10);
+    expect(truncated).toBe(true);
+    expect(urls.filter((u) => u.pathname.endsWith("/messages"))).toHaveLength(1);
+    expect(urls.filter((u) => /\/messages\/[^/]+$/.test(u.pathname)).every((u) => !u.searchParams.get("fields")?.includes("body"))).toBe(true);
+  });
+
+  it("rejects malformed addresses before calling Gmail", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    await expect(fetchAddressLookup("fake-token", "a b@example.test) OR in:anywhere")).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

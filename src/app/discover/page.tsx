@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { DiagnosticPanel } from "@/components/DiagnosticPanel";
 import { DiscoveryResults } from "@/components/DiscoveryResults";
 import { loadConfig } from "@/lib/gmail/config";
 import { analyzeDiscovery } from "@/lib/gmail/discovery";
-import { fetchDiscoverySample } from "@/lib/gmail/messages";
+import { fetchDiscoverySample, fetchOwnerAddress } from "@/lib/gmail/messages";
 import { AuthError } from "@/lib/gmail/oauth";
 import { CRED_COOKIE, credentialPageAction, readCreds } from "@/lib/gmail/session";
 
@@ -37,8 +38,11 @@ export default async function DiscoverPage() {
   let result:
     | { kind: "ready"; sample: Awaited<ReturnType<typeof fetchDiscoverySample>> }
     | { kind: "error"; message: string; href: string; action: string };
+  let ownerAddresses: string[] = [];
   try {
-    const sample = await fetchDiscoverySample(creds.accessToken, cfg.config.discoverySampleSize);
+    const owner = await fetchOwnerAddress(creds.accessToken);
+    ownerAddresses = owner ? [owner] : [];
+    const sample = await fetchDiscoverySample(creds.accessToken, cfg.config.discoverySampleSize, new Date(), ownerAddresses);
     result = { kind: "ready", sample };
   } catch (error) {
     result = {
@@ -63,7 +67,7 @@ export default async function DiscoverPage() {
     );
   }
 
-  const { candidates, diagnostics } = analyzeDiscovery(result.sample.messages);
+  const { candidates, diagnostics } = analyzeDiscovery(result.sample.messages, 10, { ownerAddresses });
   const dates = result.sample.messages
     .map((message) => message.internalDate ? new Date(Number(message.internalDate)) : null)
     .filter((date): date is Date => date !== null && !Number.isNaN(date.getTime()))
@@ -86,6 +90,7 @@ export default async function DiscoverPage() {
         oldest={dates[0] ?? null}
         newest={dates[dates.length - 1] ?? null}
       />
+      {process.env.NODE_ENV === "development" && <DiagnosticPanel />}
       <form action="/api/gmail/disconnect" method="post">
         <button className="rounded-lg border border-stone-300 px-4 py-2">Disconnect Gmail</button>
       </form>
