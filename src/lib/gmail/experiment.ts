@@ -23,3 +23,7 @@ export function broaderExperimentQuota(cap: number, slot: number): number {
   return Math.floor(((slot + 1) * boundedCap) / (BROADER_EXPERIMENT_WINDOWS * 2)) -
     Math.floor((slot * boundedCap) / (BROADER_EXPERIMENT_WINDOWS * 2));
 }
+
+export function isBroaderExperimentComplete(batchesFinished: number, failedBatches: number): boolean {
+  return batchesFinished === BROADER_EXPERIMENT_WINDOWS / BROADER_EXPERIMENT_BATCH_WINDOWS && failedBatches === 0;
+}

@@ -25,12 +25,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Gmail is not connected or the session expired." }, { status: 401 });
   }
 
-  let body: { startWindow?: unknown; windowCount?: unknown; anchor?: unknown };
+  let value: unknown;
   try {
-    body = await request.json();
+    value = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid experiment batch." }, { status: 400 });
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return NextResponse.json({ error: "Invalid experiment batch." }, { status: 400 });
+  }
+  const body = value as { startWindow?: unknown; windowCount?: unknown; anchor?: unknown };
   const startWindow = Number(body.startWindow);
   const windowCount = Number(body.windowCount);
   const anchor = body.anchor === undefined ? Date.now() : Number(body.anchor);

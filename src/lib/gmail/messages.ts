@@ -53,8 +53,9 @@ async function get<T>(path: string, token: string, meter?: RequestMeter): Promis
         headers: { Authorization: ["Bearer", token].join(" ") },
         cache: "no-store",
       });
-    } catch {
-      if (!meter || attempt === 2) throw new ApiError("Gmail API request failed");
+    } catch (error) {
+      if (!meter) throw error;
+      if (attempt === 2) throw new ApiError("Gmail API request failed");
       await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
       continue;
     }
@@ -164,8 +165,12 @@ async function listIds(token: string, q: string, limit: number, meter?: RequestM
     if (pageToken) params.set("pageToken", pageToken);
     const page = await get<{ messages?: Summary[]; nextPageToken?: string }>(`/messages?${params}`, token, meter);
     pages++;
-    for (const message of page.messages ?? []) {
-      if (!found.some((item) => item.id === message.id) && found.length < limit) found.push(message);
+    if (!meter) {
+      found.push(...(page.messages ?? []).slice(0, limit - found.length));
+    } else {
+      for (const message of page.messages ?? []) {
+        if (!found.some((item) => item.id === message.id) && found.length < limit) found.push(message);
+      }
     }
     pageToken = page.nextPageToken;
   } while (pageToken && found.length < limit && pages < (meter ? BROADER_EXPERIMENT_LIST_PAGES : Infinity));

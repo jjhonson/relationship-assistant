@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   analyzeDiscovery,
   countDistinctObservedAddresses,
@@ -9,7 +9,9 @@ import {
 } from "@/lib/gmail/discovery";
 import {
   BROADER_EXPERIMENT_BATCH_WINDOWS,
+  BROADER_EXPERIMENT_LIST_PAGES,
   BROADER_EXPERIMENT_WINDOWS,
+  isBroaderExperimentComplete,
   type BroaderExperimentStats,
 } from "@/lib/gmail/experiment";
 import type { DiscoveryMessage, SamplingStats } from "@/lib/gmail/messages";
@@ -77,28 +79,43 @@ export function BroaderMetadataExperiment({
   const [aliases, setAliases] = useState("");
   const [controlAddress, setControlAddress] = useState("");
   const [control, setControl] = useState<{ baseline: ProbeReport; broader: ProbeReport } | null>(null);
-  const controller = useRef<AbortController | null>(null);
+  const stopRequested = useRef(false);
+  const runningRef = useRef(false);
   const aliasAddresses = aliases.split(/[,\s]+/).map((value) => value.trim().toLowerCase()).filter(Boolean);
   const knownOwnerAddresses = [...ownerAddresses, ...aliasAddresses];
   const baseline = analyzeDiscovery(baselineMessages, 10, { ownerAddresses: knownOwnerAddresses });
   const broader = analyzeDiscovery(messages, 10, { ownerAddresses: knownOwnerAddresses });
   const dateTotals = datesAndYears(messages);
-  const yearDistribution = new Map<string, number>();
-  for (const message of messages) {
-    const date = message.internalDate ? new Date(Number(message.internalDate)) : null;
-    if (!date || Number.isNaN(date.getTime())) continue;
-    const year = String(date.getUTCFullYear());
-    yearDistribution.set(year, (yearDistribution.get(year) ?? 0) + 1);
-  }
+  const yearDistribution = (items: DiscoveryMessage[]) => {
+    const distribution = new Map<string, number>();
+    for (const message of items) {
+      const date = message.internalDate ? new Date(Number(message.internalDate)) : null;
+      if (!date || Number.isNaN(date.getTime())) continue;
+      const year = String(date.getUTCFullYear());
+      distribution.set(year, (distribution.get(year) ?? 0) + 1);
+    }
+    return distribution;
+  };
+  const baselineYears = yearDistribution(baselineMessages);
+  const broaderYears = yearDistribution(messages);
+  const listSlots = Math.min(detailCap, BROADER_EXPERIMENT_WINDOWS * 2);
+  const normalRequests = listSlots + detailCap;
+  const normalQuota = listSlots * 5 + detailCap * 20;
+  const maximumAttempts = listSlots * BROADER_EXPERIMENT_LIST_PAGES * 3 + detailCap * 3;
+  const maximumQuota = listSlots * BROADER_EXPERIMENT_LIST_PAGES * 3 * 5 + detailCap * 3 * 20;
   const baselineDateTotals = datesAndYears(baselineMessages);
   const baselineRequests =
     1 + baselineSampling.windowsQueried + baselineSampling.enrichedContacts +
     baselineSampling.sentFetched + baselineSampling.enrichmentFetched;
 
+  useEffect(() => () => {
+    stopRequested.current = true;
+  }, []);
+
   async function start() {
-    if (!confirmed || running) return;
-    const abortController = new AbortController();
-    controller.current = abortController;
+    if (!confirmed || runningRef.current) return;
+    stopRequested.current = false;
+    runningRef.current = true;
     setRunning(true);
     setMessages([]);
     setControl(null);
@@ -111,7 +128,7 @@ export function BroaderMetadataExperiment({
     let anchor: number | undefined;
 
     for (let startWindow = 0; startWindow < BROADER_EXPERIMENT_WINDOWS; startWindow += BROADER_EXPERIMENT_BATCH_WINDOWS) {
-      if (abortController.signal.aborted) break;
+      if (stopRequested.current) break;
       let stopAfterBatch = false;
       try {
         const response = await fetch("/api/gmail/experiment", {
@@ -123,7 +140,6 @@ export function BroaderMetadataExperiment({
             ...(anchor === undefined ? {} : { anchor }),
           }),
           cache: "no-store",
-          signal: abortController.signal,
         });
         if (response.status === 401) {
           failed++;
@@ -153,7 +169,6 @@ export function BroaderMetadataExperiment({
         if (result.stats.listBucketsQueried > 0 &&
           result.stats.failedListBuckets === result.stats.listBucketsQueried) stopAfterBatch = true;
       } catch {
-        if (abortController.signal.aborted) break;
         if (!stopAfterBatch) failed++;
       }
       completed++;
@@ -163,20 +178,18 @@ export function BroaderMetadataExperiment({
     }
 
     setRun({
-      status: completed === BROADER_EXPERIMENT_WINDOWS / BROADER_EXPERIMENT_BATCH_WINDOWS && failed === 0
-        ? "complete"
-        : "partial",
+      status: isBroaderExperimentComplete(completed, failed) ? "complete" : "partial",
       batchesFinished: completed,
       failedBatches: failed,
       stats: totals,
     });
     setRunning(false);
+    runningRef.current = false;
     setConfirmed(false);
-    controller.current = null;
   }
 
   function stop() {
-    controller.current?.abort();
+    stopRequested.current = true;
   }
 
   function checkControl(event: React.FormEvent<HTMLFormElement>) {
@@ -199,10 +212,11 @@ export function BroaderMetadataExperiment({
       </div>
       <div className="rounded-xl bg-white p-4 text-sm text-stone-700">
         <p>
-          At the default {detailCap.toLocaleString()} detail cap, the plan uses up to 240 monthly list requests and 1,000
-          metadata detail requests: about 1,240 Gmail API requests (21,200 quota units assuming 5 units per list and 20 per
-          metadata get). Two list pages and up to three attempts per request give a conservative ceiling of 4,440 API
-          attempts (67,200 quota units). A full run may take minutes; rate limits, retries, or interruption can leave it partial.
+          At the configured {detailCap.toLocaleString()} detail cap, the plan makes up to {listSlots} monthly list requests
+          and {detailCap.toLocaleString()} metadata detail requests: about {normalRequests.toLocaleString()} Gmail API requests
+          ({normalQuota.toLocaleString()} quota units assuming 5 units per list and 20 per metadata get). Two list pages and
+          up to three attempts per request give a conservative ceiling of {maximumAttempts.toLocaleString()} API attempts
+          ({maximumQuota.toLocaleString()} quota units). A full run may take minutes; rate limits, retries, or interruption can leave it partial.
           This is not a full-mailbox scan.
         </p>
         <p className="mt-2">
@@ -240,7 +254,7 @@ export function BroaderMetadataExperiment({
         </button>
         {running && (
           <button type="button" onClick={stop} className="rounded-lg border border-stone-400 px-4 py-2 text-sm">
-            Stop after current request
+            Stop after current batch
           </button>
         )}
       </div>
@@ -250,6 +264,7 @@ export function BroaderMetadataExperiment({
           <p>
             {run.status === "running" ? "Scanning" : run.status === "complete" ? "Scan complete for the requested windows" : "Partial scan"}:
             {" "}{run.batchesFinished} of {BROADER_EXPERIMENT_WINDOWS / BROADER_EXPERIMENT_BATCH_WINDOWS} batches finished;
+            {" "}{run.stats.listBucketsQueried} of {listSlots} budgeted direction/month list buckets attempted;
             {" "}{run.stats.recordsFetched} unique metadata records returned; {run.stats.failedListBuckets} list buckets and
             {" "}{run.stats.failedDetails} detail requests failed; {run.stats.apiRequests} Gmail API attempts.
           </p>
@@ -289,9 +304,10 @@ export function BroaderMetadataExperiment({
             Sent/received direction comes from Gmail labels and search queries. Candidate counts use direct one-to-one and
             service/bulk filters; this cannot resolve one person with multiple addresses. Similar names are never grouped.
           </p>
-          {yearDistribution.size > 0 && (
+          {(baselineYears.size > 0 || broaderYears.size > 0) && (
             <p>
-              Broader records by year (as observed): {[...yearDistribution].sort(([a], [b]) => a.localeCompare(b)).map(([year, count]) => `${year}: ${count}`).join("; ")}.
+              Records by year (as observed): existing {[...baselineYears].sort(([a], [b]) => a.localeCompare(b)).map(([year, count]) => `${year}: ${count}`).join("; ") || "none"};
+              {" "}broader {[...broaderYears].sort(([a], [b]) => a.localeCompare(b)).map(([year, count]) => `${year}: ${count}`).join("; ") || "none"}.
             </p>
           )}
           {broader.candidates.length > 0 && (

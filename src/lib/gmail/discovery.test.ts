@@ -10,6 +10,7 @@ import {
 import {
   broaderExperimentQuota,
   BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH,
+  isBroaderExperimentComplete,
 } from "./experiment";
 import { analyzeDiscovery, countDistinctObservedAddresses, diagnoseAddress, rankCandidates } from "./discovery";
 
@@ -493,6 +494,12 @@ describe("broader metadata coverage experiment", () => {
       .reduce((sum, quota) => sum + quota, 0)).toBe(500);
     expect(Math.max(...Array.from({ length: 240 }, (_, slot) => broaderExperimentQuota(1_000, slot)))).toBe(5);
     expect(broaderExperimentQuota(3_000, 0)).toBe(4);
+  });
+
+  it("does not label interrupted or failed scans complete", () => {
+    expect(isBroaderExperimentComplete(1, 0)).toBe(false);
+    expect(isBroaderExperimentComplete(24, 1)).toBe(false);
+    expect(isBroaderExperimentComplete(24, 0)).toBe(true);
   });
 
   it("follows bounded list pagination, deduplicates IDs, and requests metadata headers only", async () => {
