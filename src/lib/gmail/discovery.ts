@@ -8,9 +8,33 @@ export type DiscoveryCandidate = {
   threads: number;
   dates: number;
   lastExchange: string | null;
-  uncertainty: "Possible" | "Repeated correspondence observed";
+  uncertainty: "Possible" | "Two-way exchange observed" | "Repeated correspondence observed";
   reasons: string[];
 };
+
+/** Counts only; never contains addresses or other message content. */
+export type DiscoveryDiagnostics = {
+  messagesExamined: number;
+  sentExamined: number;
+  receivedExamined: number;
+  excludedDraft: number;
+  excludedBulk: number;
+  excludedGroup: number;
+  excludedAutomated: number;
+  excludedUnparseable: number;
+  excludedOneWayHighVolume: number;
+  excludedSingleInbound: number;
+  distinctMonths: number;
+  candidatesSurviving: number;
+};
+
+export type DiscoveryAnalysis = {
+  candidates: DiscoveryCandidate[];
+  diagnostics: DiscoveryDiagnostics;
+};
+
+/** Inbound-only senders with more messages than this and no reply from the user look automated. */
+const ONE_WAY_INBOUND_LIMIT = 5;
 
 type Address = { address: string; name: string };
 
@@ -80,9 +104,17 @@ function addresses(value: string): Address[] {
   return parseAddresses(value).people;
 }
 
-function isAutomationAddress(address: string): boolean {
-  const local = address.split("@", 1)[0].toLowerCase();
-  return /^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer[-_.]?daemon|notifications?|newsletter|updates?|billing|receipts?|orders?|alerts?|automated|auto[-_.]?reply)(?:[+._-].*)?$/.test(local);
+const AUTOMATED_LOCAL = new RegExp(
+  "^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|donotreply|mailer[-_.]?daemon|postmaster|bounces?|notifications?|notify|newsletters?|news|updates?|billing|invoices?|statements?|receipts?|orders?|order[-_.]?confirmation|confirmations?|bookings?|reservations?|alerts?|automated|auto[-_.]?reply|support|help|helpdesk|customer[-_.]?(?:care|service|support)|service|services|info|hello|hi|contact|contactus|sales|marketing|promo(?:tions?)?|deals|offers|rewards|shop|store|team|admin|security|accounts?|account[-_.]?services|feedback|survey|mail|email|digest|members?|subscriptions?|payments?|shipping|tracking)(?:[+._-].*)?$",
+);
+const MARKETING_SUBDOMAIN = /^(?:e|em|email|mail|mailer|news|newsletter|mg|bounce|bounces|notify|notifications?|marketing|promo|info|click|link|go|t|send|smtp)\./;
+const AUTOMATED_NAME = /\b(?:no[- ]?reply|do not reply|newsletter|notifications?|customer (?:care|service|support)|support team|alerts?|order(?:s| confirmation)|receipts?|billing|deals|offers)\b/i;
+
+function isAutomationAddress(address: string, name = ""): boolean {
+  const [local, domain = ""] = address.toLowerCase().split("@");
+  return AUTOMATED_LOCAL.test(local) ||
+    (domain.split(".").length >= 3 && MARKETING_SUBDOMAIN.test(domain)) ||
+     AUTOMATED_NAME.test(name);
 }
 
 function isAutoSubmitted(value: string): boolean {
@@ -117,28 +149,98 @@ type Aggregate = {
   latest: number;
 };
 
-export function rankCandidates(messages: DiscoveryMessage[], maximum = 10): DiscoveryCandidate[] {
-  messages = messages.filter((message) => !message.labelIds?.includes("DRAFT"));
-  const self = new Set(
+const emptyDiagnostics = (): DiscoveryDiagnostics => ({
+  messagesExamined: 0,
+  sentExamined: 0,
+  receivedExamined: 0,
+  excludedDraft: 0,
+  excludedBulk: 0,
+  excludedGroup: 0,
+  excludedAutomated: 0,
+  excludedUnparseable: 0,
+  excludedOneWayHighVolume: 0,
+  excludedSingleInbound: 0,
+  distinctMonths: 0,
+  candidatesSurviving: 0,
+});
+
+function selfAddresses(messages: DiscoveryMessage[]): Set<string> {
+  return new Set(
     messages
-      .filter((message) => message.labelIds?.includes("SENT"))
+      .filter((message) => message.labelIds?.includes("SENT") && !message.labelIds.includes("DRAFT"))
       .flatMap((message) => addresses(header(message, "From")).map((person) => person.address)),
   );
+}
+
+/**
+ * Stage-one seeds for bounded enrichment: addresses the user directly wrote to
+ * (single recipient, not bulk or automated), ordered by how many distinct years
+ * and messages they appear in. Only used in memory to build Gmail search queries.
+ */
+export function enrichmentTargets(messages: DiscoveryMessage[], maximum: number): string[] {
+  const self = selfAddresses(messages);
+  const seen = new Map<string, { sent: number; years: Set<number> }>();
+  for (const message of messages) {
+    if (!message.labelIds?.includes("SENT") || message.labelIds.includes("DRAFT") || isBulk(message)) continue;
+    const to = parseAddresses(header(message, "To"));
+    const cc = parseAddresses(header(message, "Cc"));
+    if (!to.reliable || !cc.reliable) continue;
+    const recipients = distinctPeople([...to.people, ...cc.people]);
+    if (recipients.length !== 1) continue;
+    const [person] = recipients;
+    if (self.has(person.address) || isAutomationAddress(person.address, person.name)) continue;
+    if (!/^[\w.+-]+@[\w.-]+$/.test(person.address)) continue;
+    const entry = seen.get(person.address) ?? { sent: 0, years: new Set<number>() };
+    entry.sent++;
+    const date = messageDate(message);
+    if (date) entry.years.add(date.getUTCFullYear());
+    seen.set(person.address, entry);
+  }
+  return [...seen]
+    .sort((a, b) => b[1].years.size - a[1].years.size || b[1].sent - a[1].sent || a[0].localeCompare(b[0]))
+    .slice(0, Math.max(0, maximum))
+    .map(([address]) => address);
+}
+
+export function analyzeDiscovery(messages: DiscoveryMessage[], maximum = 10): DiscoveryAnalysis {
+  const diagnostics = emptyDiagnostics();
+  diagnostics.excludedDraft = messages.filter((message) => message.labelIds?.includes("DRAFT")).length;
+  messages = messages.filter((message) => !message.labelIds?.includes("DRAFT"));
+  diagnostics.messagesExamined = messages.length;
+  const self = selfAddresses(messages);
   const candidates = new Map<string, Aggregate>();
+  const months = new Set<string>();
 
   for (const message of messages) {
-    if (isBulk(message)) continue;
     const sent = message.labelIds?.includes("SENT") ?? false;
+    if (sent) diagnostics.sentExamined++;
+    else diagnostics.receivedExamined++;
+    const when = messageDate(message);
+    if (when) months.add(when.toISOString().slice(0, 7));
+    if (isBulk(message)) {
+      diagnostics.excludedBulk++;
+      continue;
+    }
     const from = parseAddresses(header(message, "From"));
     const to = parseAddresses(header(message, "To"));
     const cc = parseAddresses(header(message, "Cc"));
-    if (!from.reliable || !to.reliable || !cc.reliable) continue;
+    if (!from.reliable || !to.reliable || !cc.reliable) {
+      diagnostics.excludedUnparseable++;
+      continue;
+    }
     const sender = distinctPeople(from.people);
     const recipients = distinctPeople([...to.people, ...cc.people]);
-    if (recipients.length !== 1 || sender.length !== 1) continue;
+    if (recipients.length !== 1 || sender.length !== 1) {
+      diagnostics.excludedGroup++;
+      continue;
+    }
     const person: Address | undefined = sent ? recipients[0] : sender[0];
 
-    if (!person || self.has(person.address) || isAutomationAddress(person.address)) continue;
+    if (!person || self.has(person.address)) continue;
+    if (isAutomationAddress(person.address, person.name)) {
+      diagnostics.excludedAutomated++;
+      continue;
+    }
     const current = candidates.get(person.address) ?? {
       address: person.address,
       name: person.name || person.address,
@@ -152,23 +254,37 @@ export function rankCandidates(messages: DiscoveryMessage[], maximum = 10): Disc
     if (sent) current.sent++;
     else current.received++;
     current.threads.add(message.threadId || message.id);
-    const date = messageDate(message);
-    if (date) {
-      current.dates.add(date.toISOString().slice(0, 10));
-      current.latest = Math.max(current.latest, date.getTime());
+    if (when) {
+      current.dates.add(when.toISOString().slice(0, 10));
+      current.latest = Math.max(current.latest, when.getTime());
     }
     candidates.set(person.address, current);
   }
+  diagnostics.distinctMonths = months.size;
 
-  return [...candidates.values()]
+  const viable = [...candidates.values()].filter((candidate) => {
+    if (candidate.sent > 0) return true;
+    if (candidate.received > ONE_WAY_INBOUND_LIMIT) {
+      diagnostics.excludedOneWayHighVolume++;
+      return false;
+    }
+    if (candidate.threads.size < 2 || candidate.dates.size < 2) {
+      diagnostics.excludedSingleInbound++;
+      return false;
+    }
+    return true;
+  });
+
+  const ranked = viable
     .map((candidate) => {
       const bilateral = candidate.sent > 0 && candidate.received > 0;
+      const repeated = bilateral && candidate.threads.size > 1 && candidate.dates.size > 1;
       const reasons = [
         bilateral
-          ? `Messages were observed both sent and received (${candidate.sent} sent, ${candidate.received} received).`
+          ? `Messages were observed both sent and received in this sample (${candidate.sent} sent, ${candidate.received} received); this does not confirm they are replies to each other.`
           : candidate.sent
-            ? `${candidate.sent} sent message${candidate.sent === 1 ? "" : "s"} to this address ${candidate.sent === 1 ? "was" : "were"} observed.`
-            : `${candidate.received} message${candidate.received === 1 ? "" : "s"} from this address ${candidate.received === 1 ? "was" : "were"} observed.`,
+            ? `${candidate.sent} sent message${candidate.sent === 1 ? "" : "s"} to this address ${candidate.sent === 1 ? "was" : "were"} observed; no incoming messages were seen in the sample, which does not mean none exist.`
+            : `${candidate.received} message${candidate.received === 1 ? "" : "s"} from this address ${candidate.received === 1 ? "was" : "were"} observed and no sent messages were seen; one-way, unverified.`,
         `They span ${candidate.dates.size} date${candidate.dates.size === 1 ? "" : "s"} and ${candidate.threads.size} thread${candidate.threads.size === 1 ? "" : "s"}.`,
       ];
       return {
@@ -179,17 +295,26 @@ export function rankCandidates(messages: DiscoveryMessage[], maximum = 10): Disc
         threads: candidate.threads.size,
         dates: candidate.dates.size,
         lastExchange: candidate.latest ? new Date(candidate.latest).toISOString().slice(0, 10) : null,
-        uncertainty: bilateral && candidate.threads.size > 1 && candidate.dates.size > 1
+        uncertainty: repeated
           ? "Repeated correspondence observed" as const
-          : "Possible" as const,
+          : bilateral
+            ? "Two-way exchange observed" as const
+            : "Possible" as const,
         reasons,
       };
     })
     .sort((a, b) =>
       Number(b.sent > 0 && b.received > 0) - Number(a.sent > 0 && a.received > 0) ||
+      Number(b.sent > 0) - Number(a.sent > 0) ||
       b.threads - a.threads ||
       b.dates - a.dates ||
       a.address.localeCompare(b.address),
     )
-    .slice(0, Math.max(0, Math.min(Math.floor(maximum), 10)))
+    .slice(0, Math.max(0, Math.min(Math.floor(maximum), 10)));
+  diagnostics.candidatesSurviving = ranked.length;
+  return { candidates: ranked, diagnostics };
+}
+
+export function rankCandidates(messages: DiscoveryMessage[], maximum = 10): DiscoveryCandidate[] {
+  return analyzeDiscovery(messages, maximum).candidates;
 }

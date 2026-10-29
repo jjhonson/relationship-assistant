@@ -1,15 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import type { DiscoveryCandidate } from "@/lib/gmail/discovery";
+import type { SamplingStats } from "@/lib/gmail/messages";
+import type { DiscoveryCandidate, DiscoveryDiagnostics } from "@/lib/gmail/discovery";
 
 export function DiscoveryResults({
   candidates,
+  diagnostics,
+  sampling,
   examined,
   oldest,
   newest,
 }: {
   candidates: DiscoveryCandidate[];
+  diagnostics: DiscoveryDiagnostics;
+  sampling: SamplingStats;
   examined: number;
   oldest: string | null;
   newest: string | null;
@@ -24,7 +29,19 @@ export function DiscoveryResults({
         <dl className="mt-2 grid gap-2 text-sm text-stone-700 sm:grid-cols-2">
           <div>Messages examined: {examined} (maximum 200)</div>
           <div>Date range: {range}</div>
-          <div className="sm:col-span-2">Sampling spans up to 10 calendar years; this is an on-demand sample, not a mailbox sync.</div>
+          <div>Sent messages examined: {diagnostics.sentExamined}</div>
+          <div>Received messages examined: {diagnostics.receivedExamined}</div>
+          <div>Distinct months covered: {diagnostics.distinctMonths}</div>
+          <div>Time windows queried: {sampling.windowsQueried}; contacts looked up for replies: {sampling.enrichedContacts}</div>
+          <div>
+            Excluded: {diagnostics.excludedBulk} bulk, {diagnostics.excludedGroup} group, {diagnostics.excludedAutomated} automated,{" "}
+            {diagnostics.excludedUnparseable} unparseable, {diagnostics.excludedOneWayHighVolume} high-volume one-way,{" "}
+            {diagnostics.excludedSingleInbound} lone inbound
+          </div>
+          <div>Candidates surviving: {diagnostics.candidatesSurviving}</div>
+          <div className="sm:col-span-2">
+            Sent mail is sampled across up to 40 calendar quarters, then a few incoming messages are looked up for the most frequent sent contacts. This is an on-demand, biased and incomplete sample, not a mailbox sync; a missing contact may reflect sampling limits, other accounts, or filtering.
+          </div>
         </dl>
       </section>
 

@@ -1,3 +1,4 @@
+import { enrichmentTargets } from "./discovery";
 import { AuthError } from "./oauth";
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -96,71 +97,148 @@ export async function fetchSample(token: string, limit: number): Promise<GmailSu
 }
 
 const DISCOVERY_YEARS = 10;
+const WINDOWS_PER_YEAR = 4;
+const SENT_SHARE = 0.6;
+const MAX_ENRICHED_CONTACTS = 20;
+const ENRICHMENT_PER_CONTACT = 4;
+const DETAIL_HEADERS = [
+  "From",
+  "To",
+  "Cc",
+  "Date",
+  "List-Id",
+  "List-Unsubscribe",
+  "Precedence",
+  "Auto-Submitted",
+  "X-Auto-Response-Suppress",
+];
+
+/** Request counts only; never contains addresses. */
+export type SamplingStats = {
+  windowsQueried: number;
+  sentFetched: number;
+  enrichedContacts: number;
+  enrichmentFetched: number;
+};
+
+type Summary = { id: string; threadId?: string };
+
+async function listIds(token: string, q: string, limit: number): Promise<Summary[]> {
+  const found: Summary[] = [];
+  let pageToken: string | undefined;
+  do {
+    const params = new URLSearchParams({ maxResults: String(limit - found.length), q });
+    if (pageToken) params.set("pageToken", pageToken);
+    const page = await get<{ messages?: Summary[]; nextPageToken?: string }>(`/messages?${params}`, token);
+    found.push(...(page.messages ?? []).slice(0, limit - found.length));
+    pageToken = page.nextPageToken;
+  } while (pageToken && found.length < limit);
+  return found;
+}
+
+async function fetchDetails(token: string, summaries: Summary[]): Promise<DiscoveryMessage[]> {
+  const results: DiscoveryMessage[] = [];
+  for (let start = 0; start < summaries.length; start += 5) {
+    const fetched = await Promise.all(
+      summaries.slice(start, start + 5).map(({ id, threadId }) => {
+        const params = new URLSearchParams({
+          format: "metadata",
+          fields: "id,threadId,internalDate,labelIds,payload(headers)",
+        });
+        for (const header of DETAIL_HEADERS) params.append("metadataHeaders", header);
+        return get<DiscoveryMessage>(`/messages/${encodeURIComponent(id)}?${params}`, token).then(
+          (message) => ({ ...message, threadId: message.threadId ?? threadId }),
+        );
+      }),
+    );
+    results.push(...fetched);
+  }
+  return results;
+}
+
+/** Quarter windows (UTC epoch seconds), newest first, covering the last DISCOVERY_YEARS years. */
+function quarterWindows(now: Date): { after: number; before: number }[] {
+  const windows: { after: number; before: number }[] = [];
+  const quarter = Math.floor(now.getUTCMonth() / 3);
+  for (let i = 0; i < DISCOVERY_YEARS * WINDOWS_PER_YEAR; i++) {
+    const index = now.getUTCFullYear() * 4 + quarter - i;
+    const year = Math.floor(index / 4);
+    const start = Date.UTC(year, (index % 4) * 3, 1);
+    const end = Date.UTC(year, (index % 4) * 3 + 3, 1);
+    windows.push({ after: start / 1000, before: Math.min(end, now.getTime() + 1000) / 1000 });
+  }
+  return windows;
+}
+
+/**
+ * Two-stage, bounded, metadata-only sampling (still biased and incomplete):
+ *  1. Sent mail (`in:sent`) is sampled per calendar quarter with an adaptive quota so
+ *     sparse quarters donate unused budget to older ones, instead of taking the newest N per year.
+ *  2. For the top Sent-derived contacts, a bounded per-contact lookup fetches a few
+ *     incoming messages to look for evidence of replies.
+ * Total message detail fetches never exceed `limit` (max 200).
+ */
+export async function fetchDiscoverySample(
+  token: string,
+  limit: number,
+  now = new Date(),
+): Promise<{ messages: DiscoveryMessage[]; stats: SamplingStats }> {
+  const cap = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 200)) : 200;
+  const sentBudget = cap >= 2 ? Math.max(1, Math.ceil(cap * SENT_SHARE)) : cap;
+  let windows = quarterWindows(now);
+  if (windows.length > sentBudget) {
+    const step = windows.length / sentBudget;
+    windows = Array.from({ length: sentBudget }, (_, i) => windows[Math.floor(i * step)]);
+  }
+
+  const sentSummaries: Summary[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < windows.length && sentSummaries.length < sentBudget; i++) {
+    const quota = Math.ceil((sentBudget - sentSummaries.length) / (windows.length - i));
+    const { after, before } = windows[i];
+    const ids = await listIds(token, `in:sent -in:drafts after:${after} before:${before}`, quota);
+    for (const summary of ids) {
+      if (!seen.has(summary.id)) {
+        seen.add(summary.id);
+        sentSummaries.push(summary);
+      }
+    }
+  }
+  const messages = await fetchDetails(token, sentSummaries);
+  const stats: SamplingStats = {
+    windowsQueried: windows.length,
+    sentFetched: messages.length,
+    enrichedContacts: 0,
+    enrichmentFetched: 0,
+  };
+
+  const budget = cap - messages.length;
+  if (budget > 0) {
+    const targets = enrichmentTargets(messages, Math.min(MAX_ENRICHED_CONTACTS, budget));
+    const incoming: Summary[] = [];
+    for (const address of targets) {
+      const room = Math.min(ENRICHMENT_PER_CONTACT, budget - incoming.length);
+      if (room <= 0) break;
+      const ids = await listIds(token, `from:${address} -in:sent -in:drafts`, room);
+      stats.enrichedContacts++;
+      for (const summary of ids) {
+        if (!seen.has(summary.id)) {
+          seen.add(summary.id);
+          incoming.push(summary);
+        }
+      }
+    }
+    const extra = await fetchDetails(token, incoming);
+    stats.enrichmentFetched = extra.length;
+    messages.push(...extra);
+  }
+  return { messages, stats };
+}
 
 export async function fetchHistoricalMessages(
   token: string,
   limit: number,
   now = new Date(),
 ): Promise<DiscoveryMessage[]> {
-  const cap = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 200)) : 200;
-  const years = Math.min(DISCOVERY_YEARS, cap);
-  const basePerYear = Math.floor(cap / years);
-  const extraYears = cap % years;
-  const summaries: { id: string; threadId?: string }[] = [];
-
-  for (let offset = 0; offset < years && summaries.length < cap; offset++) {
-    const year = now.getUTCFullYear() - offset;
-    const yearLimit = basePerYear + (offset < extraYears ? 1 : 0);
-    let pageToken: string | undefined;
-    let found = 0;
-    do {
-      const remaining = Math.min(yearLimit - found, cap - summaries.length);
-      if (remaining <= 0) break;
-      const params = new URLSearchParams({
-        maxResults: String(remaining),
-        q: `after:${year}/01/01 before:${year + 1}/01/01`,
-      });
-      if (pageToken) params.set("pageToken", pageToken);
-      const page = await get<{
-        messages?: { id: string; threadId?: string }[];
-        nextPageToken?: string;
-      }>(`/messages?${params}`, token);
-      const messages = page.messages ?? [];
-      summaries.push(...messages.slice(0, remaining));
-      found += messages.length;
-      pageToken = page.nextPageToken;
-    } while (pageToken && found < yearLimit && summaries.length < cap);
-  }
-
-  const results: DiscoveryMessage[] = [];
-  for (let start = 0; start < summaries.length; start += 5) {
-    const batch = summaries.slice(start, start + 5);
-    const fetched = await Promise.all(
-      batch.map(({ id, threadId }) => {
-        const params = new URLSearchParams({
-          format: "metadata",
-          fields: "id,threadId,internalDate,labelIds,payload(headers)",
-        });
-        for (const header of [
-          "From",
-          "To",
-          "Cc",
-          "Date",
-          "List-Id",
-          "List-Unsubscribe",
-          "Precedence",
-          "Auto-Submitted",
-          "X-Auto-Response-Suppress",
-        ]) {
-          params.append("metadataHeaders", header);
-        }
-        return get<DiscoveryMessage>(
-          `/messages/${encodeURIComponent(id)}?${params}`,
-          token,
-        ).then((message) => ({ ...message, threadId: message.threadId ?? threadId }));
-      }),
-    );
-    results.push(...fetched);
-  }
-  return results;
+  return (await fetchDiscoverySample(token, limit, now)).messages;
 }
