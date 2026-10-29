@@ -8,6 +8,7 @@ export type DiscoveryCandidate = {
   received: number;
   threads: number;
   dates: number;
+  years: number;
   lastExchange: string | null;
   uncertainty: "Possible" | "Two-way exchange observed" | "Repeated correspondence observed";
   reasons: string[];
@@ -387,6 +388,7 @@ function analyze(
         received: candidate.received,
         threads: candidate.threads.size,
         dates: candidate.dates.size,
+        years: new Set([...candidate.dates].map((date) => date.slice(0, 4))).size,
         lastExchange: candidate.latest ? new Date(candidate.latest).toISOString().slice(0, 10) : null,
         uncertainty: repeated
           ? "Repeated correspondence observed" as const
@@ -421,6 +423,16 @@ export function analyzeDiscovery(
 ): DiscoveryAnalysis {
   const { candidates, diagnostics } = analyze(messages, maximum, options);
   return { candidates, diagnostics };
+}
+
+export function countDistinctObservedAddresses(messages: DiscoveryMessage[]): number {
+  const found = new Set<string>();
+  for (const message of messages) {
+    for (const name of ["From", "To", "Cc"]) {
+      for (const person of parseAddresses(header(message, name)).people) found.add(person.address);
+    }
+  }
+  return found.size;
 }
 
 const OUTCOME_TEXT: Record<Exclude<ProbeOutcome, "counted">, string> = {

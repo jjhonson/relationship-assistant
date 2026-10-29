@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchAddressLookup, fetchDiscoverySample, fetchHistoricalMessages, fetchOwnerAddress, type DiscoveryMessage } from "./messages";
-import { analyzeDiscovery, diagnoseAddress, rankCandidates } from "./discovery";
+import {
+  fetchAddressLookup,
+  fetchBroaderMetadataBatch,
+  fetchDiscoverySample,
+  fetchHistoricalMessages,
+  fetchOwnerAddress,
+  type DiscoveryMessage,
+} from "./messages";
+import {
+  broaderExperimentQuota,
+  BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH,
+} from "./experiment";
+import { analyzeDiscovery, countDistinctObservedAddresses, diagnoseAddress, rankCandidates } from "./discovery";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -469,5 +480,152 @@ describe("bounded Gmail lookups", () => {
     vi.stubGlobal("fetch", vi.fn());
     await expect(fetchAddressLookup("fake-token", "a b@example.test) OR in:anywhere")).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("broader metadata coverage experiment", () => {
+  const anchor = Date.UTC(2026, 9, 29, 12);
+
+  it("distributes a hard detail cap across historical direction/month slots", () => {
+    expect(Array.from({ length: 240 }, (_, slot) => broaderExperimentQuota(1_000, slot))
+      .reduce((sum, quota) => sum + quota, 0)).toBe(1_000);
+    expect(Array.from({ length: 240 }, (_, slot) => broaderExperimentQuota(500, slot))
+      .reduce((sum, quota) => sum + quota, 0)).toBe(500);
+    expect(Math.max(...Array.from({ length: 240 }, (_, slot) => broaderExperimentQuota(1_000, slot)))).toBe(5);
+    expect(broaderExperimentQuota(3_000, 0)).toBe(4);
+  });
+
+  it("follows bounded list pagination, deduplicates IDs, and requests metadata headers only", async () => {
+    const urls: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      urls.push(url);
+      if (url.pathname.endsWith("/messages")) {
+        const sent = /(?:^|\s)in:sent(?:\s|$)/.test(url.searchParams.get("q") ?? "");
+        if (sent && !url.searchParams.has("pageToken")) {
+          return new Response(JSON.stringify({
+            messages: [{ id: "s1" }, { id: "s2" }, { id: "s3" }],
+            nextPageToken: "sent-next",
+          }), { status: 200 });
+        }
+        if (sent) {
+          return new Response(JSON.stringify({ messages: [{ id: "s3" }, { id: "s4" }] }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ messages: [{ id: "s1" }, { id: "r2" }, { id: "r3" }, { id: "r4" }] }), { status: 200 });
+      }
+      const id = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      return new Response(JSON.stringify({
+        id,
+        threadId: `thread-${id}`,
+        internalDate: String(anchor - 1000),
+        labelIds: ["INBOX"],
+        payload: { headers: [{ name: "From", value: "Fictional <fictional@example.test>" }] },
+      }), { status: 200 });
+    }));
+
+    const result = await fetchBroaderMetadataBatch("fake-token", 1_000, 0, 1, anchor);
+    const listUrls = urls.filter((url) => url.pathname.endsWith("/messages"));
+    const detailUrls = urls.filter((url) => /\/messages\/[^/]+$/.test(url.pathname));
+    expect(result.messages).toHaveLength(7);
+    expect(new Set(result.messages.map((item) => item.id)).size).toBe(7);
+    expect(result.stats).toMatchObject({
+      listBucketsQueried: 2,
+      plannedDetails: 8,
+      recordsFetched: 7,
+      duplicateIds: 1,
+      apiRequests: 10,
+      listRequests: 3,
+      detailRequests: 7,
+    });
+    expect(listUrls.some((url) => url.searchParams.has("pageToken"))).toBe(true);
+    expect(detailUrls).toHaveLength(7);
+    expect(detailUrls.every((url) =>
+      url.searchParams.get("format") === "metadata" &&
+      !url.searchParams.get("fields")?.includes("body") &&
+      url.searchParams.getAll("metadataHeaders").every((name) =>
+        ["From", "To", "Cc", "Date", "List-Id", "List-Unsubscribe", "Precedence", "Auto-Submitted", "X-Auto-Response-Suppress"].includes(name),
+      ),
+    )).toBe(true);
+  });
+
+  it("bounds retries and reports failed list buckets and detail requests as incomplete", async () => {
+    const urls: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      urls.push(url);
+      if (url.pathname.endsWith("/messages")) {
+        if (/(?:^|\s)in:sent(?:\s|$)/.test(url.searchParams.get("q") ?? "")) {
+          if (urls.filter((item) => item.pathname.endsWith("/messages") && /(?:^|\s)in:sent(?:\s|$)/.test(item.searchParams.get("q") ?? "")).length < 3) {
+            return new Response("{}", { status: 429, headers: { "Retry-After": "0.001" } });
+          }
+          return new Response(JSON.stringify({ messages: [{ id: "retry-detail" }] }), { status: 200 });
+        }
+        return new Response("{}", { status: 400 });
+      }
+      return new Response("{}", { status: 400 });
+    }));
+
+    const result = await fetchBroaderMetadataBatch("fake-token", 1_000, 0, 1, anchor);
+    expect(result.messages).toEqual([]);
+    expect(result.stats).toMatchObject({
+      failedListBuckets: 1,
+      failedDetails: 1,
+      recordsFetched: 0,
+      apiRequests: 5,
+      listRequests: 4,
+      detailRequests: 1,
+    });
+    expect(result.stats.apiRequests).toBeLessThanOrEqual(BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH);
+    expect(urls.filter((url) => !url.pathname.endsWith("/messages"))).toHaveLength(1);
+  });
+
+  it("keeps a batched request budget below its fixed ceiling", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ messages: [] }), { status: 200 })));
+    const result = await fetchBroaderMetadataBatch("fake-token", 1_000, 0, 5, anchor);
+    expect(result.stats.apiRequests).toBe(10);
+    expect(result.stats.apiRequests).toBeLessThanOrEqual(BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH);
+    expect(result.stats.detailRequests).toBeLessThanOrEqual(1_000);
+  });
+
+  it("shows how broader evidence changes a synthetic shortlist without merging identities", () => {
+    const owner = "Owner <owner@example.test>";
+    const synthetic: DiscoveryMessage[] = [];
+    for (let i = 0; i < 30; i++) {
+      synthetic.push(message(`burst-${i}`, owner, "Busy <busy@example.test>", "Tue, 06 Jan 2026 10:00:00 +0000", [], true));
+    }
+    for (let year = 2017; year <= 2026; year++) {
+      const date = `Mon, 01 Jan ${year} 10:00:00 +0000`;
+      synthetic.push(message(`long-out-${year}`, owner, "Long-running <long@example.test>", date, [], true));
+      synthetic.push(message(`long-in-${year}`, "Long-running <long@example.test>", owner, date));
+    }
+    for (let year = 2021; year <= 2023; year++) {
+      const date = `Mon, 02 Jan ${year} 10:00:00 +0000`;
+      synthetic.push(message(`control-out-${year}`, owner, "Known control <control@example.test>", date, [], true));
+      synthetic.push(message(`control-in-${year}`, "Known control <control@example.test>", owner, date));
+    }
+    synthetic.push(message("address-one", owner, "Same Name <person-one@example.test>", "Mon, 01 Jan 2024 10:00:00 +0000", [], true));
+    synthetic.push(message("address-two", owner, "Same Name <person-two@example.test>", "Mon, 01 Jan 2024 10:00:00 +0000", [], true));
+    synthetic.push(message("group-mail", owner, "Long-running <long@example.test>, Other <other@example.test>", "Mon, 01 Jan 2024 10:00:00 +0000", [], true));
+    synthetic.push(message("newsletter", "Weekly <weekly@example.test>", owner, "Mon, 01 Jan 2024 10:00:00 +0000", [{ name: "List-Id", value: "weekly.example.test" }]));
+
+    const narrowSample = synthetic.filter((item) => item.id.startsWith("burst-"));
+    const narrowControl = diagnoseAddress(narrowSample, "control@example.test");
+    const broadControl = diagnoseAddress(synthetic, "control@example.test");
+    const analysis = analyzeDiscovery(synthetic);
+    expect(narrowControl.status).toBe("not-sampled");
+    expect(broadControl.status).toBe("displayed");
+    expect(analysis.candidates.find((candidate) => candidate.address === "long@example.test")).toMatchObject({
+      sent: 10,
+      received: 10,
+      dates: 10,
+      years: 10,
+    });
+    expect(analysis.candidates.findIndex((candidate) => candidate.address === "long@example.test"))
+      .toBeLessThan(analysis.candidates.findIndex((candidate) => candidate.address === "busy@example.test"));
+    expect(analysis.candidates.filter((candidate) => candidate.name === "Same Name")).toHaveLength(2);
+    expect(countDistinctObservedAddresses(synthetic)).toBeGreaterThan(5);
+    expect(analysis.diagnostics.excludedGroup).toBe(1);
+    expect(analysis.diagnostics.excludedBulk).toBe(1);
+    expect(JSON.stringify(broadControl)).not.toContain("control@example.test");
   });
 });

@@ -1,3 +1,12 @@
+import {
+  BROADER_EXPERIMENT_BATCH_WINDOWS,
+  BROADER_EXPERIMENT_LIST_PAGES,
+  BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH,
+  BROADER_EXPERIMENT_WINDOWS,
+  MAX_EXPERIMENT_DETAIL_CAP,
+  broaderExperimentQuota,
+  type BroaderExperimentStats,
+} from "./experiment";
 import { enrichmentTargets } from "./discovery";
 import { AuthError } from "./oauth";
 
@@ -23,12 +32,32 @@ export type DiscoveryMessage = {
 
 export class ApiError extends Error {}
 
-async function get<T>(path: string, token: string): Promise<T> {
+type RequestMeter = {
+  attempts: number;
+  maxAttempts: number;
+  listAttempts: number;
+  detailAttempts: number;
+};
+
+async function get<T>(path: string, token: string, meter?: RequestMeter): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${API}${path}`, {
-      headers: { Authorization: ["Bearer", token].join(" ") },
-      cache: "no-store",
-    });
+    if (meter) {
+      if (meter.attempts >= meter.maxAttempts) throw new ApiError("Gmail request budget reached");
+      meter.attempts++;
+      if (path.startsWith("/messages?")) meter.listAttempts++;
+      else if (path.startsWith("/messages/")) meter.detailAttempts++;
+    }
+    let res: Response;
+    try {
+      res = await fetch(`${API}${path}`, {
+        headers: { Authorization: ["Bearer", token].join(" ") },
+        cache: "no-store",
+      });
+    } catch {
+      if (!meter || attempt === 2) throw new ApiError("Gmail API request failed");
+      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+      continue;
+    }
     if (res.status === 401) throw new AuthError("Unauthorized");
     if (res.ok) return (await res.json()) as T;
 
@@ -126,16 +155,20 @@ export type SamplingStats = {
 
 type Summary = { id: string; threadId?: string };
 
-async function listIds(token: string, q: string, limit: number): Promise<Summary[]> {
+async function listIds(token: string, q: string, limit: number, meter?: RequestMeter): Promise<Summary[]> {
   const found: Summary[] = [];
   let pageToken: string | undefined;
+  let pages = 0;
   do {
     const params = new URLSearchParams({ maxResults: String(limit - found.length), q });
     if (pageToken) params.set("pageToken", pageToken);
-    const page = await get<{ messages?: Summary[]; nextPageToken?: string }>(`/messages?${params}`, token);
-    found.push(...(page.messages ?? []).slice(0, limit - found.length));
+    const page = await get<{ messages?: Summary[]; nextPageToken?: string }>(`/messages?${params}`, token, meter);
+    pages++;
+    for (const message of page.messages ?? []) {
+      if (!found.some((item) => item.id === message.id) && found.length < limit) found.push(message);
+    }
     pageToken = page.nextPageToken;
-  } while (pageToken && found.length < limit);
+  } while (pageToken && found.length < limit && pages < (meter ? BROADER_EXPERIMENT_LIST_PAGES : Infinity));
   return found;
 }
 
@@ -259,6 +292,119 @@ export async function fetchDiscoverySample(
     messages.push(...extra);
   }
   return { messages, stats };
+}
+
+type ExperimentWindow = { after: number; before: number };
+
+function experimentWindows(anchor: number): ExperimentWindow[] {
+  const date = new Date(anchor);
+  return Array.from({ length: BROADER_EXPERIMENT_WINDOWS }, (_, index) => {
+    const end = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - index + 1, 1);
+    const start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - index, 1);
+    return {
+      after: Math.floor(start / 1000),
+      before: Math.floor(Math.min(end, anchor) / 1000),
+    };
+  });
+}
+
+async function mapBounded<T, R>(values: T[], concurrency: number, fn: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await fn(values[index]);
+    }
+  }));
+  return results;
+}
+
+/**
+ * Fetches one bounded monthly batch for a local-only, opt-in coverage experiment.
+ * The complete 10-year plan never requests more than `cap` unique message details.
+ */
+export async function fetchBroaderMetadataBatch(
+  token: string,
+  cap: number,
+  startWindow: number,
+  windowCount: number,
+  anchor: number,
+): Promise<{ messages: DiscoveryMessage[]; stats: BroaderExperimentStats }> {
+  const boundedCap = Math.max(1, Math.min(Math.floor(cap), MAX_EXPERIMENT_DETAIL_CAP));
+  if (!Number.isInteger(startWindow) || startWindow < 0 || startWindow >= BROADER_EXPERIMENT_WINDOWS ||
+    !Number.isInteger(windowCount) || windowCount < 1 || windowCount > BROADER_EXPERIMENT_BATCH_WINDOWS ||
+    startWindow + windowCount > BROADER_EXPERIMENT_WINDOWS ||
+    !Number.isFinite(anchor) || anchor > Date.now() + 60_000 || anchor < Date.now() - 10 * 366 * 24 * 60 * 60 * 1000) {
+    throw new ApiError("Invalid experiment batch");
+  }
+
+  const meter: RequestMeter = {
+    attempts: 0,
+    maxAttempts: BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH,
+    listAttempts: 0,
+    detailAttempts: 0,
+  };
+  const windows = experimentWindows(anchor).slice(startWindow, startWindow + windowCount);
+  const slots = windows.flatMap((window, offset) => {
+    const windowIndex = startWindow + offset;
+    return (["sent", "received"] as const).map((direction, directionIndex) => ({
+      window,
+      direction,
+      quota: broaderExperimentQuota(boundedCap, windowIndex * 2 + directionIndex),
+    }));
+  }).filter((slot) => slot.quota > 0);
+
+  let failedListBuckets = 0;
+  const summaries = (await mapBounded(slots, 5, async (slot) => {
+    const directionQuery = slot.direction === "sent" ? "in:sent" : "-in:sent";
+    const query = `after:${slot.window.after} before:${slot.window.before} ${directionQuery} -in:drafts`;
+    try {
+      return await listIds(token, query, slot.quota, meter);
+    } catch {
+      failedListBuckets++;
+      return [];
+    }
+  })).flat();
+
+  const unique = new Map<string, Summary>();
+  let duplicateIds = 0;
+  for (const summary of summaries) {
+    if (unique.has(summary.id)) duplicateIds++;
+    else unique.set(summary.id, summary);
+  }
+  let failedDetails = 0;
+  const details = await mapBounded<Summary, DiscoveryMessage | null>([...unique.values()], 5, async ({ id, threadId }) => {
+    const params = new URLSearchParams({
+      format: "metadata",
+      fields: "id,threadId,internalDate,labelIds,payload(headers)",
+    });
+    for (const header of DETAIL_HEADERS) params.append("metadataHeaders", header);
+    try {
+      const message = await get<DiscoveryMessage>(`/messages/${encodeURIComponent(id)}?${params}`, token, meter);
+      if (!message.threadId && threadId) return { ...message, threadId };
+      return message;
+    } catch {
+      failedDetails++;
+      return null;
+    }
+  });
+  const messages = details.filter((message): message is DiscoveryMessage => message !== null);
+  return {
+    messages,
+    stats: {
+      windowsQueried: windowCount,
+      listBucketsQueried: slots.length,
+      plannedDetails: slots.reduce((total, slot) => total + slot.quota, 0),
+      recordsFetched: messages.length,
+      duplicateIds,
+      failedListBuckets,
+      failedDetails,
+      apiRequests: meter.attempts,
+      listRequests: meter.listAttempts,
+      detailRequests: meter.detailAttempts,
+    },
+  };
 }
 
 export async function fetchHistoricalMessages(

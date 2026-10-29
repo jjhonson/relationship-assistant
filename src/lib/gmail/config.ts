@@ -1,3 +1,5 @@
+import { MAX_EXPERIMENT_DETAIL_CAP } from "./experiment";
+
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 export const MAX_SAMPLE = 50;
 export const MAX_DISCOVERY_SAMPLE = 200;
@@ -9,6 +11,7 @@ export type GmailConfig = {
   sessionSecret: string;
   sampleSize: number;
   discoverySampleSize: number;
+  experimentDetailCap: number;
 };
 
 export function clampSampleSize(raw: string | number | undefined | null): number {
@@ -21,6 +24,12 @@ export function clampDiscoverySampleSize(raw: string | number | undefined | null
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 1) return MAX_DISCOVERY_SAMPLE;
   return Math.min(Math.floor(n), MAX_DISCOVERY_SAMPLE);
+}
+
+export function clampExperimentDetailCap(raw: string | number | undefined | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return MAX_EXPERIMENT_DETAIL_CAP;
+  return Math.min(Math.floor(n), MAX_EXPERIMENT_DETAIL_CAP);
 }
 
 /** Returns config, or the names of missing environment variables. */
@@ -42,6 +51,7 @@ export function loadConfig(
       sessionSecret: env.SESSION_SECRET!,
       sampleSize: clampSampleSize(env.GMAIL_SAMPLE_SIZE),
       discoverySampleSize: clampDiscoverySampleSize(env.GMAIL_DISCOVERY_SAMPLE_SIZE),
+      experimentDetailCap: clampExperimentDetailCap(env.GMAIL_EXPERIMENT_DETAIL_CAP),
     },
   };
 }

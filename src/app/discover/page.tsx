@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { DiagnosticPanel } from "@/components/DiagnosticPanel";
+import { BroaderMetadataExperiment } from "@/components/BroaderMetadataExperiment";
 import { DiscoveryResults } from "@/components/DiscoveryResults";
 import { loadConfig } from "@/lib/gmail/config";
 import { analyzeDiscovery } from "@/lib/gmail/discovery";
@@ -90,6 +91,14 @@ export default async function DiscoverPage() {
         oldest={dates[0] ?? null}
         newest={dates[dates.length - 1] ?? null}
       />
+      {process.env.NODE_ENV === "development" && (
+        <BroaderMetadataExperiment
+          baselineMessages={result.sample.messages}
+          baselineSampling={result.sample.stats}
+          ownerAddresses={ownerAddresses}
+          detailCap={cfg.config.experimentDetailCap}
+        />
+      )}
       {process.env.NODE_ENV === "development" && <DiagnosticPanel />}
       <form action="/api/gmail/disconnect" method="post">
         <button className="rounded-lg border border-stone-300 px-4 py-2">Disconnect Gmail</button>
