@@ -133,6 +133,32 @@ describe("relationship discovery ranking", () => {
     expect(rankCandidates(messages).map((c) => c.address)).toEqual(["riley.chen@acme-corp.example.test"]);
   });
 
+  it("keeps a registrable .co.uk contact and excludes a marketing subdomain", () => {
+    const correspondent = [
+      out("uk-sent", "Alex <alex@mail.co.uk>"),
+      inc("uk-received", "Owner <owner@example.test>", "Alex <alex@mail.co.uk>"),
+    ];
+    const marketing = [
+      inc("marketing-1", "Owner <owner@example.test>", "Alex <alex@news.example.co.uk>"),
+      inc("marketing-2", "Owner <owner@example.test>", "Alex <alex@news.example.co.uk>"),
+    ];
+    const { candidates, diagnostics } = analyzeDiscovery([...correspondent, ...marketing]);
+
+    expect(candidates.map((candidate) => candidate.address)).toEqual(["alex@mail.co.uk"]);
+    expect(candidates[0].uncertainty).toBe("Repeated correspondence observed");
+    expect(diagnostics.excludedAutomated).toBe(2);
+  });
+
+  it("counts viable candidates before applying the ten-candidate display cap", () => {
+    const messages = Array.from({ length: 12 }, (_, i) =>
+      out(`contact-${i}`, `Person ${i} <person${i}@example.test>`),
+    );
+    const { candidates, diagnostics } = analyzeDiscovery(messages);
+
+    expect(candidates).toHaveLength(10);
+    expect(diagnostics.candidatesSurviving).toBe(12);
+  });
+
   it("does not let a high-volume marketing sender outrank a modest real correspondent", () => {
     const spam = Array.from({ length: 30 }, (_, i) =>
       message(`m${i}`, "Gadgets Weekly <gadgets@shopco.example.test>", "Owner <owner@example.test>", `Mon, ${String((i % 28) + 1).padStart(2, "0")} Jan 2024 10:00:00 +0000`),

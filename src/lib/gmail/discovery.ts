@@ -1,4 +1,5 @@
 import type { DiscoveryMessage } from "./messages";
+import { getSubdomain } from "tldts";
 
 export type DiscoveryCandidate = {
   address: string;
@@ -112,9 +113,10 @@ const AUTOMATED_NAME = /\b(?:no[- ]?reply|do not reply|newsletter|notifications?
 
 function isAutomationAddress(address: string, name = ""): boolean {
   const [local, domain = ""] = address.toLowerCase().split("@");
+  const subdomain = getSubdomain(domain);
   return AUTOMATED_LOCAL.test(local) ||
-    (domain.split(".").length >= 3 && MARKETING_SUBDOMAIN.test(domain)) ||
-     AUTOMATED_NAME.test(name);
+    Boolean(subdomain && MARKETING_SUBDOMAIN.test(`${subdomain}.`)) ||
+    AUTOMATED_NAME.test(name);
 }
 
 function isAutoSubmitted(value: string): boolean {
@@ -311,7 +313,7 @@ export function analyzeDiscovery(messages: DiscoveryMessage[], maximum = 10): Di
       a.address.localeCompare(b.address),
     )
     .slice(0, Math.max(0, Math.min(Math.floor(maximum), 10)));
-  diagnostics.candidatesSurviving = ranked.length;
+  diagnostics.candidatesSurviving = viable.length;
   return { candidates: ranked, diagnostics };
 }
 
