@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchHistoricalMessages, type DiscoveryMessage } from "./messages";
-import { rankCandidates } from "./discovery";
+import { fetchDiscoverySample, fetchHistoricalMessages, type DiscoveryMessage } from "./messages";
+import { analyzeDiscovery, rankCandidates } from "./discovery";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -54,7 +54,7 @@ describe("relationship discovery ranking", () => {
 
   it("ignores drafts when determining self addresses and aggregating", () => {
     const draft = { ...inc("d", "Alex <alex@example.test>", owner), labelIds: ["DRAFT"] };
-    expect(rankCandidates([draft, inc("i", "Owner <owner@example.test>")]).map((c) => c.address)).toEqual(["alex@example.test"]);
+    expect(rankCandidates([draft, out("i", "Alex <alex@example.test>")]).map((c) => c.address)).toEqual(["alex@example.test"]);
     expect(rankCandidates([draft])).toEqual([]);
   });
 
@@ -90,72 +90,187 @@ describe("relationship discovery ranking", () => {
     expect(candidates[0].reasons.join(" ")).toContain("both sent and received");
   });
 
-  it("keeps a single formal exchange as a possible contact without inferring a relationship", () => {
-    const candidates = rankCandidates([
-      message(
-        "recruiter",
-        "Jordan Lee <jordan@careers.example.test>",
-        "Owner <owner@example.test>",
-        "Fri, 05 Jan 2024 10:00:00 +0000",
-      ),
-    ]);
+  it("does not recommend a lone inbound message but keeps one-way sent contacts as possible", () => {
+    const lone = message("recruiter", "Jordan Lee <jordan@careers.example.test>", "Owner <owner@example.test>", "Fri, 05 Jan 2024 10:00:00 +0000");
+    expect(rankCandidates([lone])).toEqual([]);
 
-    expect(candidates).toHaveLength(1);
-    expect(candidates[0].uncertainty).toBe("Possible");
-    expect(candidates[0].received).toBe(1);
-    expect(candidates[0].reasons).toEqual([
-      "1 message from this address was observed.",
-      "They span 1 date and 1 thread.",
+    const [candidate] = rankCandidates([out("o", "Casey <casey@example.test>")]);
+    expect(candidate.uncertainty).toBe("Possible");
+    expect(candidate.sent).toBe(1);
+    expect(candidate.reasons[0]).toContain("no incoming messages were seen in the sample");
+  });
+
+  it("does not assert reciprocity from a sparse sample", () => {
+    const [candidate] = rankCandidates([out("o", "Casey <casey@example.test>")]);
+    expect(candidate.received).toBe(0);
+    expect(candidate.uncertainty).not.toBe("Repeated correspondence observed");
+    const [two] = rankCandidates([out("o", "Casey <casey@example.test>"), inc("i", "Owner <owner@example.test>", "Casey <casey@example.test>")].map((m) => ({ ...m, threadId: "same" })));
+    expect(two.uncertainty).toBe("Two-way exchange observed");
+  });
+
+  it("excludes generic store, support and marketing-subdomain senders without List-Unsubscribe", () => {
+    const senders = [
+      "Shop <store@example.test>",
+      "Help <support@example.test>",
+      "Deals <hello@e.example.test>",
+      "Acme Customer Service <cs@example.test>",
+      "Orders <order-confirmation@example.test>",
+    ];
+    const messages = senders.flatMap((from, i) => [
+      message(`a${i}`, from, "Owner <owner@example.test>", "Tue, 02 Jan 2024 10:00:00 +0000"),
+      message(`b${i}`, from, "Owner <owner@example.test>", "Wed, 03 Jan 2024 10:00:00 +0000"),
     ]);
+    const { candidates, diagnostics } = analyzeDiscovery(messages);
+    expect(candidates).toEqual([]);
+    expect(diagnostics.excludedAutomated).toBe(10);
+  });
+
+  it("keeps a real person on a business domain", () => {
+    const messages = [
+      out("o", "Riley Chen <riley.chen@acme-corp.example.test>"),
+      inc("i", "Owner <owner@example.test>", "Riley Chen <riley.chen@acme-corp.example.test>"),
+    ];
+    expect(rankCandidates(messages).map((c) => c.address)).toEqual(["riley.chen@acme-corp.example.test"]);
+  });
+
+  it("keeps a registrable .co.uk contact and excludes a marketing subdomain", () => {
+    const correspondent = [
+      out("uk-sent", "Alex <alex@mail.co.uk>"),
+      inc("uk-received", "Owner <owner@example.test>", "Alex <alex@mail.co.uk>"),
+    ];
+    const marketing = [
+      inc("marketing-1", "Owner <owner@example.test>", "Alex <alex@news.example.co.uk>"),
+      inc("marketing-2", "Owner <owner@example.test>", "Alex <alex@news.example.co.uk>"),
+    ];
+    const { candidates, diagnostics } = analyzeDiscovery([...correspondent, ...marketing]);
+
+    expect(candidates.map((candidate) => candidate.address)).toEqual(["alex@mail.co.uk"]);
+    expect(candidates[0].uncertainty).toBe("Repeated correspondence observed");
+    expect(diagnostics.excludedAutomated).toBe(2);
+  });
+
+  it("counts viable candidates before applying the ten-candidate display cap", () => {
+    const messages = Array.from({ length: 12 }, (_, i) =>
+      out(`contact-${i}`, `Person ${i} <person${i}@example.test>`),
+    );
+    const { candidates, diagnostics } = analyzeDiscovery(messages);
+
+    expect(candidates).toHaveLength(10);
+    expect(diagnostics.candidatesSurviving).toBe(12);
+  });
+
+  it("does not let a high-volume marketing sender outrank a modest real correspondent", () => {
+    const spam = Array.from({ length: 30 }, (_, i) =>
+      message(`m${i}`, "Gadgets Weekly <gadgets@shopco.example.test>", "Owner <owner@example.test>", `Mon, ${String((i % 28) + 1).padStart(2, "0")} Jan 2024 10:00:00 +0000`),
+    );
+    const real = [out("o", "Sam Park <sam@example.test>")];
+    const { candidates, diagnostics } = analyzeDiscovery([...spam, ...real]);
+    expect(candidates.map((c) => c.address)).toEqual(["sam@example.test"]);
+    expect(diagnostics.excludedOneWayHighVolume).toBe(1);
+    expect(diagnostics.sentExamined).toBe(1);
+    expect(diagnostics.receivedExamined).toBe(30);
   });
 });
 
 describe("historical metadata sampling", () => {
-  it("covers multiple calendar years, follows pagination, and requests metadata headers only", async () => {
-    const requests: URL[] = [];
+  const NOW = new Date("2025-06-15T00:00:00Z");
+  const owner = "Owner <owner@example.test>";
+  const T0 = Date.parse("2016-01-01T00:00:00Z");
+
+  type Box = { id: string; date: number; labelIds: string[]; from: string; to: string };
+
+  /** Synthetic mailbox: a 10-year two-way correspondent plus year-end-heavy newsletters. */
+  function buildMailbox(): Box[] {
+    const box: Box[] = [];
+    let n = 0;
+    for (let q = 0; q < 38; q++) {
+      const date = Date.UTC(2016 + Math.floor(q / 4), (q % 4) * 3 + 1, 10);
+      box.push({ id: `s${n++}`, date, labelIds: ["SENT"], from: owner, to: "Dana Wu <dana@example.test>" });
+      box.push({ id: `r${n++}`, date: date + 86_400_000, labelIds: ["INBOX"], from: "Dana Wu <dana@example.test>", to: owner });
+      box.push({ id: `s${n++}`, date: date + 2 * 86_400_000, labelIds: ["SENT"], from: owner, to: `Friend${q} <friend${q}@example.test>` });
+    }
+    for (let year = 2016; year <= 2025; year++) {
+      for (let i = 0; i < 60; i++) {
+        box.push({ id: `n${n++}`, date: Date.UTC(year, 11, 1 + (i % 30)), labelIds: ["INBOX"], from: "Deals <deals@promo.example.test>", to: owner });
+      }
+    }
+    return box.filter((m) => m.date >= T0 && m.date < NOW.getTime());
+  }
+
+  function mockGmail(box: Box[], requests: URL[]) {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
       requests.push(url);
       if (url.pathname.endsWith("/messages")) {
-        const year = Number(url.searchParams.get("q")?.match(/after:(\d{4})/)?.[1]);
-        const firstYearPage = year === 2025 && !url.searchParams.has("pageToken");
-        const ids = firstYearPage ? ["y2025a"] : year === 2025 ? ["y2025b"] : [`y${year}a`, `y${year}b`];
-        const page = {
-          messages: ids.map((id) => ({ id, threadId: `t-${id}` })),
-          ...(firstYearPage ? { nextPageToken: "next-page" } : {}),
-        };
-        return new Response(JSON.stringify(page), { status: 200 });
+        const q = url.searchParams.get("q") ?? "";
+        const after = Number(q.match(/after:(\d+)/)?.[1] ?? 0) * 1000;
+        const before = Number(q.match(/before:(\d+)/)?.[1] ?? Infinity) * 1000;
+        const from = q.match(/from:(\S+)/)?.[1];
+        const sentOnly = q.includes("in:sent") && !q.includes("-in:sent");
+        const max = Number(url.searchParams.get("maxResults"));
+        const hits = box
+          .filter((m) => m.date >= after && m.date < before)
+          .filter((m) => !sentOnly || m.labelIds.includes("SENT"))
+          .filter((m) => !q.includes("-in:sent") || !m.labelIds.includes("SENT"))
+          .filter((m) => !from || m.from.includes(`<${from}>`))
+          .sort((a, b) => b.date - a.date)
+          .slice(0, max);
+        return new Response(JSON.stringify({ messages: hits.map((m) => ({ id: m.id, threadId: `t-${m.id}` })) }), { status: 200 });
       }
       const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+      const m = box.find((item) => item.id === id)!;
       return new Response(JSON.stringify({
         id,
         threadId: `t-${id}`,
-        internalDate: String(Date.parse("2025-01-02T00:00:00Z")),
-        labelIds: ["INBOX"],
-        payload: { headers: [{ name: "From", value: "Person <person@example.test>" }] },
+        internalDate: String(m.date),
+        labelIds: m.labelIds,
+        payload: { headers: [{ name: "From", value: m.from }, { name: "To", value: m.to }] },
       }), { status: 200 });
     }));
+  }
 
-    const messages = await fetchHistoricalMessages("fake-token", 20, new Date("2025-06-01T00:00:00Z"));
-    const listRequests = requests.filter((url) => url.pathname.endsWith("/messages"));
+  it("spreads Sent sampling across quarters, stays bounded, and requests metadata headers only", async () => {
+    const requests: URL[] = [];
+    mockGmail(buildMailbox(), requests);
+    const { messages, stats } = await fetchDiscoverySample("fake-token", 100, NOW);
     const details = requests.filter((url) => /\/messages\/[^/]+$/.test(url.pathname));
 
-    expect(messages).toHaveLength(20);
-    expect(new Set(listRequests.map((url) => url.searchParams.get("q")?.match(/after:(\d{4})/)?.[1])).size).toBe(10);
-    expect(listRequests.some((url) => url.searchParams.get("pageToken") === "next-page")).toBe(true);
-    expect(details).toHaveLength(20);
+    expect(messages.length).toBeLessThanOrEqual(100);
+    expect(details).toHaveLength(messages.length);
+    expect(stats.windowsQueried).toBe(40);
+    const sentMonths = new Set(
+      messages.filter((m) => m.labelIds?.includes("SENT")).map((m) => new Date(Number(m.internalDate)).toISOString().slice(0, 7)),
+    );
+    const sentYears = new Set([...sentMonths].map((month) => month.slice(0, 4)));
+    expect(sentYears.size).toBeGreaterThanOrEqual(9);
+    expect(sentMonths.size).toBeGreaterThanOrEqual(30);
     expect(details[0].searchParams.get("format")).toBe("metadata");
-    expect(details[0].searchParams.getAll("metadataHeaders")).toEqual([
-      "From",
-      "To",
-      "Cc",
-      "Date",
-      "List-Id",
-      "List-Unsubscribe",
-      "Precedence",
-      "Auto-Submitted",
-      "X-Auto-Response-Suppress",
-    ]);
+    expect(details[0].searchParams.getAll("metadataHeaders")).toContain("To");
     expect(details[0].searchParams.get("fields")).not.toContain("body");
+    expect(requests.filter((u) => u.pathname.endsWith("/messages")).length).toBeLessThanOrEqual(100);
+  });
+
+  it("recovers a multi-year two-way correspondent without naming them and ignores year-end newsletters", async () => {
+    mockGmail(buildMailbox(), []);
+    const { messages } = await fetchDiscoverySample("fake-token", 200, NOW);
+    const { candidates, diagnostics } = analyzeDiscovery(messages);
+    expect(candidates[0]).toMatchObject({ address: "dana@example.test", uncertainty: "Repeated correspondence observed" });
+    expect(candidates.some((c) => c.address.includes("deals"))).toBe(false);
+    expect(diagnostics.distinctMonths).toBeGreaterThan(20);
+    expect(diagnostics.sentExamined).toBeGreaterThan(0);
+    expect(diagnostics.receivedExamined).toBeGreaterThan(0);
+  });
+
+  it("honors a small ceiling and wrapper", async () => {
+    const requests: URL[] = [];
+    mockGmail(buildMailbox(), requests);
+    const messages = await fetchHistoricalMessages("fake-token", 7, NOW);
+    expect(messages.length).toBeLessThanOrEqual(7);
+  });
+
+  it("does not retry-loop forever on Gmail errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 400 })));
+    await expect(fetchDiscoverySample("fake-token", 10, NOW)).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

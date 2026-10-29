@@ -2,8 +2,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { DiscoveryResults } from "@/components/DiscoveryResults";
 import { loadConfig } from "@/lib/gmail/config";
-import { rankCandidates } from "@/lib/gmail/discovery";
-import { fetchHistoricalMessages } from "@/lib/gmail/messages";
+import { analyzeDiscovery } from "@/lib/gmail/discovery";
+import { fetchDiscoverySample } from "@/lib/gmail/messages";
 import { AuthError } from "@/lib/gmail/oauth";
 import { CRED_COOKIE, credentialPageAction, readCreds } from "@/lib/gmail/session";
 
@@ -35,11 +35,11 @@ export default async function DiscoverPage() {
   }
 
   let result:
-    | { kind: "ready"; messages: Awaited<ReturnType<typeof fetchHistoricalMessages>> }
+    | { kind: "ready"; sample: Awaited<ReturnType<typeof fetchDiscoverySample>> }
     | { kind: "error"; message: string; href: string; action: string };
   try {
-    const messages = await fetchHistoricalMessages(creds.accessToken, cfg.config.discoverySampleSize);
-    result = { kind: "ready", messages };
+    const sample = await fetchDiscoverySample(creds.accessToken, cfg.config.discoverySampleSize);
+    result = { kind: "ready", sample };
   } catch (error) {
     result = {
       kind: "error",
@@ -63,7 +63,8 @@ export default async function DiscoverPage() {
     );
   }
 
-  const dates = result.messages
+  const { candidates, diagnostics } = analyzeDiscovery(result.sample.messages);
+  const dates = result.sample.messages
     .map((message) => message.internalDate ? new Date(Number(message.internalDate)) : null)
     .filter((date): date is Date => date !== null && !Number.isNaN(date.getTime()))
     .map((date) => date.toISOString().slice(0, 10))
@@ -78,8 +79,10 @@ export default async function DiscoverPage() {
         </p>
       </header>
       <DiscoveryResults
-        candidates={rankCandidates(result.messages)}
-        examined={result.messages.length}
+        candidates={candidates}
+        diagnostics={diagnostics}
+        sampling={result.sample.stats}
+        examined={result.sample.messages.length}
         oldest={dates[0] ?? null}
         newest={dates[dates.length - 1] ?? null}
       />
