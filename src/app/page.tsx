@@ -22,6 +22,12 @@ export default function Dashboard() {
       >
         Discover relationships
       </Link>
+      <Link
+        href="/pilot"
+        className="mb-6 ml-3 inline-block rounded-lg border border-indigo-700 px-4 py-2 font-medium text-indigo-700 hover:bg-indigo-50"
+      >
+        Try fictional context pilot
+      </Link>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {contacts.map((c) => (
           <li key={c.id}>
