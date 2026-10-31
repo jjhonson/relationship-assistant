@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clampDiscoverySampleSize, clampSampleSize, loadConfig } from "./config";
+import { clampDiscoverySampleSize, clampExperimentDetailCap, clampSampleSize, loadConfig } from "./config";
 import { seal, unseal } from "./crypto";
 import { summarize } from "./messages";
 import { AuthError, buildAuthUrl, refresh } from "./oauth";
@@ -29,6 +29,13 @@ describe("config", () => {
     expect(clampDiscoverySampleSize(undefined)).toBe(200);
     const config = loadConfig(env);
     expect(config.ok && config.config.discoverySampleSize).toBe(200);
+  });
+  it("keeps the broader experiment detail cap configurable but never above 1,000", () => {
+    expect(clampExperimentDetailCap("500")).toBe(500);
+    expect(clampExperimentDetailCap("3000")).toBe(1_000);
+    expect(clampExperimentDetailCap("0")).toBe(1_000);
+    const config = loadConfig({ ...env, GMAIL_EXPERIMENT_DETAIL_CAP: "250" });
+    expect(config.ok && config.config.experimentDetailCap).toBe(250);
   });
   it("reports missing variables by name only", () => {
     const r = loadConfig({});
