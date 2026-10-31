@@ -27,6 +27,23 @@ npm run dev        # http://localhost:3000
 | `npm run typecheck` | TypeScript check |
 | `npm test` | Run unit tests (Vitest) |
 
+## Codespaces dev start/stop (run on the Mac host)
+
+Optional convenience scripts (bash + [GitHub CLI](https://cli.github.com/), `gh auth login` done). **Mac-local:** `scripts/dev-start.sh` and `scripts/dev-stop.sh`. They run `scripts/remote-dev.sh` **inside the Codespace** over `gh codespace ssh`; do not run that file on the Mac.
+
+```bash
+scripts/dev-start.sh [--name CODESPACE] [--dry-run]   # then open http://localhost:3000
+scripts/dev-stop.sh  [--name CODESPACE] [--force] [--dry-run]
+```
+
+- The Codespace is auto-selected if the repository (`RA_REPO`, default `jjhonson/relationship-assistant`) has exactly one; otherwise pass `--name` or `RA_CODESPACE`. Other overrides: `RA_PORT`, `RA_REMOTE_DIR` (default `/workspaces/relationship-assistant`), `RA_STATE_DIR`.
+- Start is idempotent: it reuses a running Codespace, dev server (PID file in the Codespace) and port forward (PID file in `~/.local/state/relationship-assistant`), and fails clearly if `localhost:3000` is held by something else. It finishes by checking `http://localhost:3000`, so the Gmail callback stays `http://localhost:3000/api/gmail/callback`.
+- It never switches, pulls or merges branches (it prints the current branch/status), never reads or copies `.env.local`, and never touches Gmail. Connect/disconnect Gmail manually.
+- Stop sends SIGTERM only to the recorded dev-server process group and the recorded forward (both verified by command line), then stops that Codespace. If the server will not exit, rerun with `--force`; the Codespace is left running on failure.
+- `next-env.d.ts` is rewritten by Next.js. On stop it is restored with `git checkout` only if every change is a generated reference/import line; any other edit is kept with a warning.
+- Manual recovery: Mac `kill "$(cat ~/.local/state/relationship-assistant/forward.pid)"`; Codespace `gh codespace ssh -c NAME -- 'kill -TERM -- -$(cat /tmp/relationship-assistant-dev.pid)'`; then `gh codespace stop -c NAME`. Dev-server log: `/tmp/relationship-assistant-dev.log` in the Codespace.
+- Tests (`src/scripts/dev-workflow.test.ts`) use a fake `gh` and dry-run mode; no Gmail or real Codespace needed.
+
 ## Structure
 
 - `src/app/page.tsx` – "Your Relationships" dashboard
