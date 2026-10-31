@@ -9,8 +9,13 @@ import {
 } from "@/lib/gmail/discovery";
 import {
   BROADER_EXPERIMENT_BATCH_WINDOWS,
+  BROADER_EXPERIMENT_CONCURRENCY,
   BROADER_EXPERIMENT_LIST_PAGES,
+  BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH,
+  BROADER_EXPERIMENT_MAX_DETAILS_PER_BATCH,
   BROADER_EXPERIMENT_WINDOWS,
+  BROADER_EXPERIMENT_REQUEST_ATTEMPTS,
+  broaderExperimentQuota,
   isBroaderExperimentComplete,
   type BroaderExperimentStats,
 } from "@/lib/gmail/experiment";
@@ -33,6 +38,8 @@ type RunState = {
   status: "running" | "complete" | "partial";
   batchesFinished: number;
   failedBatches: number;
+  unreportedBatches: number;
+  sessionExpired: boolean;
   stats: BroaderExperimentStats;
 };
 
@@ -98,11 +105,13 @@ export function BroaderMetadataExperiment({
   };
   const baselineYears = yearDistribution(baselineMessages);
   const broaderYears = yearDistribution(messages);
-  const listSlots = Math.min(detailCap, BROADER_EXPERIMENT_WINDOWS * 2);
-  const normalRequests = listSlots + detailCap;
-  const normalQuota = listSlots * 5 + detailCap * 20;
-  const maximumAttempts = listSlots * BROADER_EXPERIMENT_LIST_PAGES * 3 + detailCap * 3;
-  const maximumQuota = listSlots * BROADER_EXPERIMENT_LIST_PAGES * 3 * 5 + detailCap * 3 * 20;
+  const listSlots = Array.from({ length: BROADER_EXPERIMENT_WINDOWS * 2 }, (_, slot) =>
+    broaderExperimentQuota(detailCap, slot) > 0 ? 1 : 0,
+  ).reduce<number>((total, active) => total + active, 0);
+  const maxListRequests = listSlots * BROADER_EXPERIMENT_LIST_PAGES;
+  const maximumRequests = maxListRequests + detailCap;
+  const maximumQuota = maxListRequests * 5 + detailCap * 20;
+  const maximumAttempts = maximumRequests * BROADER_EXPERIMENT_REQUEST_ATTEMPTS;
   const baselineDateTotals = datesAndYears(baselineMessages);
   const baselineRequests =
     1 + baselineSampling.windowsQueried + baselineSampling.enrichedContacts +
@@ -119,17 +128,27 @@ export function BroaderMetadataExperiment({
     setRunning(true);
     setMessages([]);
     setControl(null);
-    setRun({ status: "running", batchesFinished: 0, failedBatches: 0, stats: EMPTY_STATS });
+    setRun({
+      status: "running",
+      batchesFinished: 0,
+      failedBatches: 0,
+      unreportedBatches: 0,
+      sessionExpired: false,
+      stats: EMPTY_STATS,
+    });
     const gathered: DiscoveryMessage[] = [];
     const seen = new Set<string>();
     let totals = EMPTY_STATS;
     let completed = 0;
     let failed = 0;
+    let unreported = 0;
+    let sessionExpired = false;
     let anchor: number | undefined;
 
     for (let startWindow = 0; startWindow < BROADER_EXPERIMENT_WINDOWS; startWindow += BROADER_EXPERIMENT_BATCH_WINDOWS) {
       if (stopRequested.current) break;
       let stopAfterBatch = false;
+      let receivedStats = false;
       try {
         const response = await fetch("/api/gmail/experiment", {
           method: "POST",
@@ -143,6 +162,7 @@ export function BroaderMetadataExperiment({
         });
         if (response.status === 401) {
           failed++;
+          sessionExpired = true;
           stopAfterBatch = true;
           throw new Error("Session expired");
         }
@@ -152,6 +172,7 @@ export function BroaderMetadataExperiment({
           messages: DiscoveryMessage[];
           stats: BroaderExperimentStats;
         };
+        receivedStats = true;
         anchor = result.anchor;
         let clientDuplicates = 0;
         for (const message of result.messages) {
@@ -170,10 +191,18 @@ export function BroaderMetadataExperiment({
           result.stats.failedListBuckets === result.stats.listBucketsQueried) stopAfterBatch = true;
       } catch {
         if (!stopAfterBatch) failed++;
+        if (!receivedStats) unreported++;
       }
       completed++;
       setMessages([...gathered]);
-      setRun({ status: "running", batchesFinished: completed, failedBatches: failed, stats: totals });
+      setRun({
+        status: "running",
+        batchesFinished: completed,
+        failedBatches: failed,
+        unreportedBatches: unreported,
+        sessionExpired,
+        stats: totals,
+      });
       if (stopAfterBatch) break;
     }
 
@@ -181,6 +210,8 @@ export function BroaderMetadataExperiment({
       status: isBroaderExperimentComplete(completed, failed) ? "complete" : "partial",
       batchesFinished: completed,
       failedBatches: failed,
+      unreportedBatches: unreported,
+      sessionExpired,
       stats: totals,
     });
     setRunning(false);
@@ -208,16 +239,32 @@ export function BroaderMetadataExperiment({
         <p className="mt-1 text-sm text-stone-700">
           Off by default. When you confirm, this manually scans monthly Sent and inbound metadata windows across up to ten years.
           It reads headers, labels, dates, and thread IDs only—never bodies or attachments—and keeps results in this page&apos;s memory.
+          The cooperative UI plan uses up to 24 sequential batches; the server enforces each batch&apos;s limits, not a cross-request
+          account/session ledger, so replaying or starting another run can exceed this plan&apos;s detail cap.
         </p>
       </div>
       <div className="rounded-xl bg-white p-4 text-sm text-stone-700">
         <p>
-          At the configured {detailCap.toLocaleString()} detail cap, the plan makes up to {listSlots} monthly list requests
-          and {detailCap.toLocaleString()} metadata detail requests: about {normalRequests.toLocaleString()} Gmail API requests
-          ({normalQuota.toLocaleString()} quota units assuming 5 units per list and 20 per metadata get). Two list pages and
-          up to three attempts per request give a conservative ceiling of {maximumAttempts.toLocaleString()} API attempts
-          ({maximumQuota.toLocaleString()} quota units). A full run may take minutes; rate limits, retries, or interruption can leave it partial.
+          At the configured {detailCap.toLocaleString()} detail cap, the UI plan has {listSlots} active month/direction list buckets,
+          each with up to {BROADER_EXPERIMENT_LIST_PAGES} pages, and up to {detailCap.toLocaleString()} metadata detail requests:
+          up to {maximumRequests.toLocaleString()} Gmail API requests before retries ({maximumQuota.toLocaleString()} quota units,
+          assuming 5 units per list page and 20 per metadata get). Up to {BROADER_EXPERIMENT_REQUEST_ATTEMPTS} attempts per request
+          give a conservative UI-plan ceiling of {maximumAttempts.toLocaleString()} API attempts
+          ({(maximumQuota * BROADER_EXPERIMENT_REQUEST_ATTEMPTS).toLocaleString()} quota units).
+          Each batch covers at most {BROADER_EXPERIMENT_BATCH_WINDOWS} months, lists at most
+          {BROADER_EXPERIMENT_BATCH_WINDOWS * 2 * BROADER_EXPERIMENT_LIST_PAGES} pages, fetches at most
+          {BROADER_EXPERIMENT_MAX_DETAILS_PER_BATCH} metadata details at the
+          default cap, and makes at most {BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH} Gmail attempts with at most
+          {BROADER_EXPERIMENT_CONCURRENCY} concurrent calls.
+          These are per-batch limits; repeating batches is not tracked across requests. A full run may take minutes; rate limits,
+          retries, or interruption can leave it partial.
           This is not a full-mailbox scan.
+        </p>
+        <p className="mt-2">
+          Each direction receives half the detail budget (Sent gets the extra record when odd), spread across the full date range.
+          Within a month, selected IDs are evenly spaced in Gmail&apos;s newest-first result order across up to two pages (at most
+          1,000 listed IDs). Older mail beyond those pages, Gmail search behavior, and the bounded monthly sample can still hide
+          correspondents or favor recent activity.
         </p>
         <p className="mt-2">
           Additional account-owner aliases, only if you have verified them (comma or space separated):
@@ -239,8 +286,9 @@ export function BroaderMetadataExperiment({
           className="mt-1"
         />
         <span>
-          I explicitly confirm this local experiment may make up to {detailCap.toLocaleString()} Gmail metadata detail
-          requests across the selected historical windows. I understand this can use quota and does not measure relationship strength.
+          I explicitly confirm this cooperative UI run may request up to {detailCap.toLocaleString()} Gmail metadata details across
+          the selected historical windows. Each batch is independently bounded, but replaying requests or starting another run can
+          exceed this per-run plan. I understand this can use quota and does not measure relationship strength.
         </span>
       </label>
       <div className="flex flex-wrap gap-2">
@@ -264,17 +312,26 @@ export function BroaderMetadataExperiment({
           <p>
             {run.status === "running" ? "Scanning" : run.status === "complete" ? "Scan complete for the requested windows" : "Partial scan"}:
             {" "}{run.batchesFinished} of {BROADER_EXPERIMENT_WINDOWS / BROADER_EXPERIMENT_BATCH_WINDOWS} batches finished;
-            {" "}{run.stats.listBucketsQueried} of {listSlots} budgeted direction/month list buckets attempted;
-            {" "}{run.stats.recordsFetched} unique metadata records returned; {run.stats.failedListBuckets} list buckets and
-            {" "}{run.stats.failedDetails} detail requests failed; {run.stats.apiRequests} Gmail API attempts.
+            {" "}{run.stats.listBucketsQueried} of {listSlots} budgeted direction/month list buckets reported (lower bound);
+            {" "}{run.stats.recordsFetched} unique metadata records reported (lower bound); {run.stats.failedListBuckets} reported list buckets and
+            {" "}{run.stats.failedDetails} reported detail requests failed; {run.stats.apiRequests} reported Gmail API attempts (lower bound).
           </p>
           {run.status !== "complete" && (
             <p className="text-amber-800">
               Coverage is incomplete: {run.failedBatches ? `${run.failedBatches} batch(es) had failures. ` : ""}
+              {run.unreportedBatches ? `${run.unreportedBatches} batch response(s) lacked statistics; failed batches may have consumed additional quota. ` : ""}
               {run.batchesFinished < BROADER_EXPERIMENT_WINDOWS / BROADER_EXPERIMENT_BATCH_WINDOWS
                 ? "The scan was stopped or interrupted before all windows were attempted. "
                 : ""}
               Missing metadata is not evidence that no correspondence exists.
+            </p>
+          )}
+          {run.sessionExpired && (
+            <p role="alert" className="text-amber-900">
+              Your Gmail session expired or was revoked. Refresh the session or reconnect Gmail before resuming the scan.{" "}
+              <a className="font-medium underline" href="/api/gmail/refresh?returnTo=%2Fdiscover">Refresh Gmail session</a>
+              {" or "}
+              <a className="font-medium underline" href="/api/gmail/connect">Reconnect Gmail</a>.
             </p>
           )}
           <div className="overflow-x-auto">
@@ -287,18 +344,19 @@ export function BroaderMetadataExperiment({
                 </tr>
               </thead>
               <tbody>
-                <tr><th className="py-1 pr-3 font-medium">Records fetched</th><td>{baselineMessages.length}</td><td>{messages.length}</td></tr>
+                <tr><th className="py-1 pr-3 font-medium">Records fetched / reported (lower bound)</th><td>{baselineMessages.length}</td><td>{messages.length}</td></tr>
                 <tr><th className="py-1 pr-3 font-medium">Distinct dates / years</th><td>{baselineDateTotals.dates} / {baselineDateTotals.years}</td><td>{dateTotals.dates} / {dateTotals.years}</td></tr>
                 <tr><th className="py-1 pr-3 font-medium">Distinct observed addresses</th><td>{countDistinctObservedAddresses(baselineMessages)}</td><td>{countDistinctObservedAddresses(messages)}</td></tr>
                 <tr><th className="py-1 pr-3 font-medium">Sent / received records</th><td>{baseline.diagnostics.sentExamined} / {baseline.diagnostics.receivedExamined}</td><td>{broader.diagnostics.sentExamined} / {broader.diagnostics.receivedExamined}</td></tr>
                 <tr><th className="py-1 pr-3 font-medium">Direct-contact candidates surviving filters</th><td>{baseline.diagnostics.candidatesSurviving}</td><td>{broader.diagnostics.candidatesSurviving}</td></tr>
-                <tr><th className="py-1 pr-3 font-medium">Approximate / actual Gmail API requests</th><td>~{baselineRequests}</td><td>{run.stats.apiRequests} attempted so far</td></tr>
+                <tr><th className="py-1 pr-3 font-medium">Approximate / reported Gmail API requests (lower bound)</th><td>~{baselineRequests}</td><td>{run.stats.apiRequests} reported</td></tr>
               </tbody>
             </table>
           </div>
           <p>
-            Broader scan detail requests: {run.stats.detailRequests}; list requests: {run.stats.listRequests};
-            {" "}duplicate IDs discarded: {run.stats.duplicateIds}; planned detail budget for attempted windows: {run.stats.plannedDetails}.
+            Reported detail attempts (lower bound): {run.stats.detailRequests}; reported list attempts (lower bound): {run.stats.listRequests};
+            {" "}duplicate IDs discarded: {run.stats.duplicateIds}; reported planned detail budget: {run.stats.plannedDetails}.
+            {run.unreportedBatches > 0 && " Request and detail/list totals are lower bounds because one or more batch responses lacked statistics."}
           </p>
           <p>
             Sent/received direction comes from Gmail labels and search queries. Candidate counts use direct one-to-one and

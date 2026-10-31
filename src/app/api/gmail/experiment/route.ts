@@ -5,6 +5,7 @@ import { BROADER_EXPERIMENT_BATCH_WINDOWS, BROADER_EXPERIMENT_WINDOWS } from "@/
 import {
   fetchBroaderMetadataBatch,
 } from "@/lib/gmail/messages";
+import { AuthError } from "@/lib/gmail/oauth";
 import { CRED_COOKIE, readCreds } from "@/lib/gmail/session";
 
 export const dynamic = "force-dynamic";
@@ -58,7 +59,10 @@ export async function POST(request: Request) {
       anchor,
     );
     return NextResponse.json({ ...result, anchor }, { headers: { "Cache-Control": "no-store" } });
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: "Gmail session expired. Refresh or reconnect." }, { status: 401 });
+    }
     return NextResponse.json({ error: "Gmail could not be reached for this batch." }, { status: 502 });
   }
 }

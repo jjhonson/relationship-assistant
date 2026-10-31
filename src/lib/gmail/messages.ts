@@ -1,7 +1,10 @@
 import {
   BROADER_EXPERIMENT_BATCH_WINDOWS,
+  BROADER_EXPERIMENT_CONCURRENCY,
   BROADER_EXPERIMENT_LIST_PAGES,
+  BROADER_EXPERIMENT_LIST_PAGE_SIZE,
   BROADER_EXPERIMENT_MAX_ATTEMPTS_PER_BATCH,
+  BROADER_EXPERIMENT_REQUEST_ATTEMPTS,
   BROADER_EXPERIMENT_WINDOWS,
   MAX_EXPERIMENT_DETAIL_CAP,
   broaderExperimentQuota,
@@ -40,7 +43,7 @@ type RequestMeter = {
 };
 
 async function get<T>(path: string, token: string, meter?: RequestMeter): Promise<T> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < BROADER_EXPERIMENT_REQUEST_ATTEMPTS; attempt++) {
     if (meter) {
       if (meter.attempts >= meter.maxAttempts) throw new ApiError("Gmail request budget reached");
       meter.attempts++;
@@ -55,7 +58,7 @@ async function get<T>(path: string, token: string, meter?: RequestMeter): Promis
       });
     } catch (error) {
       if (!meter) throw error;
-      if (attempt === 2) throw new ApiError("Gmail API request failed");
+      if (attempt === BROADER_EXPERIMENT_REQUEST_ATTEMPTS - 1) throw new ApiError("Gmail API request failed");
       await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
       continue;
     }
@@ -74,7 +77,9 @@ async function get<T>(path: string, token: string, meter?: RequestMeter): Promis
       } catch {}
     }
     const retryable = rateLimited || [500, 502, 503, 504].includes(res.status);
-    if (!retryable || attempt === 2) throw new ApiError(`Gmail API returned ${res.status}`);
+    if (!retryable || attempt === BROADER_EXPERIMENT_REQUEST_ATTEMPTS - 1) {
+      throw new ApiError(`Gmail API returned ${res.status}`);
+    }
 
     const retryAfter = Number(res.headers.get("Retry-After"));
     const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -325,9 +330,40 @@ async function mapBounded<T, R>(values: T[], concurrency: number, fn: (value: T)
   return results;
 }
 
+async function listBroaderExperimentIds(token: string, q: string, meter: RequestMeter): Promise<Summary[]> {
+  const found = new Map<string, Summary>();
+  let pageToken: string | undefined;
+  let pages = 0;
+  do {
+    const params = new URLSearchParams({
+      maxResults: String(BROADER_EXPERIMENT_LIST_PAGE_SIZE),
+      q,
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+    const page = await get<{ messages?: Summary[]; nextPageToken?: string }>(`/messages?${params}`, token, meter);
+    for (const summary of page.messages ?? []) {
+      if (found.size >= BROADER_EXPERIMENT_LIST_PAGE_SIZE * BROADER_EXPERIMENT_LIST_PAGES) break;
+      if (!found.has(summary.id)) found.set(summary.id, summary);
+    }
+    pages++;
+    pageToken = page.nextPageToken;
+  } while (pageToken && pages < BROADER_EXPERIMENT_LIST_PAGES &&
+    found.size < BROADER_EXPERIMENT_LIST_PAGE_SIZE * BROADER_EXPERIMENT_LIST_PAGES);
+  return [...found.values()];
+}
+
+function spreadExperimentIds(ids: Summary[], quota: number): Summary[] {
+  const count = Math.min(ids.length, quota);
+  if (count === 0) return [];
+  if (count === 1) return [ids[Math.floor((ids.length - 1) / 2)]];
+  return Array.from({ length: count }, (_, index) =>
+    ids[Math.round((index * (ids.length - 1)) / (count - 1))],
+  );
+}
+
 /**
  * Fetches one bounded monthly batch for a local-only, opt-in coverage experiment.
- * The complete 10-year plan never requests more than `cap` unique message details.
+ * The cooperative UI plan distributes at most `cap` details across its batches.
  */
 export async function fetchBroaderMetadataBatch(
   token: string,
@@ -361,12 +397,13 @@ export async function fetchBroaderMetadataBatch(
   }).filter((slot) => slot.quota > 0);
 
   let failedListBuckets = 0;
-  const summaries = (await mapBounded(slots, 5, async (slot) => {
+  const summaries = (await mapBounded(slots, BROADER_EXPERIMENT_CONCURRENCY, async (slot) => {
     const directionQuery = slot.direction === "sent" ? "in:sent" : "-in:sent";
     const query = `after:${slot.window.after} before:${slot.window.before} ${directionQuery} -in:drafts`;
     try {
-      return await listIds(token, query, slot.quota, meter);
-    } catch {
+      return spreadExperimentIds(await listBroaderExperimentIds(token, query, meter), slot.quota);
+    } catch (error) {
+      if (error instanceof AuthError) throw error;
       failedListBuckets++;
       return [];
     }
@@ -379,21 +416,26 @@ export async function fetchBroaderMetadataBatch(
     else unique.set(summary.id, summary);
   }
   let failedDetails = 0;
-  const details = await mapBounded<Summary, DiscoveryMessage | null>([...unique.values()], 5, async ({ id, threadId }) => {
-    const params = new URLSearchParams({
-      format: "metadata",
-      fields: "id,threadId,internalDate,labelIds,payload(headers)",
-    });
-    for (const header of DETAIL_HEADERS) params.append("metadataHeaders", header);
-    try {
-      const message = await get<DiscoveryMessage>(`/messages/${encodeURIComponent(id)}?${params}`, token, meter);
-      if (!message.threadId && threadId) return { ...message, threadId };
-      return message;
-    } catch {
-      failedDetails++;
-      return null;
-    }
-  });
+  const details = await mapBounded<Summary, DiscoveryMessage | null>(
+    [...unique.values()],
+    BROADER_EXPERIMENT_CONCURRENCY,
+    async ({ id, threadId }) => {
+      const params = new URLSearchParams({
+        format: "metadata",
+        fields: "id,threadId,internalDate,labelIds,payload(headers)",
+      });
+      for (const header of DETAIL_HEADERS) params.append("metadataHeaders", header);
+      try {
+        const message = await get<DiscoveryMessage>(`/messages/${encodeURIComponent(id)}?${params}`, token, meter);
+        if (!message.threadId && threadId) return { ...message, threadId };
+        return message;
+      } catch (error) {
+        if (error instanceof AuthError) throw error;
+        failedDetails++;
+        return null;
+      }
+    },
+  );
   const messages = details.filter((message): message is DiscoveryMessage => message !== null);
   return {
     messages,
