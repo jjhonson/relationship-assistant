@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, chmodSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, chmodSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -15,6 +15,7 @@ function fakeGh(listOutput: string) {
     `#!/usr/bin/env bash
 echo "$@" >> "${tmp}/gh.log"
 if [ "$1" != "codespace" ]; then echo "unsupported gh command: $*" >&2; exit 97; fi
+if [ -n "\${RA_FAKE_GH_DELAY:-}" ]; then sleep "$RA_FAKE_GH_DELAY"; fi
 case "$2" in
   list) printf '%b' '${listOutput}' ;;
   ssh)
@@ -24,6 +25,9 @@ case "$2" in
     echo "unsupported ssh command: $*" >&2; exit 99
     ;;
   ports)
+    if [ "\${RA_FAKE_GH_TERM_RESIST:-0}" = "1" ]; then
+      exec node -e 'process.title=process.env.RA_FAKE_GH_TITLE; process.on("SIGTERM",()=>{}); setInterval(()=>{},1000)'
+    fi
     trap 'kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; exit 0' TERM INT
     sleep 60 & child=$!; wait "$child"
     ;;
@@ -45,6 +49,33 @@ function run(script: string, args: string[], extraEnv: Record<string, string> = 
       ...extraEnv,
     },
   });
+}
+
+function runAsync(script: string, args: string[], extraEnv: Record<string, string> = {}) {
+  const child = spawn("bash", [path.join(scripts, script), ...args], {
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      RA_STATE_DIR: path.join(tmp, "state"),
+      ...extraEnv,
+    },
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  const done = new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+  return { child, done };
+}
+
+async function waitFor(predicate: () => boolean) {
+  for (let i = 0; i < 100; i += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("timed out waiting for condition");
 }
 
 const ghCalls = () => (existsSync(`${tmp}/gh.log`) ? readFileSync(`${tmp}/gh.log`, "utf8") : "");
@@ -139,14 +170,40 @@ describe("dev-start / dev-stop (dry run)", () => {
 
   function writeForwardMeta(pid: number, fields: Record<string, string> = {}) {
     const start = spawnSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8" }).stdout.trim();
-    const m = { pid: String(pid), start, codespace: "cs-one", port: "3000", ...fields };
+    const m = { pid: String(pid), start, codespace: "cs-one", port: "3000", run_id: "test-run", ...fields };
     mkdirSync(path.join(tmp, "state"), { recursive: true });
     writeFileSync(path.join(tmp, "state/forward-cs-one.meta"), Object.entries(m).map(([k, v]) => `${k}=${v}`).join("\n") + "\n");
   }
-  function fakeForward(args = "codespace ports forward 3000:3000 -c cs-one") {
-    return spawn(path.join(bin, "gh"), args.split(" "));
+  function fakeForward(args = "codespace ports forward 3000:3000 -c cs-one", extraEnv: Record<string, string> = {}) {
+    return spawn(path.join(bin, "gh"), args.split(" "), {
+      env: { ...process.env, RA_FORWARD_OWNER: "test-run", ...extraEnv },
+    });
   }
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+  it("does not erase or signal another run's forward record during failed startup cleanup", () => {
+    fakeGh("cs-one\\tShutdown\\n");
+    const work = path.join(tmp, "remote");
+    mkdirSync(path.join(work, "node_modules"), { recursive: true });
+    writeFileSync(path.join(bin, "npm"), "#!/usr/bin/env bash\nexit 1\n");
+    chmodSync(path.join(bin, "npm"), 0o755);
+    const fwd = fakeForward();
+    try {
+      writeForwardMeta(fwd.pid!);
+      const metadata = path.join(tmp, "state/forward-cs-one.meta");
+      const original = readFileSync(metadata, "utf8");
+      const result = run("dev-start.sh", [], {
+        RA_REMOTE_DIR: work,
+        RA_PID_FILE: path.join(tmp, "remote.pid"),
+        RA_REMOTE_SHELL_FLAGS: "-c",
+      });
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(metadata, "utf8")).toBe(original);
+      expect(alive(fwd.pid!)).toBe(true);
+    } finally {
+      fwd.kill();
+    }
+  }, 20000);
 
   it("does not signal a recorded pid that is not a gh port forward", () => {
     fakeGh("cs-one\\tAvailable\\n");
@@ -170,6 +227,8 @@ describe("dev-start / dev-stop (dry run)", () => {
       expect(run("dev-stop.sh", ["--dry-run"]).stdout).toContain("Closing port forward");
       writeForwardMeta(fwd.pid!, { start: "Mon Jan  1 00:00:00 2001" });
       expect(run("dev-stop.sh", ["--dry-run"]).stdout).not.toContain("Closing port forward");
+      writeForwardMeta(fwd.pid!, { run_id: "different-run" });
+      expect(run("dev-stop.sh", ["--dry-run"]).stdout).not.toContain("Closing port forward");
       writeForwardMeta(fwd.pid!, { port: "3001" });
       expect(run("dev-stop.sh", ["--dry-run"]).stdout).not.toContain("Closing port forward");
       writeForwardMeta(fwd.pid!, { codespace: "other" });
@@ -191,6 +250,66 @@ describe("dev-start / dev-stop (dry run)", () => {
       fwd.kill();
     }
   });
+
+  it("shares a host lifecycle lock between overlapping start and stop", async () => {
+    fakeGh("cs-one\\tShutdown\\n");
+    const work = path.join(tmp, "remote");
+    mkdirSync(path.join(work, "node_modules"), { recursive: true });
+    writeFileSync(path.join(bin, "npm"), "#!/usr/bin/env bash\nexit 1\n");
+    chmodSync(path.join(bin, "npm"), 0o755);
+    const start = runAsync("dev-start.sh", [], {
+      RA_FAKE_GH_DELAY: "0.5",
+      RA_REMOTE_DIR: work,
+      RA_PORT: String(45500 + (process.pid % 300)),
+      RA_PID_FILE: path.join(tmp, "remote.pid"),
+      RA_REMOTE_SHELL_FLAGS: "-c",
+    });
+    try {
+      await waitFor(() => existsSync(path.join(tmp, "state/lifecycle.lock/owner")));
+      const owner = readFileSync(path.join(tmp, "state/lifecycle.lock/owner"), "utf8");
+      const stop = run("dev-stop.sh", []);
+      expect(stop.status).not.toBe(0);
+      expect(stop.stderr).toContain("another start/stop is in progress");
+      expect(readFileSync(path.join(tmp, "state/lifecycle.lock/owner"), "utf8")).toBe(owner);
+      const result = await start.done;
+      expect(result.status).not.toBe(0);
+      expect(existsSync(path.join(tmp, "state/lifecycle.lock"))).toBe(false);
+    } finally {
+      start.child.kill("SIGKILL");
+    }
+  }, 20000);
+
+  it("retains a verified forward record when TERM is ignored and removes it only after forced exit", async () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const work = path.join(tmp, "remote");
+    mkdirSync(work);
+    const remotePidFile = path.join(tmp, "remote.pid");
+    const title = "gh codespace ports forward 3000:3000 -c cs-one";
+    const fwd = fakeForward("codespace ports forward 3000:3000 -c cs-one", {
+      RA_FAKE_GH_TERM_RESIST: "1",
+      RA_FAKE_GH_TITLE: title,
+    });
+    const metadata = path.join(tmp, "state/forward-cs-one.meta");
+    const env = { RA_REMOTE_DIR: work, RA_PID_FILE: remotePidFile, RA_LOG_FILE: path.join(tmp, "remote.log") };
+    try {
+      writeForwardMeta(fwd.pid!);
+      await waitFor(() => spawnSync("ps", ["-p", String(fwd.pid), "-o", "command="], { encoding: "utf8" }).stdout.trim() === title);
+      const first = run("dev-stop.sh", [], env);
+      expect(first.status).not.toBe(0);
+      expect(first.stdout).toContain("ownership record retained");
+      expect(existsSync(metadata)).toBe(true);
+      expect(alive(fwd.pid!)).toBe(true);
+      const second = run("dev-stop.sh", ["--force"], env);
+      expect(second.status, `${second.stdout}\n${second.stderr}`).toBe(0);
+      expect(existsSync(metadata)).toBe(false);
+      if (fwd.exitCode === null && fwd.signalCode === null) {
+        await new Promise<void>((resolve) => fwd.once("exit", () => resolve()));
+      }
+      expect(alive(fwd.pid!)).toBe(false);
+    } finally {
+      try { process.kill(fwd.pid!, "SIGKILL"); } catch { /* already gone */ }
+    }
+  }, 20000);
 
   it("stop only stops the intended Codespace", () => {
     fakeGh("a\\tAvailable\\nb\\tAvailable\\n");
@@ -245,8 +364,8 @@ describe("remote-dev.sh", () => {
   const sh = (cmd: string, cwd = work) => spawnSync("bash", ["-c", cmd], { cwd, encoding: "utf8" });
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
-  function remote(action: string, extra: Record<string, string> = {}, force = "0", runId = "test-run") {
-    return spawnSync("bash", [path.join(scripts, "remote-dev.sh"), action, work, PORT, force, runId], {
+  function remote(action: string, extra: Record<string, string> = {}, force = "0", runId = "test-run", dir = work) {
+    return spawnSync("bash", [path.join(scripts, "remote-dev.sh"), action, dir, PORT, force, runId], {
       encoding: "utf8",
       env: {
         ...process.env,
@@ -257,6 +376,26 @@ describe("remote-dev.sh", () => {
         ...extra,
       },
     });
+  }
+  function remoteAsync(action: string, extra: Record<string, string> = {}, force = "0", runId = "async-run") {
+    const child = spawn("bash", [path.join(scripts, "remote-dev.sh"), action, work, PORT, force, runId], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        RA_PID_FILE: pidFile,
+        RA_LOG_FILE: path.join(tmp, "dev.log"),
+        RA_REMOTE_SHELL_FLAGS: "-c",
+        ...extra,
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    const done = new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+      child.on("close", (status) => resolve({ status, stdout, stderr }));
+    });
+    return { child, done };
   }
   const meta = (k: string) => readFileSync(pidFile, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] ?? "";
   const listening = () => spawnSync("bash", ["-c", `(exec 3<>/dev/tcp/127.0.0.1/${PORT}) 2>/dev/null`]).status === 0;
@@ -305,6 +444,44 @@ describe("remote-dev.sh", () => {
     expect(alive(pid)).toBe(false);
     expect(listening()).toBe(false);
     expect(existsSync(pidFile)).toBe(false);
+  });
+
+  it.each(["start", "stop"] as const)("serializes remote start against concurrent %s", async (contender) => {
+    fakeNpm(`sleep 1\n${serverNpm}`);
+    const first = remoteAsync("start");
+    try {
+      await waitFor(() => existsSync(`${pidFile}.lock/owner`));
+      const competing = remote(contender, {}, "0", "other-run");
+      expect(competing.status).not.toBe(0);
+      expect(competing.stderr).toContain("another dev start/stop is in progress");
+      const result = await first.done;
+      expect(result.status).toBe(0);
+      expect(existsSync(`${pidFile}.lock`)).toBe(false);
+      expect(remote("stop").status).toBe(0);
+    } finally {
+      first.child.kill("SIGKILL");
+    }
+  }, 30000);
+
+  it("normalizes trailing slash, parent and symlink workspace paths for reuse and stop", () => {
+    fakeNpm(serverNpm);
+    const symlink = path.join(tmp, "work-link");
+    symlinkSync(work, symlink);
+    try {
+      const started = remote("start", {}, "0", "path-run", `${work}/`);
+      expect(started.status).toBe(0);
+      expect(meta("dir")).toBe(work);
+      const reused = remote("start", {}, "0", "other-run", path.join(work, "..", path.basename(work)));
+      expect(reused.stdout).toContain("RA_STATUS=reused");
+      const stopped = remote("stop", {}, "0", "path-run", symlink);
+      expect(stopped.status).toBe(0);
+      expect(existsSync(pidFile)).toBe(false);
+    } finally {
+      if (existsSync(pidFile)) {
+        const pid = Number(meta("pid"));
+        if (pid > 0) { try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ } }
+      }
+    }
   });
 
   it("recognizes an npm process title padded with trailing NUL bytes", () => {

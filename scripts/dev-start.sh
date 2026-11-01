@@ -17,8 +17,12 @@ set -u
 parse_common_args "$@"
 require_tools
 
+acquire_host_lock
+trap release_host_lock EXIT
+
 STARTED_CS=0
 STARTED_FWD=""
+STARTED_FWD_START=""
 RA_RUN_ID="mac-$$-$(date +%s)-${RANDOM}${RANDOM}"
 
 cleanup_failed_start() {
@@ -26,8 +30,17 @@ cleanup_failed_start() {
   log "Start failed; cleaning up what this run launched..."
   if [ "$RA_DRY_RUN" = "1" ]; then return; fi
   if [ -n "$STARTED_FWD" ]; then
-    if pid="$(forward_pid_if_ours)"; then kill -TERM "$pid" 2>/dev/null || true; fi
-    [ "$RA_DRY_RUN" = "1" ] || rm -f "$(forward_meta_file)"
+    if [ "$(sed -n 's/^pid=//p' "$(forward_meta_file)" 2>/dev/null | head -n1)" = "$STARTED_FWD" ] &&
+       [ "$(sed -n 's/^start=//p' "$(forward_meta_file)" 2>/dev/null | head -n1)" = "$STARTED_FWD_START" ] &&
+       [ "$(sed -n 's/^run_id=//p' "$(forward_meta_file)" 2>/dev/null | head -n1)" = "$RA_RUN_ID" ]; then
+      if stop_forward "$STARTED_FWD" 0 "$RA_RUN_ID"; then
+        log "[Mac] This run's port forward exited."
+      else
+        log "WARNING: this run's forward could not be verified as terminated; its ownership record was retained."
+      fi
+    else
+      log "WARNING: forward ownership record no longer identifies this run; it was left untouched."
+    fi
   fi
   remote_run stop-start "$RA_RUN_ID" >/dev/null 2>&1 \
     || log "WARNING: could not clean up this run's remote server; it was not stopped unless its launch record matched."
@@ -73,7 +86,9 @@ fi
 if pid="$(forward_pid_if_ours)"; then
   log "[Mac] Port forward already running (pid $pid); reusing."
 else
-  [ "$RA_DRY_RUN" = "1" ] || rm -f "$(forward_meta_file)"
+  if [ "$RA_DRY_RUN" != "1" ] && [ -f "$(forward_meta_file)" ]; then
+    start_fail "recorded forward does not match this Codespace/port or is stale; ownership record retained for inspection"
+  fi
   if local_port_in_use; then
     start_fail "localhost:$RA_PORT is already in use by a process this workflow did not start (or by a forward for another Codespace). Free it and retry."
   fi
@@ -82,7 +97,7 @@ else
     log "[dry-run] gh codespace ports forward $RA_PORT:$RA_PORT -c $RA_CODESPACE"
   else
     mkdir -p "$RA_STATE_DIR"
-    nohup gh codespace ports forward "$RA_PORT:$RA_PORT" -c "$RA_CODESPACE" >"$RA_STATE_DIR/forward-$RA_CODESPACE.log" 2>&1 </dev/null &
+    nohup env RA_FORWARD_OWNER="$RA_RUN_ID" gh codespace ports forward "$RA_PORT:$RA_PORT" -c "$RA_CODESPACE" >"$RA_STATE_DIR/forward-$RA_CODESPACE.log" 2>&1 </dev/null &
     STARTED_FWD=$!
     record_forward "$STARTED_FWD" || start_fail "port forward exited immediately; see $RA_STATE_DIR/forward-$RA_CODESPACE.log"
     sleep 1

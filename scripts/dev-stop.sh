@@ -18,6 +18,8 @@ RA_FORCE=0
 . "$(dirname "${BASH_SOURCE[0]}")/dev-common.sh"
 parse_common_args "$@"
 require_tools
+acquire_host_lock
+trap release_host_lock EXIT
 
 resolve_codespace
 status=0
@@ -34,10 +36,20 @@ fi
 
 if pid="$(forward_pid_if_ours)"; then
   log "[Mac] Closing port forward (pid $pid)"
-  run_mutating kill -TERM "$pid"
-  [ "$RA_DRY_RUN" = "1" ] || rm -f "$(forward_meta_file)"
+  if [ "$RA_DRY_RUN" = "1" ]; then
+    log "[dry-run] would send SIGTERM and verify exit before removing ownership metadata"
+  else
+    forward_run_id="$(sed -n 's/^run_id=//p' "$(forward_meta_file)" | head -n1)"
+    if stop_forward "$pid" "$RA_FORCE" "$forward_run_id"; then
+      log "[Mac] Port forward exited; ownership record removed."
+    else
+      log "WARNING: port forward did not terminate or could not be verified; ownership record retained."
+      status=1
+    fi
+  fi
 elif [ -f "$(forward_meta_file)" ]; then
   log "[Mac] Recorded port forward does not match this Codespace/port or is stale; not signalling it."
+  [ "$RA_DRY_RUN" = "1" ] || status=1
 fi
 
 if [ "$status" -ne 0 ]; then exit "$status"; fi

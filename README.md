@@ -50,13 +50,14 @@ scripts/dev-stop.sh  [--name CODESPACE] [--force] [--dry-run]
 - The Codespace is auto-selected if the repository (`RA_REPO`, default `jjhonson/relationship-assistant`) has exactly one; otherwise pass `--name` or `RA_CODESPACE`. Other overrides: `RA_PORT`, `RA_REMOTE_DIR` (default `/workspaces/relationship-assistant`), `RA_STATE_DIR`.
 - Start is idempotent: it reuses a running Codespace, dev server and port forward. For a stopped Codespace it uses `gh codespace ssh -c NAME -- true` to wake/connect, retrying up to 12 times; it does not call an unsupported `gh codespace start` subcommand. It fails clearly if `localhost:3000` is held by something else and finishes by checking `http://localhost:3000`, so the default Gmail callback stays `http://localhost:3000/api/gmail/callback`.
 - `RA_PORT` defaults to 3000 and is passed as `PORT` to Next.js. Changing it does not rewrite Gmail OAuth settings; Gmail callback configuration remains manual and may not work on a non-default port.
-- If start fails or is interrupted, it cleans up what *that run* launched (forward, server, and a Codespace it started). Anything already running beforehand is left alone.
+- If start fails or is interrupted, it attempts to clean up only what *that run* launched. Termination is verified before a forward record is removed; if the process cannot be safely verified or stopped, the record is retained and a warning is printed. A Codespace already running beforehand is left alone.
 - It never switches, pulls or merges branches (it prints the current branch/status), and never touches Gmail. Connect/disconnect Gmail manually.
 
 ### Process ownership
 
-- Local forward: the PID, process start time, selected Codespace and port are recorded in `~/.local/state/relationship-assistant/forward-<codespace>.meta`. It is reused or signalled only if the PID start time and exact Codespace/port command match.
-- Remote dev server: launched via `setsid` as its own session/group; `/tmp/relationship-assistant-dev.pid` records the PID, kernel start time, workspace, port, unique inherited launch token and start-run ID. Before signalling, the script verifies the launch group/session, workdir, configured port and token on every live group member; it also checks the npm command title when the leader remains alive.
+- Local forward: the PID, process start time, selected Codespace, port and launch ID are recorded in `~/.local/state/relationship-assistant/forward-<codespace>.meta`. The launch ID is also inherited by the process. It is reused or signalled only if the record, process start time, owner environment and exact command details match. Stop waits for exit before removing the record; `--force` escalates only after re-verifying identity. Failed-start cleanup applies the same checks and only removes its own forward record.
+- Local start/stop share an atomic lock at `~/.local/state/relationship-assistant/lifecycle.lock`. Remote start/stop also share a lock beside the PID record, protecting calls from different Mac terminals. Concurrent commands fail clearly rather than queue or replace ownership metadata. If a machine or shell is killed while holding a lock, inspect that no matching operation remains before manually removing the stale lock.
+- Remote dev server: launched via `setsid` as its own session/group; `/tmp/relationship-assistant-dev.pid` records the PID, kernel start time, physical workspace path, port, unique inherited launch token and start-run ID. Launch handoff files are invocation-specific. Before signalling, the script verifies the launch group/session, workdir, configured port and token on every live group member; it also checks the npm command title when the leader remains alive.
 - Mismatches fail closed: nothing is signalled and the record is retained for safe inspection. Stop waits for the entire verified group to exit; `--force` escalates to SIGKILL only after re-verifying the remaining group. Failed-start cleanup only stops a remote server whose run ID matches that start invocation, and only stops Codespace compute when that invocation woke a previously shut-down Codespace.
 
 ### `next-env.d.ts`
@@ -65,8 +66,8 @@ Next.js may rewrite this tracked file. Shutdown **never restores or edits it aut
 
 ### Manual recovery
 
-- Mac forward: `kill "$(sed -n 's/^pid=//p' ~/.local/state/relationship-assistant/forward-NAME.meta)"`
-- Codespace server: `gh codespace ssh -c NAME -- 'kill -TERM -- -"$(sed -n s/^pid=//p /tmp/relationship-assistant-dev.pid)"'`
+- Mac forward: inspect `~/.local/state/relationship-assistant/forward-NAME.meta`, then use `scripts/dev-stop.sh --name NAME --force` to re-verify ownership before escalation.
+- Codespace server: use `scripts/dev-stop.sh --name NAME --force`; do not signal a PID copied from a possibly stale record without verifying its identity.
 - Compute: `gh codespace stop -c NAME`, then confirm with `gh codespace list`. Server log: `/tmp/relationship-assistant-dev.log` in the Codespace.
 
 ### Smoke-test checklist (after review; no Gmail needed)

@@ -6,6 +6,8 @@ set -u
 ACTION="${1:-}"; DIR="${2:-}"; PORT="${3:-3000}"; FORCE="${4:-0}"; RUN_ID="${5:-}"
 PIDFILE="${RA_PID_FILE:-/tmp/relationship-assistant-dev.pid}"
 LOG="${RA_LOG_FILE:-/tmp/relationship-assistant-dev.log}"
+LOCK_DIR="${PIDFILE}.lock"
+LOCK_TOKEN="remote-$$-${RANDOM}${RANDOM}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 meta_get() { sed -n "s/^$1=//p" "$PIDFILE" 2>/dev/null | head -n1; }
@@ -98,12 +100,33 @@ stop_owned() {
 }
 
 cleanup_launch() {
-  local pid="$1" start="$2" owner="$3"
-  if [ -n "$pid" ] && [ "$(proc_field "$pid" 19)" = "$start" ] &&
-     [ "$(proc_field "$pid" 2)" = "$pid" ] && [ "$(proc_field "$pid" 3)" = "$pid" ] &&
-     group_members_valid "$pid" "$owner" "$DIR" "$PORT"; then
-    kill -TERM -- "-$pid" 2>/dev/null || true
+  local pid="$1" start="$2" owner="$3" i leader_start leader_group leader_session
+  group_has_live_members "$pid" || return 0
+  group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
+  leader_start="$(proc_field "$pid" 19)"
+  leader_group="$(proc_field "$pid" 2)"
+  leader_session="$(proc_field "$pid" 3)"
+  if [ "$leader_group" = "$pid" ] && [ "$leader_session" = "$pid" ]; then
+    [ -z "$start" ] || [ "$leader_start" = "$start" ] || return 2
+  elif [ "$leader_group" = "$pid" ] || [ "$leader_session" = "$pid" ]; then
+    return 2
   fi
+  kill -TERM -- "-$pid" 2>/dev/null || true
+  for i in 1 2 3 4 5; do
+    group_has_live_members "$pid" || return 0
+    group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
+    sleep 1
+  done
+  group_has_live_members "$pid" || return 0
+  group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
+  kill -KILL -- "-$pid" 2>/dev/null || true
+  for i in 1 2 3 4 5; do
+    group_has_live_members "$pid" || return 0
+    group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
+    sleep 1
+  done
+  group_has_live_members "$pid" && return 1
+  return 0
 }
 
 report_next_env() {
@@ -114,8 +137,25 @@ report_next_env() {
 }
 
 cd "$DIR" 2>/dev/null || die "directory $DIR not found in Codespace (set RA_REMOTE_DIR)"
+DIR="$(pwd -P)"
 case "$PORT" in ''|*[!0-9]*) die "invalid port '$PORT'" ;; esac
 case "$RUN_ID" in *[!A-Za-z0-9._-]*) [ "$ACTION" = "stop" ] || die "invalid launch run id" ;; esac
+
+mkdir -p "$(dirname "$PIDFILE")" || die "could not create process-record directory"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  die "another dev start/stop is in progress (or a stale lock needs inspection): $LOCK_DIR"
+fi
+if ! printf '%s\n' "$LOCK_TOKEN" >"$LOCK_DIR/owner"; then
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+  die "could not record remote lifecycle lock ownership"
+fi
+release_remote_lock() {
+  [ -f "$LOCK_DIR/owner" ] || return 0
+  [ "$(cat "$LOCK_DIR/owner" 2>/dev/null)" = "$LOCK_TOKEN" ] || return 0
+  rm -f "$LOCK_DIR/owner"
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+trap release_remote_lock EXIT
 
 case "$ACTION" in
   start)
@@ -138,30 +178,41 @@ case "$ACTION" in
            ;;
       esac
     fi
-    rm -f "$PIDFILE.launch"
     port_listening && die "port $PORT already in use by a process this workflow did not start."
     [ -d node_modules ] || npm install </dev/null || die "npm install failed"
     umask 077
     owner="$(printf '%s-%s-%s' "$RUN_ID" "$$" "$RANDOM$RANDOM")"
-    setsid env RA_DEV_OWNER="$owner" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'echo $$ > "$1"; exec npm run dev' _ "$PIDFILE.launch" >"$LOG" 2>&1 </dev/null &
+    launch_file="$PIDFILE.launch.$RUN_ID.$$"
+    setsid env RA_DEV_OWNER="$owner" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'echo $$ > "$1"; exec npm run dev' _ "$launch_file" >"$LOG" 2>&1 </dev/null &
     launched=$!
     launch_start="$(proc_field "$launched" 19)"
     pid=""
     for i in 1 2 3 4 5 6 7 8 9 10; do
-      [ -s "$PIDFILE.launch" ] && { pid="$(cat "$PIDFILE.launch")"; break; }
+      [ -s "$launch_file" ] && { pid="$(cat "$launch_file")"; break; }
       sleep 1
     done
-    rm -f "$PIDFILE.launch"
-    case "$pid" in ''|*[!0-9]*) cleanup_launch "$launched" "$launch_start" "$owner"; die "could not determine dev server pid; see $LOG" ;; esac
+    rm -f "$launch_file"
+    case "$pid" in
+      ''|*[!0-9]*)
+        cleanup_launch "$launched" "$launch_start" "$owner" || die "could not verify cleanup of incomplete launch group; inspect $LOG"
+        die "could not determine dev server pid; see $LOG"
+        ;;
+    esac
     sleep 1
     start="$(proc_field "$pid" 19)"
     if [ -z "$start" ] || [ "$(proc_field "$pid" 2)" != "$pid" ] || [ "$(proc_field "$pid" 3)" != "$pid" ]; then
-      cleanup_launch "$pid" "$launch_start" "$owner"
+      cleanup_launch "$launched" "$launch_start" "$owner" || die "could not verify cleanup of incomplete launch group; inspect $LOG"
       die "dev server exited immediately or did not start as its own session; see $LOG"
     fi
+    record_tmp="$PIDFILE.tmp.$$"
     printf 'pid=%s\nstart=%s\ndir=%s\nport=%s\nowner=%s\nrun_id=%s\n' \
-      "$pid" "$start" "$DIR" "$PORT" "$owner" "$RUN_ID" >"$PIDFILE.tmp.$$"
-    mv "$PIDFILE.tmp.$$" "$PIDFILE"
+      "$pid" "$start" "$DIR" "$PORT" "$owner" "$RUN_ID" >"$record_tmp"
+    if ! ln "$record_tmp" "$PIDFILE"; then
+      rm -f "$record_tmp"
+      cleanup_launch "$launched" "$launch_start" "$owner" || die "record collision and launch cleanup could not be verified; inspect $LOG"
+      die "a process record appeared during launch; this launch was stopped without replacing it"
+    fi
+    rm -f "$record_tmp"
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
       if port_listening; then echo "Dev server listening on $PORT."; echo "RA_STATUS=started"; exit 0; fi
       if ! group_has_live_members "$pid"; then rm -f "$PIDFILE"; die "dev server exited early; see $LOG"; fi
