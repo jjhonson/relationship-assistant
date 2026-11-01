@@ -5,8 +5,8 @@ usage() {
 Usage: scripts/dev-stop.sh [--name CODESPACE] [--force] [--dry-run]
 
 Gracefully stops the dev server started by dev-start.sh (SIGTERM; --force escalates to SIGKILL),
-closes the recorded port forward, restores generated next-env.d.ts if it only has generated
-changes, then stops the Codespace. Other processes and Codespaces are never touched.
+closes a verified recorded port forward, reports any next-env.d.ts changes without modifying
+them, then stops the selected Codespace. Other processes and Codespaces are never touched.
 Manual recovery:
   Mac:       kill "$(sed -n 's/^pid=//p' ~/.local/state/relationship-assistant/forward-NAME.meta)"
   Codespace: gh codespace ssh -c NAME -- 'kill -TERM -- -"$(sed -n s/^pid=//p /tmp/relationship-assistant-dev.pid)"'
@@ -35,10 +35,10 @@ fi
 if pid="$(forward_pid_if_ours)"; then
   log "[Mac] Closing port forward (pid $pid)"
   run_mutating kill -TERM "$pid"
+  [ "$RA_DRY_RUN" = "1" ] || rm -f "$(forward_meta_file)"
 elif [ -f "$(forward_meta_file)" ]; then
   log "[Mac] Recorded port forward does not match this Codespace/port or is stale; not signalling it."
 fi
-[ "$RA_DRY_RUN" = "1" ] || rm -f "$(forward_meta_file)"
 
 if [ "$status" -ne 0 ]; then exit "$status"; fi
 if [ "$RA_STATE" = "Available" ] || [ "$RA_STATE" = "Starting" ]; then

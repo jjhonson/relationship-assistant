@@ -29,14 +29,14 @@ npm run dev        # http://localhost:3000
 
 ## Codespaces dev start/stop (run on the Mac host)
 
-Optional convenience scripts (bash + [GitHub CLI](https://cli.github.com/)). **Mac-local:** `scripts/dev-start.sh`, `scripts/dev-stop.sh`, `scripts/dev-common.sh`. **Codespace-only:** `scripts/remote-dev.sh`, which the Mac scripts pipe to `bash -s` over `gh codespace ssh` (never run it on the Mac). No secrets are involved and nothing is downloaded or executed unreviewed.
+Optional convenience scripts (bash + [GitHub CLI](https://cli.github.com/)). **Mac-local:** `scripts/dev-start.sh`, `scripts/dev-stop.sh`, `scripts/dev-common.sh`. **Codespace-only:** `scripts/remote-dev.sh`, which the Mac scripts pipe to `bash -s` over `gh codespace ssh` (never run it on the Mac). The reviewed script is sent from the local checkout; no script is fetched from a URL, and `.env.local` is not read or copied.
 
 ### One-time Mac setup
 
 The scripts live in this repository, so the Mac needs a checkout. If your only checkout is the browser Codespace:
 
 1. Wait until the PR containing the scripts is reviewed and merged. Until then they exist only on the PR branch, not on `main`.
-2. In Mac Terminal (not in `~` directly; pick a projects folder): `gh auth login` (once), then `gh repo clone jjhonson/relationship-assistant ~/projects/relationship-assistant`. (To try them before merge, you can instead `git -C ~/projects/relationship-assistant fetch origin <branch>` and `git checkout <branch>` yourself after reading the diff; the scripts never switch branches.)
+2. In Mac Terminal, run `gh auth login` if needed, then `gh repo clone jjhonson/relationship-assistant ~/projects/relationship-assistant`. GitHub CLI authentication stays on the Mac; do not copy credentials or `.env.local` into the repository. The scripts become available on `main` only after review and merge. To use a reviewed PR branch before merge, fetch and check out that branch yourself only after reviewing its diff.
 3. Requires a Codespace for this repository with an SSH server (see `gh codespace ssh --help`) and a `.env.local` already present in it. The scripts never read, copy or print `.env.local`.
 
 ### Daily use
@@ -48,19 +48,20 @@ scripts/dev-stop.sh  [--name CODESPACE] [--force] [--dry-run]
 ```
 
 - The Codespace is auto-selected if the repository (`RA_REPO`, default `jjhonson/relationship-assistant`) has exactly one; otherwise pass `--name` or `RA_CODESPACE`. Other overrides: `RA_PORT`, `RA_REMOTE_DIR` (default `/workspaces/relationship-assistant`), `RA_STATE_DIR`.
-- Start is idempotent: it reuses a running Codespace, dev server and port forward, and fails clearly if `localhost:3000` is held by something else. It finishes by checking `http://localhost:3000`, so the Gmail callback stays `http://localhost:3000/api/gmail/callback`.
+- Start is idempotent: it reuses a running Codespace, dev server and port forward. For a stopped Codespace it uses `gh codespace ssh -c NAME -- true` to wake/connect, retrying up to 12 times; it does not call an unsupported `gh codespace start` subcommand. It fails clearly if `localhost:3000` is held by something else and finishes by checking `http://localhost:3000`, so the default Gmail callback stays `http://localhost:3000/api/gmail/callback`.
+- `RA_PORT` defaults to 3000 and is passed as `PORT` to Next.js. Changing it does not rewrite Gmail OAuth settings; Gmail callback configuration remains manual and may not work on a non-default port.
 - If start fails or is interrupted, it cleans up what *that run* launched (forward, server, and a Codespace it started). Anything already running beforehand is left alone.
 - It never switches, pulls or merges branches (it prints the current branch/status), and never touches Gmail. Connect/disconnect Gmail manually.
 
 ### Process ownership
 
-- Local forward: the PID, process start time, Codespace and port are recorded in `~/.local/state/relationship-assistant/forward-<codespace>.meta`. It is reused or signalled only if the PID is alive, the start time matches (guards PID reuse), and the command line ends with `codespace ports forward PORT:PORT -c <codespace>`.
-- Remote dev server: launched via `setsid` as its own session/group leader; `/tmp/relationship-assistant-dev.pid` in the Codespace records pid, kernel start time, workspace dir and port. Before any signal it re-checks start time, session/group leader, working directory, `npm … run dev` command line, dir and port.
-- Any mismatch fails closed: nothing is signalled and the stale record is dropped. Stop sends SIGTERM to the verified group only (`--force` escalates to SIGKILL), then stops only the selected Codespace. If the remote stop fails, the Codespace is left running and the exit code is non-zero.
+- Local forward: the PID, process start time, selected Codespace and port are recorded in `~/.local/state/relationship-assistant/forward-<codespace>.meta`. It is reused or signalled only if the PID start time and exact Codespace/port command match.
+- Remote dev server: launched via `setsid` as its own session/group; `/tmp/relationship-assistant-dev.pid` records the PID, kernel start time, workspace, port, unique inherited launch token and start-run ID. Before signalling, the script verifies the launch group/session, workdir, configured port and token on every live group member; it also checks the npm command title when the leader remains alive.
+- Mismatches fail closed: nothing is signalled and the record is retained for safe inspection. Stop waits for the entire verified group to exit; `--force` escalates to SIGKILL only after re-verifying the remaining group. Failed-start cleanup only stops a remote server whose run ID matches that start invocation, and only stops Codespace compute when that invocation woke a previously shut-down Codespace.
 
 ### `next-env.d.ts`
 
-Next.js rewrites this tracked file. On stop it is restored only if it was identical to `HEAD` when the server was started, nothing is staged, and every changed line is a generated import/reference line. Staged edits, files already modified at start, and any other edit are kept with a warning.
+Next.js may rewrite this tracked file. Shutdown **never restores or edits it automatically**. If it changed, the script reports that staged and unstaged content was left untouched. Review `git diff HEAD -- next-env.d.ts` in the Codespace, then manually discard only changes you have confirmed are generated; automatic cleanup is deferred to avoid losing user edits.
 
 ### Manual recovery
 
@@ -70,13 +71,13 @@ Next.js rewrites this tracked file. On stop it is restored only if it was identi
 
 ### Smoke-test checklist (after review; no Gmail needed)
 
-1. `scripts/dev-start.sh --dry-run`: shows the chosen Codespace and intended commands, changes nothing.
-2. `scripts/dev-start.sh`: `curl -I http://localhost:3000` returns 200; run it again and confirm "reusing" messages, one forward process (`pgrep -fl "ports forward"`), one server.
-3. Start with the Codespace stopped, then stop: `gh codespace list` shows `Shutdown`, no local forward remains.
-4. Start with port 3000 occupied locally: clear error, nothing launched remotely that stays running.
-5. `git status` in the Codespace: `next-env.d.ts` clean after stop; a staged edit survives.
+1. `scripts/dev-start.sh --dry-run`: shows the selected Codespace and planned SSH wake/start/forward commands. Confirm the configured state directory and any existing metadata are unchanged.
+2. After reviewing this branch, start with a non-Gmail Codespace; verify `curl -I http://localhost:3000` succeeds. Run start again and confirm the server/forward are reused rather than duplicated.
+3. Stop gracefully; verify `gh codespace list` shows the selected Codespace shut down and the local forward is gone. Repeat with a deliberately staged `next-env.d.ts` edit and confirm both its staged and working-tree contents remain unchanged.
+4. With `localhost:3000` occupied by an unrelated process, start should fail without signalling it. For a startup failure after wake, verify only that invocation's server/forward are cleaned up and only its newly awakened Codespace is stopped.
+5. To recover manually, inspect `scripts/dev-start.sh` / `scripts/dev-stop.sh` and `gh codespace list`; use `scripts/dev-stop.sh --name NAME --force` only after confirming the selected name. Do not use Gmail for this smoke test.
 
-Unit tests (`src/scripts/dev-workflow.test.ts`) use a fake `gh`, a fake `npm`, and dry-run mode. They cover the above ownership, PID-reuse, multi-Codespace, failed-start and `next-env.d.ts` cases, but not real `gh`/ssh behaviour; use the checklist for that.
+Unit tests (`src/scripts/dev-workflow.test.ts`) use a rejecting fake `gh`, fake `npm`, and isolated local processes. They exercise `gh codespace ssh -c NAME -- bash -s -- ...` argument/stdin handling and process-group lifecycle, but do not contact GitHub or prove behavior on a real Mac/Codespace. The first real-host smoke test remains unperformed and should happen only after review.
 
 ## Structure
 

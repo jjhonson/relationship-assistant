@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Run on the Mac host. Starts the Codespace, `npm run dev` inside it, and a localhost port forward.
+# Run on the Mac host. Wakes the Codespace over SSH, starts `npm run dev`, and forwards its port.
 usage() {
   cat <<'USAGE'
 Usage: scripts/dev-start.sh [--name CODESPACE] [--dry-run]
 
-Starts (or reuses) the repository's Codespace, the Next.js dev server inside it, and a
+Wakes (or reuses) the repository's Codespace over SSH, starts the Next.js dev server inside it, and a
 Mac-local port forward so http://localhost:3000 works (Gmail OAuth callback unchanged).
 Never switches, pulls or merges branches; never touches .env.local.
 If startup fails, everything this run launched (forward, server, and a Codespace this run
@@ -16,25 +16,24 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/dev-common.sh"
 parse_common_args "$@"
 require_tools
-mkdir -p "$RA_STATE_DIR"
 
 STARTED_CS=0
-STARTED_SERVER=0
 STARTED_FWD=""
+RA_RUN_ID="mac-$$-$(date +%s)-${RANDOM}${RANDOM}"
 
 cleanup_failed_start() {
   trap - INT TERM
   log "Start failed; cleaning up what this run launched..."
+  if [ "$RA_DRY_RUN" = "1" ]; then return; fi
   if [ -n "$STARTED_FWD" ]; then
-    kill -TERM "$STARTED_FWD" 2>/dev/null || true
-    rm -f "$(forward_meta_file)"
+    if pid="$(forward_pid_if_ours)"; then kill -TERM "$pid" 2>/dev/null || true; fi
+    [ "$RA_DRY_RUN" = "1" ] || rm -f "$(forward_meta_file)"
   fi
+  remote_run stop-start "$RA_RUN_ID" >/dev/null 2>&1 \
+    || log "WARNING: could not clean up this run's remote server; it was not stopped unless its launch record matched."
   if [ "$STARTED_CS" = "1" ]; then
-    remote_run stop >/dev/null 2>&1 || true
     gh codespace stop -c "$RA_CODESPACE" >/dev/null 2>&1 \
       || log "WARNING: could not stop Codespace; run: gh codespace stop -c $RA_CODESPACE"
-  elif [ "$STARTED_SERVER" = "1" ]; then
-    remote_run stop >/dev/null 2>&1 || log "WARNING: could not stop dev server; run scripts/dev-stop.sh"
   fi
 }
 start_fail() {
@@ -47,11 +46,16 @@ resolve_codespace
 log "[Mac] Codespace: $RA_CODESPACE ($RA_STATE)"
 trap 'start_fail "interrupted"' INT TERM
 if [ "$RA_STATE" != "Available" ]; then
-  log "[Mac] Starting Codespace..."
-  if [ "$RA_DRY_RUN" = "1" ]; then log "[dry-run] gh codespace start -c $RA_CODESPACE"
+  log "[Mac] Waking Codespace over SSH..."
+  if [ "$RA_STATE" = "Shutdown" ]; then STARTED_CS=1; fi
+  if [ "$RA_DRY_RUN" = "1" ]; then log "[dry-run] gh codespace ssh -c $RA_CODESPACE -- true"
   else
-    STARTED_CS=1
-    gh codespace start -c "$RA_CODESPACE" || start_fail "could not start Codespace $RA_CODESPACE"
+    ready=0
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      if gh codespace ssh -c "$RA_CODESPACE" -- true >/dev/null 2>&1; then ready=1; break; fi
+      [ "$i" -eq 12 ] || { log "[Mac] Waiting for Codespace SSH readiness ($i/12)..."; sleep 5; }
+    done
+    [ "$ready" = "1" ] || start_fail "Codespace SSH did not become ready after 12 attempts"
   fi
 else
   log "[Mac] Codespace already running; reusing."
@@ -59,17 +63,17 @@ fi
 
 log "[Codespace] Starting dev server (reuses an existing one)..."
 if [ "$RA_DRY_RUN" = "1" ]; then
-  log "[dry-run] gh codespace ssh -c $RA_CODESPACE -- bash -s -- start $RA_REMOTE_DIR $RA_PORT 0 < remote-dev.sh"
+  log "[dry-run] gh codespace ssh -c $RA_CODESPACE -- bash -s -- start $RA_REMOTE_DIR $RA_PORT 0 $RA_RUN_ID < remote-dev.sh"
 else
-  out="$(remote_run start)" || { printf '%s\n' "$out"; start_fail "remote start failed. Log: gh codespace ssh -c $RA_CODESPACE -- tail -n 50 /tmp/relationship-assistant-dev.log"; }
+  mkdir -p "$RA_STATE_DIR"
+  out="$(remote_run start "$RA_RUN_ID")" || { printf '%s\n' "$out"; start_fail "remote start failed. Log: gh codespace ssh -c $RA_CODESPACE -- tail -n 50 /tmp/relationship-assistant-dev.log"; }
   printf '%s\n' "$out"
-  case "$out" in *RA_STATUS=started*) STARTED_SERVER=1 ;; esac
 fi
 
 if pid="$(forward_pid_if_ours)"; then
   log "[Mac] Port forward already running (pid $pid); reusing."
 else
-  rm -f "$(forward_meta_file)"
+  [ "$RA_DRY_RUN" = "1" ] || rm -f "$(forward_meta_file)"
   if local_port_in_use; then
     start_fail "localhost:$RA_PORT is already in use by a process this workflow did not start (or by a forward for another Codespace). Free it and retry."
   fi
@@ -77,10 +81,12 @@ else
   if [ "$RA_DRY_RUN" = "1" ]; then
     log "[dry-run] gh codespace ports forward $RA_PORT:$RA_PORT -c $RA_CODESPACE"
   else
+    mkdir -p "$RA_STATE_DIR"
     nohup gh codespace ports forward "$RA_PORT:$RA_PORT" -c "$RA_CODESPACE" >"$RA_STATE_DIR/forward-$RA_CODESPACE.log" 2>&1 </dev/null &
     STARTED_FWD=$!
-    sleep 1
     record_forward "$STARTED_FWD" || start_fail "port forward exited immediately; see $RA_STATE_DIR/forward-$RA_CODESPACE.log"
+    sleep 1
+    forward_pid_if_ours >/dev/null || start_fail "port forward exited or could not be verified; see $RA_STATE_DIR/forward-$RA_CODESPACE.log"
   fi
 fi
 

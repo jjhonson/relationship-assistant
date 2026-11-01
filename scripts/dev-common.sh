@@ -38,6 +38,7 @@ require_tools() {
 resolve_codespace() {
   local rows count
   case "$RA_PORT" in ''|*[!0-9]*) fail "invalid port: $RA_PORT" ;; esac
+  [ "$RA_PORT" -ge 1 ] && [ "$RA_PORT" -le 65535 ] || fail "invalid port: $RA_PORT"
   case "$RA_REMOTE_DIR" in /*) ;; *) fail "RA_REMOTE_DIR must be an absolute path" ;; esac
   case "$RA_REMOTE_DIR" in *[!A-Za-z0-9._/-]*) fail "RA_REMOTE_DIR contains unsupported characters" ;; esac
   if [ -n "$RA_CODESPACE" ]; then
@@ -65,7 +66,7 @@ resolve_codespace() {
 # `gh codespace ssh -c NAME -- CMD...` hands CMD to ssh as the remote command; the script is
 # piped on stdin to `bash -s`, so nothing needs to be installed in the Codespace.
 remote_run() {
-  gh codespace ssh -c "$RA_CODESPACE" -- bash -s -- "$1" "$RA_REMOTE_DIR" "$RA_PORT" "${RA_FORCE:-0}" < "$RA_REMOTE_SCRIPT"
+  gh codespace ssh -c "$RA_CODESPACE" -- bash -s -- "$1" "$RA_REMOTE_DIR" "$RA_PORT" "${RA_FORCE:-0}" "${2:-}" < "$RA_REMOTE_SCRIPT"
 }
 
 # Local port-forward ownership. A recorded forward is reused/signalled only if ALL hold:
@@ -88,7 +89,10 @@ forward_pid_if_ours() {
   [ "$cs" = "$RA_CODESPACE" ] && [ "$port" = "$RA_PORT" ] || return 1
   [ -n "$start" ] && [ "$(proc_start "$pid")" = "$start" ] || return 1
   cmd="$(ps -p "$pid" -o command= 2>/dev/null)" || return 1
-  case "$cmd" in *"codespace ports forward $RA_PORT:$RA_PORT -c $RA_CODESPACE") printf '%s' "$pid"; return 0 ;; esac
+  case "$cmd" in
+    "gh codespace ports forward $RA_PORT:$RA_PORT -c $RA_CODESPACE"|*/gh\ codespace\ ports\ forward\ "$RA_PORT:$RA_PORT"\ -c\ "$RA_CODESPACE")
+      printf '%s' "$pid"; return 0 ;;
+  esac
   return 1
 }
 
