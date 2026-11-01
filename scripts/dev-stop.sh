@@ -8,9 +8,9 @@ Gracefully stops the dev server started by dev-start.sh (SIGTERM; --force escala
 closes a verified recorded port forward, reports any next-env.d.ts changes without modifying
 them, then stops the selected Codespace. Other processes and Codespaces are never touched.
 Manual recovery:
-  Mac:       kill "$(sed -n 's/^pid=//p' ~/.local/state/relationship-assistant/forward-NAME.meta)"
-  Codespace: gh codespace ssh -c NAME -- 'kill -TERM -- -"$(sed -n s/^pid=//p /tmp/relationship-assistant-dev.pid)"'
-  Stop:      gh codespace stop -c NAME
+  Inspect:   the ownership record and process logs; do not signal a PID copied from a record.
+  Retry:     scripts/dev-stop.sh --name NAME --force
+  Compute:   gh codespace stop -c NAME (only after confirming NAME)
 USAGE
 }
 set -u
@@ -48,8 +48,14 @@ if pid="$(forward_pid_if_ours)"; then
     fi
   fi
 elif [ -f "$(forward_meta_file)" ]; then
-  log "[Mac] Recorded port forward does not match this Codespace/port or is stale; not signalling it."
-  [ "$RA_DRY_RUN" = "1" ] || status=1
+  if [ "$RA_DRY_RUN" = "1" ]; then
+    log "[dry-run] recorded forward was not verified; metadata and process were left untouched."
+  elif cleanup_stale_forward_record; then
+    log "[Mac] Removed unchanged ownership metadata for a definitively exited forward; no process was signalled."
+  else
+    log "[Mac] Recorded forward is live, mismatched, malformed, or outside this Codespace/port; not signalling it. Inspect $(forward_meta_file) before recovery."
+    status=1
+  fi
 fi
 
 if [ "$status" -ne 0 ]; then exit "$status"; fi

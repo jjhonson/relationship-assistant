@@ -94,7 +94,8 @@ remote_run() {
 # Local port-forward ownership. A recorded forward is reused/signalled only if ALL hold:
 # the PID is alive, its start time equals the recorded one (guards PID reuse), and its command
 # line ends with exactly "codespace ports forward PORT:PORT -c CODESPACE" for this Codespace/port.
-# Any mismatch fails closed (the record is dropped, the process is never signalled).
+# Any live mismatch fails closed; only an unchanged, correctly scoped record for a
+# definitively exited process may be removed.
 forward_meta_file() { printf '%s/forward-%s.meta' "$RA_STATE_DIR" "$RA_CODESPACE"; }
 
 proc_start() { ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//; s/ *$//'; }
@@ -103,25 +104,51 @@ forward_owner_matches() {
   ps eww -p "$1" -o command= 2>/dev/null | grep -Fq "RA_FORWARD_OWNER=$2"
 }
 
+forward_record_valid() {
+  local f="$1" content lines pid start codespace port run_id expected
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  lines="$(wc -l <"$f" 2>/dev/null | tr -d '[:space:]')" || return 1
+  [ "$lines" = "5" ] || return 1
+  content="$(cat "$f" 2>/dev/null)" || return 1
+  pid="$(printf '%s\n' "$content" | sed -n 's/^pid=//p')"
+  start="$(printf '%s\n' "$content" | sed -n 's/^start=//p')"
+  codespace="$(printf '%s\n' "$content" | sed -n 's/^codespace=//p')"
+  port="$(printf '%s\n' "$content" | sed -n 's/^port=//p')"
+  run_id="$(printf '%s\n' "$content" | sed -n 's/^run_id=//p')"
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  case "$run_id" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  printf '%s\n' "$start" | grep -Eq '^[A-Za-z]{3} [A-Za-z]{3} [ 0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$' || return 1
+  expected="$(printf 'pid=%s\nstart=%s\ncodespace=%s\nport=%s\nrun_id=%s' "$pid" "$start" "$codespace" "$port" "$run_id")"
+  [ "$content" = "$expected" ]
+}
+
+forward_process_matches() {
+  local pid="$1" start="$2" run_id="$3" codespace="$4" port="$5" cmd
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ -n "$start" ] && [ "$(proc_start "$pid")" = "$start" ] || return 1
+  forward_owner_matches "$pid" "$run_id" || return 1
+  cmd="$(ps -p "$pid" -o command= 2>/dev/null)" || return 1
+  case "$cmd" in
+    "gh codespace ports forward $port:$port -c $codespace"|*/gh\ codespace\ ports\ forward\ "$port:$port"\ -c\ "$codespace")
+      return 0 ;;
+  esac
+  return 1
+}
+
 forward_pid_if_ours() {
-  local f pid start port cs run_id cmd
+  local f pid start port cs run_id
   f="$(forward_meta_file)"
-  [ -f "$f" ] || return 1
+  forward_record_valid "$f" || return 1
   pid="$(sed -n 's/^pid=//p' "$f" | head -n1)"
   start="$(sed -n 's/^start=//p' "$f" | head -n1)"
   cs="$(sed -n 's/^codespace=//p' "$f" | head -n1)"
   port="$(sed -n 's/^port=//p' "$f" | head -n1)"
   run_id="$(sed -n 's/^run_id=//p' "$f" | head -n1)"
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$cs" = "$RA_CODESPACE" ] && [ "$port" = "$RA_PORT" ] && [ -n "$run_id" ] || return 1
-  [ -n "$start" ] && [ "$(proc_start "$pid")" = "$start" ] || return 1
-  forward_owner_matches "$pid" "$run_id" || return 1
-  cmd="$(ps -p "$pid" -o command= 2>/dev/null)" || return 1
-  case "$cmd" in
-    "gh codespace ports forward $RA_PORT:$RA_PORT -c $RA_CODESPACE"|*/gh\ codespace\ ports\ forward\ "$RA_PORT:$RA_PORT"\ -c\ "$RA_CODESPACE")
-      printf '%s' "$pid"; return 0 ;;
-  esac
-  return 1
+  [ "$cs" = "$RA_CODESPACE" ] && [ "$port" = "$RA_PORT" ] || return 1
+  case "$run_id" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  forward_process_matches "$pid" "$start" "$run_id" "$cs" "$port" || return 1
+  printf '%s' "$pid"
 }
 
 # Record a forward we just launched (PID $1).
@@ -129,32 +156,40 @@ record_forward() {
   local f tmp
   STARTED_FWD_START="$(proc_start "$1")"
   [ -n "$STARTED_FWD_START" ] || return 1
+  forward_process_matches "$1" "$STARTED_FWD_START" "$RA_RUN_ID" "$RA_CODESPACE" "$RA_PORT" || return 1
   f="$(forward_meta_file)"
-  tmp="$f.tmp.$RA_LOCK_TOKEN"
-  printf 'pid=%s\nstart=%s\ncodespace=%s\nport=%s\nrun_id=%s\n' \
-    "$1" "$STARTED_FWD_START" "$RA_CODESPACE" "$RA_PORT" "$RA_RUN_ID" \
-    >"$tmp" || { rm -f "$tmp"; return 1; }
+  tmp="$(mktemp "${f}.tmp.XXXXXX")" || return 1
+  if ! printf 'pid=%s\nstart=%s\ncodespace=%s\nport=%s\nrun_id=%s\n' \
+    "$1" "$STARTED_FWD_START" "$RA_CODESPACE" "$RA_PORT" "$RA_RUN_ID" >"$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
   if ! ln "$tmp" "$f"; then
     rm -f "$tmp"
     return 1
   fi
   rm -f "$tmp"
+  [ "$(forward_pid_if_ours)" = "$1" ]
 }
 
 remove_forward_record() {
-  local pid="$1" start="$2" run_id="$3" f
+  local pid="$1" start="$2" run_id="$3" f before after
   f="$(forward_meta_file)"
-  [ -f "$f" ] || return 1
+  forward_record_valid "$f" || return 1
+  before="$(cat "$f" 2>/dev/null)" || return 1
   [ "$(sed -n 's/^pid=//p' "$f" | head -n1)" = "$pid" ] &&
     [ "$(sed -n 's/^start=//p' "$f" | head -n1)" = "$start" ] &&
     [ "$(sed -n 's/^run_id=//p' "$f" | head -n1)" = "$run_id" ] &&
     [ "$(sed -n 's/^codespace=//p' "$f" | head -n1)" = "$RA_CODESPACE" ] &&
     [ "$(sed -n 's/^port=//p' "$f" | head -n1)" = "$RA_PORT" ] || return 1
+  after="$(cat "$f" 2>/dev/null)" || return 1
+  [ "$before" = "$after" ] || return 1
   rm -f "$f"
 }
 
-forward_has_exited() {
+forward_identity_has_exited() {
   local pid="$1" start="$2" current_start state
+  [ -n "$start" ] || return 1
   state="$(proc_state "$pid")"
   case "$state" in Z*|X*) return 0 ;; esac
   current_start="$(proc_start "$pid")"
@@ -165,42 +200,75 @@ forward_has_exited() {
   ! kill -0 "$pid" 2>/dev/null
 }
 
-wait_forward_exit() {
-  local pid="$1" start="$2" i current
+wait_forward_identity_exit() {
+  local pid="$1" start="$2" run_id="$3" codespace="$4" port="$5" i
   for i in 1 2 3 4 5; do
-    if forward_has_exited "$pid" "$start"; then return 0; fi
-    current="$(forward_pid_if_ours)" || return 2
-    [ "$current" = "$pid" ] || return 2
+    if forward_identity_has_exited "$pid" "$start"; then return 0; fi
+    forward_process_matches "$pid" "$start" "$run_id" "$codespace" "$port" || return 2
     sleep 1
   done
   return 1
 }
 
-stop_forward() {
-  local pid="$1" force="$2" run_id="$3" start current rc
-  start="$(sed -n 's/^start=//p' "$(forward_meta_file)" | head -n1)"
-  [ -n "$start" ] || return 2
-  if ! current="$(forward_pid_if_ours)"; then
-    if forward_has_exited "$pid" "$start"; then
-      remove_forward_record "$pid" "$start" "$run_id" || return 2
+stop_forward_identity() {
+  local pid="$1" start="$2" run_id="$3" force="$4" require_record="$5" rc
+  forward_process_matches "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT" || {
+    if forward_identity_has_exited "$pid" "$start"; then
+      if [ -f "$(forward_meta_file)" ]; then
+        remove_forward_record "$pid" "$start" "$run_id" || { [ "$require_record" = "0" ] || return 2; }
+      elif [ "$require_record" = "1" ]; then
+        return 2
+      fi
       return 0
     fi
     return 2
-  fi
-  [ "$current" = "$pid" ] || return 2
-  [ "$(sed -n 's/^run_id=//p' "$(forward_meta_file)" | head -n1)" = "$run_id" ] || return 2
+  }
   kill -TERM "$pid" 2>/dev/null || true
-  wait_forward_exit "$pid" "$start"
+  wait_forward_identity_exit "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT"
   rc=$?
   if [ "$rc" -eq 1 ] && [ "$force" = "1" ]; then
-    current="$(forward_pid_if_ours)" || return 2
-    [ "$current" = "$pid" ] || return 2
+    forward_process_matches "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT" || return 2
     kill -KILL "$pid" 2>/dev/null || true
-    wait_forward_exit "$pid" "$start"
+    wait_forward_identity_exit "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT"
     rc=$?
   fi
   [ "$rc" -eq 0 ] || return "$rc"
-  remove_forward_record "$pid" "$start" "$run_id"
+  if [ -f "$(forward_meta_file)" ]; then
+    if remove_forward_record "$pid" "$start" "$run_id"; then return 0; fi
+  elif [ "$require_record" = "0" ]; then
+    return 0
+  fi
+  [ "$require_record" = "0" ] && return 0
+  return 2
+}
+
+stop_forward() {
+  local pid="$1" force="$2" run_id="$3" start
+  start="$(sed -n 's/^start=//p' "$(forward_meta_file)" | head -n1)"
+  [ -n "$start" ] || return 2
+  stop_forward_identity "$pid" "$start" "$run_id" "$force" 1
+}
+
+cleanup_stale_forward_record() {
+  local f pid start codespace port run_id before after
+  [ "$RA_DRY_RUN" = "1" ] && return 1
+  f="$(forward_meta_file)"
+  [ -f "$f" ] || return 1
+  forward_record_valid "$f" || return 2
+  before="$(cat "$f" 2>/dev/null)" || return 2
+  pid="$(printf '%s\n' "$before" | sed -n 's/^pid=//p' | head -n1)"
+  start="$(printf '%s\n' "$before" | sed -n 's/^start=//p' | head -n1)"
+  codespace="$(printf '%s\n' "$before" | sed -n 's/^codespace=//p' | head -n1)"
+  port="$(printf '%s\n' "$before" | sed -n 's/^port=//p' | head -n1)"
+  run_id="$(printf '%s\n' "$before" | sed -n 's/^run_id=//p' | head -n1)"
+  case "$pid" in ''|*[!0-9]*) return 2 ;; esac
+  case "$run_id" in ''|*[!A-Za-z0-9._-]*) return 2 ;; esac
+  [ -n "$start" ] && [ "$codespace" = "$RA_CODESPACE" ] && [ "$port" = "$RA_PORT" ] || return 2
+  if ! forward_identity_has_exited "$pid" "$start"; then return 2; fi
+  after="$(cat "$f" 2>/dev/null)" || return 2
+  [ "$before" = "$after" ] || return 2
+  rm -f "$f" || return 2
+  return 0
 }
 
 local_port_in_use() {

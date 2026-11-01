@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, chmodSync, existsSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, chmodSync, existsSync, symlinkSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -21,10 +21,25 @@ case "$2" in
   ssh)
     if [ "$3" != "-c" ] || [ "$5" != "--" ]; then echo "invalid ssh invocation: $*" >&2; exit 98; fi
     if [ "$6" = "true" ]; then exit 0; fi
-    if [ "$6" = "bash" ] && [ "$7" = "-s" ] && [ "$8" = "--" ]; then shift 5; exec "$@"; fi
+    if [ "$6" = "bash" ] && [ "$7" = "-s" ] && [ "$8" = "--" ]; then
+      if [ "\${RA_FAKE_GH_REMOTE_STUB:-0}" = "1" ]; then
+        [ "\${9:-}" = "start" ] && echo "RA_STATUS=started"
+        exit 0
+      fi
+      shift 5; exec "$@"
+    fi
     echo "unsupported ssh command: $*" >&2; exit 99
     ;;
   ports)
+    if [ -n "\${RA_FAKE_GH_COLLISION_FILE:-}" ]; then
+      cp "$RA_FAKE_GH_COLLISION_FILE" "$RA_STATE_DIR/forward-cs-one.meta"
+    fi
+    if [ -n "\${RA_FAKE_GH_LAUNCHED_PID_FILE:-}" ]; then
+      printf '%s\\n' "$$" > "$RA_FAKE_GH_LAUNCHED_PID_FILE"
+    fi
+    if [ "\${RA_FAKE_GH_HTTP_SERVER:-0}" = "1" ]; then
+      exec node -e 'process.title=process.env.RA_FAKE_GH_TITLE; require("http").createServer((q,r)=>r.end("ok")).listen(Number(process.env.RA_TEST_PORT))'
+    fi
     if [ "\${RA_FAKE_GH_TERM_RESIST:-0}" = "1" ]; then
       exec node -e 'process.title=process.env.RA_FAKE_GH_TITLE; process.on("SIGTERM",()=>{}); setInterval(()=>{},1000)'
     fi
@@ -99,6 +114,15 @@ describe("dev-start / dev-stop (dry run)", () => {
     const unsupported = spawnSync(path.join(bin, "gh"), ["codespace", "start", "-c", "cs-one"], { encoding: "utf8" });
     expect(unsupported.status).toBe(97);
     expect(unsupported.stderr).toContain("unsupported gh codespace subcommand");
+  });
+
+  it("shows only verified process recovery instructions in stop help", () => {
+    const help = run("dev-stop.sh", ["--help"]);
+    expect(help.status).toBe(0);
+    expect(help.stdout).toContain("scripts/dev-stop.sh --name NAME --force");
+    expect(help.stdout).toContain("do not signal a PID copied from a record");
+    expect(help.stdout).not.toContain('kill "$(sed');
+    expect(help.stdout).not.toContain("kill -TERM");
   });
 
   it("does not start an already running Codespace", () => {
@@ -180,6 +204,12 @@ describe("dev-start / dev-stop (dry run)", () => {
     });
   }
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const live = (pid: number) => {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      return !/^\d+ \(.*\) [ZX]/.test(stat);
+    } catch { return false; }
+  };
 
   it("does not erase or signal another run's forward record during failed startup cleanup", () => {
     fakeGh("cs-one\\tShutdown\\n");
@@ -212,7 +242,7 @@ describe("dev-start / dev-stop (dry run)", () => {
       writeForwardMeta(sleeper.pid!);
       const r = run("dev-stop.sh", ["--dry-run"]);
       expect(r.stdout).not.toContain("Closing port forward");
-      expect(r.stdout).toContain("not signalling");
+      expect(r.stdout).toContain("left untouched");
       expect(alive(sleeper.pid!)).toBe(true);
     } finally {
       sleeper.kill();
@@ -238,6 +268,132 @@ describe("dev-start / dev-stop (dry run)", () => {
       fwd.kill();
     }
   });
+
+  it("removes unchanged scoped metadata for an exited forward without signalling a reused PID", () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const work = path.join(tmp, "remote");
+    mkdirSync(work);
+    const sleeper = spawn("sleep", ["30"]);
+    try {
+      writeForwardMeta(sleeper.pid!, { start: "Mon Jan  1 00:00:00 2001" });
+      const metadata = path.join(tmp, "state/forward-cs-one.meta");
+      const original = readFileSync(metadata, "utf8");
+      const result = run("dev-stop.sh", [], {
+        RA_REMOTE_DIR: work,
+        RA_PID_FILE: path.join(tmp, "remote.pid"),
+        RA_REMOTE_SHELL_FLAGS: "-c",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("definitively exited");
+      expect(existsSync(metadata)).toBe(false);
+      expect(alive(sleeper.pid!)).toBe(true);
+
+      writeFileSync(metadata, original);
+      const dryRun = run("dev-stop.sh", ["--dry-run"], {
+        RA_REMOTE_DIR: work,
+        RA_PID_FILE: path.join(tmp, "remote.pid"),
+        RA_REMOTE_SHELL_FLAGS: "-c",
+      });
+      expect(dryRun.status).toBe(0);
+      expect(readFileSync(metadata, "utf8")).toBe(original);
+    } finally {
+      sleeper.kill();
+    }
+  });
+
+  it("recovers a stale scoped forward record during normal start and then stops the new forward", () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const port = String(47500 + (process.pid % 400));
+    const state = path.join(tmp, "state");
+    mkdirSync(state);
+    const metadata = path.join(state, "forward-cs-one.meta");
+    writeFileSync(metadata, `pid=99999999\nstart=Mon Jan  1 00:00:00 2001\ncodespace=cs-one\nport=${port}\nrun_id=old-run\n`);
+    writeFileSync(path.join(bin, "curl"), "#!/usr/bin/env bash\necho 200\n");
+    chmodSync(path.join(bin, "curl"), 0o755);
+    const work = path.join(tmp, "remote");
+    mkdirSync(work);
+    const pidFile = path.join(tmp, "remote.pid");
+    const env = {
+      RA_PORT: port,
+      RA_REMOTE_DIR: work,
+      RA_PID_FILE: pidFile,
+      RA_REMOTE_SHELL_FLAGS: "-c",
+      RA_FAKE_GH_REMOTE_STUB: "1",
+    };
+
+    const start = run("dev-start.sh", [], env);
+    expect(start.status, `${start.stdout}\n${start.stderr}`).toBe(0);
+    expect(start.stdout).toContain("definitively exited");
+    expect(readFileSync(metadata, "utf8")).toContain(`port=${port}\n`);
+    expect(run("dev-stop.sh", [], env).status).toBe(0);
+    expect(existsSync(metadata)).toBe(false);
+  }, 20000);
+
+  it("preserves a live process record whose command or owner does not match", () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const work = path.join(tmp, "remote");
+    mkdirSync(work);
+    const sleeper = spawn("sleep", ["30"]);
+    try {
+      writeForwardMeta(sleeper.pid!);
+      const metadata = path.join(tmp, "state/forward-cs-one.meta");
+      const original = readFileSync(metadata, "utf8");
+      const result = run("dev-stop.sh", [], {
+        RA_REMOTE_DIR: work,
+        RA_PID_FILE: path.join(tmp, "remote.pid"),
+        RA_REMOTE_SHELL_FLAGS: "-c",
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toContain("not signalling it");
+      expect(readFileSync(metadata, "utf8")).toBe(original);
+      expect(alive(sleeper.pid!)).toBe(true);
+    } finally {
+      sleeper.kill();
+    }
+  });
+
+  it("cleans up its unrecorded forward after a metadata link collision", async () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const work = path.join(tmp, "remote");
+    mkdirSync(work);
+    const port = String(47000 + (process.pid % 500));
+    const state = path.join(tmp, "state");
+    const title = `gh codespace ports forward ${port}:${port} -c cs-one`;
+    const existing = fakeForward(`codespace ports forward ${port}:${port} -c cs-one`, {
+      RA_FAKE_GH_TERM_RESIST: "1",
+      RA_FAKE_GH_TITLE: title,
+    });
+    const collision = path.join(tmp, "collision.meta");
+    const startedPidFile = path.join(tmp, "new-forward.pid");
+    const remotePidFile = path.join(tmp, "remote.pid");
+    try {
+      writeForwardMeta(existing.pid!, { port });
+      const metadata = path.join(state, "forward-cs-one.meta");
+      const original = readFileSync(metadata, "utf8");
+      writeFileSync(collision, original);
+      rmSync(metadata);
+      const result = run("dev-start.sh", [], {
+        RA_PORT: port,
+        RA_REMOTE_DIR: work,
+        RA_PID_FILE: remotePidFile,
+        RA_REMOTE_SHELL_FLAGS: "-c",
+        RA_FAKE_GH_REMOTE_STUB: "1",
+        RA_FAKE_GH_COLLISION_FILE: collision,
+        RA_FAKE_GH_HTTP_SERVER: "1",
+        RA_FAKE_GH_TITLE: title,
+        RA_FAKE_GH_LAUNCHED_PID_FILE: startedPidFile,
+        RA_TEST_PORT: port,
+      });
+      const launched = Number(readFileSync(startedPidFile, "utf8").trim());
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("could not be recorded and verified");
+      expect(readFileSync(metadata, "utf8")).toBe(original);
+      expect(live(launched)).toBe(false);
+      expect(alive(existing.pid!)).toBe(true);
+    } finally {
+      try { process.kill(existing.pid!, "SIGKILL"); } catch { /* already gone */ }
+    }
+  }, 20000);
 
   it("does not match a forward that belongs to a different Codespace", () => {
     fakeGh("cs-one\\tAvailable\\ncs-two\\tAvailable\\n");
@@ -363,6 +519,18 @@ describe("remote-dev.sh", () => {
   let work: string;
   const sh = (cmd: string, cwd = work) => spawnSync("bash", ["-c", cmd], { cwd, encoding: "utf8" });
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const liveGroup = (group: number) => {
+    try {
+      return readdirSync("/proc").some((entry) => {
+        if (!/^\d+$/.test(entry)) return false;
+        try {
+          const stat = readFileSync(`/proc/${entry}/stat`, "utf8");
+          const fields = stat.slice(stat.lastIndexOf(") ") + 2).split(" ");
+          return fields[0] !== "Z" && fields[0] !== "X" && Number(fields[2]) === group && Number(fields[3]) === group;
+        } catch { return false; }
+      });
+    } catch { return false; }
+  };
 
   function remote(action: string, extra: Record<string, string> = {}, force = "0", runId = "test-run", dir = work) {
     return spawnSync("bash", [path.join(scripts, "remote-dev.sh"), action, dir, PORT, force, runId], {
@@ -445,6 +613,87 @@ describe("remote-dev.sh", () => {
     expect(listening()).toBe(false);
     expect(existsSync(pidFile)).toBe(false);
   });
+
+  it("uses the actual npm CLI and a local Node server for start, reuse, and stop", () => {
+    if (spawnSync("npm", ["--version"]).status !== 0) return;
+    writeFileSync(path.join(work, "package.json"), JSON.stringify({ scripts: { dev: "node server.js" } }));
+    writeFileSync(
+      path.join(work, "server.js"),
+      'require("http").createServer((req, res) => res.end("ok")).listen(Number(process.env.PORT));\n',
+    );
+
+    const first = remote("start", {}, "0", "real-npm-run");
+    expect(first.status, `${first.stdout}\n${first.stderr}`).toBe(0);
+    expect(first.stdout).toContain("RA_STATUS=started");
+    expect(listening()).toBe(true);
+
+    const second = remote("start", {}, "0", "real-npm-run");
+    expect(second.status).toBe(0);
+    expect(second.stdout).toContain("RA_STATUS=reused");
+
+    const stopped = remote("stop", {}, "0", "real-npm-run");
+    expect(stopped.status).toBe(0);
+    expect(listening()).toBe(false);
+    expect(existsSync(pidFile)).toBe(false);
+  }, 30000);
+
+  it("cleans up an interrupted launch before its ownership record is published", async () => {
+    fakeNpm("sleep 60");
+    const launch = remoteAsync("start", {}, "0", "interrupt-run");
+    const handoff = `${pidFile}.launch.interrupt-run.${launch.child.pid}`;
+    try {
+      await waitFor(() => existsSync(handoff));
+      const group = Number(readFileSync(handoff, "utf8").trim().split(":")[0]);
+      launch.child.kill("SIGTERM");
+      const result = await launch.done;
+      expect(result.status).toBe(143);
+      expect(result.stderr).not.toContain("could not be verified as terminated");
+      expect(existsSync(pidFile)).toBe(false);
+      expect(existsSync(handoff)).toBe(false);
+      expect(existsSync(`${pidFile}.lock`)).toBe(false);
+      expect(liveGroup(group)).toBe(false);
+    } finally {
+      launch.child.kill("SIGKILL");
+    }
+  }, 30000);
+
+  it("cleans up after an ownership-record write failure without publishing a server", async () => {
+    fakeNpm(serverNpm);
+    writeFileSync(
+      path.join(bin, "mktemp"),
+      '#!/usr/bin/env bash\ntarget="${1/XXXXXX/writefail}"\nln -s /dev/full "$target" || exit 1\nprintf "%s\\n" "$target"\n',
+    );
+    chmodSync(path.join(bin, "mktemp"), 0o755);
+    const launch = remoteAsync("start", {}, "0", "write-failure");
+    const handoff = `${pidFile}.launch.write-failure.${launch.child.pid}`;
+    const tempRecord = `${pidFile}.tmp.writefail`;
+    try {
+      await waitFor(() => existsSync(handoff));
+      const result = await launch.done;
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("could not write complete dev server ownership record");
+      expect(existsSync(pidFile)).toBe(false);
+      expect(existsSync(handoff)).toBe(false);
+      expect(existsSync(tempRecord)).toBe(false);
+      expect(existsSync(`${pidFile}.lock`)).toBe(false);
+      expect(listening()).toBe(false);
+    } finally {
+      launch.child.kill("SIGKILL");
+    }
+  }, 30000);
+
+  it("preserves an existing record and cleans up the launch when publication collides", () => {
+    const collision = path.join(tmp, "existing.pid");
+    const original = "pid=another-run\nstart=unchanged\nowner=another-owner\n";
+    writeFileSync(collision, original);
+    fakeNpm(`cp "\${RA_COLLISION_RECORD_SOURCE}" "\${RA_PID_FILE}"\n${serverNpm}`);
+    const result = remote("start", { RA_COLLISION_RECORD_SOURCE: collision }, "0", "collision-run");
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("a process record appeared during launch");
+    expect(readFileSync(pidFile, "utf8")).toBe(original);
+    expect(existsSync(`${pidFile}.lock`)).toBe(false);
+    expect(listening()).toBe(false);
+  }, 30000);
 
   it.each(["start", "stop"] as const)("serializes remote start against concurrent %s", async (contender) => {
     fakeNpm(`sleep 1\n${serverNpm}`);

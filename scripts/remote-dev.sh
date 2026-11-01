@@ -13,6 +13,23 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 meta_get() { sed -n "s/^$1=//p" "$PIDFILE" 2>/dev/null | head -n1; }
 port_listening() { (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; }
 
+pid_record_valid() {
+  local content lines pid start dir port owner run_id expected
+  [ -f "$PIDFILE" ] && [ ! -L "$PIDFILE" ] || return 1
+  lines="$(wc -l <"$PIDFILE" 2>/dev/null | tr -d '[:space:]')" || return 1
+  [ "$lines" = "6" ] || return 1
+  content="$(cat "$PIDFILE" 2>/dev/null)" || return 1
+  pid="$(meta_get pid)"; start="$(meta_get start)"; dir="$(meta_get dir)"
+  port="$(meta_get port)"; owner="$(meta_get owner)"; run_id="$(meta_get run_id)"
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  case "$start" in ''|*[!0-9]*) return 1 ;; esac
+  case "$owner" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$run_id" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  [ "$dir" = "$DIR" ] && [ "$port" = "$PORT" ] || return 1
+  expected="$(printf 'pid=%s\nstart=%s\ndir=%s\nport=%s\nowner=%s\nrun_id=%s' "$pid" "$start" "$dir" "$port" "$owner" "$run_id")"
+  [ "$content" = "$expected" ]
+}
+
 # /proc/PID/stat fields after "comm"; 0=state, 2=pgrp, 3=session, 19=starttime.
 proc_field() {
   local s f
@@ -45,7 +62,7 @@ group_members_valid() {
 
 owned_group() {
   local pid start dir port owner cmd
-  [ -f "$PIDFILE" ] || return 1
+  pid_record_valid || return 1
   pid="$(meta_get pid)"; start="$(meta_get start)"
   dir="$(meta_get dir)"; port="$(meta_get port)"; owner="$(meta_get owner)"
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
@@ -102,12 +119,14 @@ stop_owned() {
 cleanup_launch() {
   local pid="$1" start="$2" owner="$3" i leader_start leader_group leader_session
   group_has_live_members "$pid" || return 0
+  [ -n "$start" ] || return 2
   group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
   leader_start="$(proc_field "$pid" 19)"
   leader_group="$(proc_field "$pid" 2)"
   leader_session="$(proc_field "$pid" 3)"
+  [ -z "$leader_start" ] || [ "$leader_start" = "$start" ] || return 2
   if [ "$leader_group" = "$pid" ] && [ "$leader_session" = "$pid" ]; then
-    [ -z "$start" ] || [ "$leader_start" = "$start" ] || return 2
+    :
   elif [ "$leader_group" = "$pid" ] || [ "$leader_session" = "$pid" ]; then
     return 2
   fi
@@ -155,7 +174,91 @@ release_remote_lock() {
   rm -f "$LOCK_DIR/owner"
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
-trap release_remote_lock EXIT
+
+LAUNCH_PID=""
+LAUNCH_START=""
+LAUNCH_OWNER=""
+LAUNCH_FILE=""
+LAUNCH_SERVER_PID=""
+LAUNCH_SERVER_START=""
+LAUNCH_HANDED_OFF=0
+LAUNCHING=0
+LAUNCH_IDENTITY_READY=0
+PENDING_SIGNAL=""
+RECORD_TMP=""
+RECORD_TMP_OWNED=0
+
+remove_launch_record() {
+  local before after
+  [ -n "$LAUNCH_SERVER_PID" ] && [ -n "$LAUNCH_SERVER_START" ] || return 0
+  [ -f "$PIDFILE" ] || return 0
+  before="$(cat "$PIDFILE" 2>/dev/null)" || return 1
+  if [ "$(meta_get pid)" != "$LAUNCH_SERVER_PID" ] ||
+     [ "$(meta_get start)" != "$LAUNCH_SERVER_START" ] ||
+     [ "$(meta_get dir)" != "$DIR" ] ||
+     [ "$(meta_get port)" != "$PORT" ] ||
+     [ "$(meta_get owner)" != "$LAUNCH_OWNER" ] ||
+     [ "$(meta_get run_id)" != "$RUN_ID" ]; then
+    return 0
+  fi
+  pid_record_valid || return 1
+  after="$(cat "$PIDFILE" 2>/dev/null)" || return 1
+  [ "$before" = "$after" ] || return 1
+  rm -f "$PIDFILE"
+}
+
+remove_launch_file() {
+  local content handoff_pid
+  [ -n "$LAUNCH_FILE" ] && [ -f "$LAUNCH_FILE" ] || return 0
+  content="$(cat "$LAUNCH_FILE" 2>/dev/null)" || return 1
+  handoff_pid="${content%%:*}"
+  case "$handoff_pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$content" = "$handoff_pid:$LAUNCH_OWNER" ] || return 1
+  rm -f "$LAUNCH_FILE"
+}
+
+remote_exit_cleanup() {
+  local status=$? launch_cleanup_ok=0 handoff_content handoff_pid
+  trap - EXIT INT TERM
+  if [ -n "$LAUNCH_PID" ] && [ "$LAUNCH_HANDED_OFF" != "1" ]; then
+    if cleanup_launch "$LAUNCH_PID" "$LAUNCH_START" "$LAUNCH_OWNER"; then
+      launch_cleanup_ok=1
+      if [ -z "$LAUNCH_SERVER_PID" ] && [ -f "$LAUNCH_FILE" ]; then
+        handoff_content="$(cat "$LAUNCH_FILE" 2>/dev/null)"
+        handoff_pid="${handoff_content%%:*}"
+        case "$handoff_pid" in ''|*[!0-9]*) handoff_pid="" ;; esac
+        if [ -n "$handoff_pid" ] && [ "$handoff_content" = "$handoff_pid:$LAUNCH_OWNER" ]; then
+          LAUNCH_SERVER_PID="$handoff_pid"
+          LAUNCH_SERVER_START="$(proc_field "$handoff_pid" 19)"
+        fi
+      fi
+      remove_launch_record || echo "WARNING: could not safely remove this launch's ownership record." >&2
+    else
+      echo "WARNING: interrupted or failed launch could not be verified as terminated; inspect $LOG and retain its ownership record." >&2
+      [ "$status" -ne 0 ] || status=1
+    fi
+  fi
+  if [ "$LAUNCH_HANDED_OFF" = "1" ] || [ "$launch_cleanup_ok" = "1" ]; then
+    remove_launch_file || echo "WARNING: could not verify this launch's handoff file; it was retained: $LAUNCH_FILE" >&2
+  fi
+  if [ "$RECORD_TMP_OWNED" = "1" ] && [ -n "$RECORD_TMP" ]; then
+    rm -f "$RECORD_TMP" || echo "WARNING: could not remove this launch's temporary ownership record: $RECORD_TMP" >&2
+  fi
+  release_remote_lock
+  exit "$status"
+}
+
+remote_signal() {
+  if [ "$LAUNCHING" = "1" ] && [ "$LAUNCH_IDENTITY_READY" != "1" ]; then
+    PENDING_SIGNAL="$1"
+    return 0
+  fi
+  case "$1" in INT) exit 130 ;; TERM) exit 143 ;; esac
+}
+
+trap remote_exit_cleanup EXIT
+trap 'remote_signal INT' INT
+trap 'remote_signal TERM' TERM
 
 case "$ACTION" in
   start)
@@ -168,64 +271,103 @@ case "$ACTION" in
       echo "Dev server already running (pid $pid); reusing."; echo "RA_STATUS=reused"; exit 0
     fi
     if [ -f "$PIDFILE" ]; then
+      pid_record_valid || die "existing dev server record is malformed or mismatched; it was retained for inspection"
       old_pid="$(meta_get pid)"
-      case "$old_pid" in
-        ''|*[!0-9]*) rm -f "$PIDFILE" ;;
-        *) if group_has_live_members "$old_pid"; then
-             die "an existing recorded process group is still active but cannot be verified; ownership record retained"
-           fi
-           rm -f "$PIDFILE"
-           ;;
-      esac
+      old_start="$(meta_get start)"
+      old_current_start="$(proc_field "$old_pid" 19)"
+      if group_has_live_members "$old_pid" || [ "$old_current_start" = "$old_start" ]; then
+        die "an existing recorded process group is still active or ambiguous; ownership record retained"
+      fi
+      old_record="$(cat "$PIDFILE" 2>/dev/null)" || die "could not inspect existing process record; it was retained"
+      [ "$(cat "$PIDFILE" 2>/dev/null)" = "$old_record" ] || die "existing process record changed during stale cleanup; it was retained"
+      rm -f "$PIDFILE" || die "could not remove the unchanged stale process record"
     fi
     port_listening && die "port $PORT already in use by a process this workflow did not start."
     [ -d node_modules ] || npm install </dev/null || die "npm install failed"
     umask 077
-    owner="$(printf '%s-%s-%s' "$RUN_ID" "$$" "$RANDOM$RANDOM")"
-    launch_file="$PIDFILE.launch.$RUN_ID.$$"
-    setsid env RA_DEV_OWNER="$owner" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'echo $$ > "$1"; exec npm run dev' _ "$launch_file" >"$LOG" 2>&1 </dev/null &
-    launched=$!
-    launch_start="$(proc_field "$launched" 19)"
+    LAUNCH_OWNER="$(printf '%s-%s-%s' "$RUN_ID" "$$" "$RANDOM$RANDOM")"
+    LAUNCH_FILE="$PIDFILE.launch.$RUN_ID.$$"
+    if [ -e "$LAUNCH_FILE" ] || [ -L "$LAUNCH_FILE" ]; then
+      die "this invocation's unique launch handoff path already exists; it was left untouched: $LAUNCH_FILE"
+    fi
+    LAUNCHING=1
+    setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null &
+    LAUNCH_PID=$!
+    LAUNCH_START="$(proc_field "$LAUNCH_PID" 19)"
+    LAUNCH_IDENTITY_READY=1
+    LAUNCHING=0
+    [ -z "$PENDING_SIGNAL" ] || remote_signal "$PENDING_SIGNAL"
     pid=""
     for i in 1 2 3 4 5 6 7 8 9 10; do
-      [ -s "$launch_file" ] && { pid="$(cat "$launch_file")"; break; }
+      if [ -s "$LAUNCH_FILE" ]; then
+        handoff_content="$(cat "$LAUNCH_FILE")"
+        handoff_pid="${handoff_content%%:*}"
+        if [ "$handoff_content" = "$handoff_pid:$LAUNCH_OWNER" ]; then pid="$handoff_pid"; fi
+        break
+      fi
       sleep 1
     done
-    rm -f "$launch_file"
+    LAUNCH_SERVER_PID="$pid"
     case "$pid" in
       ''|*[!0-9]*)
-        cleanup_launch "$launched" "$launch_start" "$owner" || die "could not verify cleanup of incomplete launch group; inspect $LOG"
         die "could not determine dev server pid; see $LOG"
         ;;
     esac
     sleep 1
     start="$(proc_field "$pid" 19)"
+    LAUNCH_SERVER_START="$start"
     if [ -z "$start" ] || [ "$(proc_field "$pid" 2)" != "$pid" ] || [ "$(proc_field "$pid" 3)" != "$pid" ]; then
-      cleanup_launch "$launched" "$launch_start" "$owner" || die "could not verify cleanup of incomplete launch group; inspect $LOG"
       die "dev server exited immediately or did not start as its own session; see $LOG"
     fi
-    record_tmp="$PIDFILE.tmp.$$"
-    printf 'pid=%s\nstart=%s\ndir=%s\nport=%s\nowner=%s\nrun_id=%s\n' \
-      "$pid" "$start" "$DIR" "$PORT" "$owner" "$RUN_ID" >"$record_tmp"
+    record_tmp="$(mktemp "${PIDFILE}.tmp.XXXXXX")" || die "could not create unique ownership-record temp file; launch cleanup will be attempted; see $LOG"
+    RECORD_TMP="$record_tmp"
+    RECORD_TMP_OWNED=1
+    record_expected="$(printf 'pid=%s\nstart=%s\ndir=%s\nport=%s\nowner=%s\nrun_id=%s' \
+      "$pid" "$start" "$DIR" "$PORT" "$LAUNCH_OWNER" "$RUN_ID")"
+    if ! printf '%s\n' "$record_expected" >"$record_tmp"; then
+      die "could not write complete dev server ownership record; launch cleanup will be attempted; see $LOG"
+    fi
+    record_actual="$(cat "$record_tmp" 2>/dev/null)" || record_actual=""
+    record_lines="$(wc -l <"$record_tmp" 2>/dev/null | tr -d '[:space:]')"
+    if [ "$record_actual" != "$record_expected" ] || [ "$record_lines" != "6" ]; then
+      die "temporary dev server ownership record was incomplete or invalid; launch cleanup will be attempted; see $LOG"
+    fi
     if ! ln "$record_tmp" "$PIDFILE"; then
-      rm -f "$record_tmp"
-      cleanup_launch "$launched" "$launch_start" "$owner" || die "record collision and launch cleanup could not be verified; inspect $LOG"
       die "a process record appeared during launch; this launch was stopped without replacing it"
     fi
-    rm -f "$record_tmp"
+    if ! cmp -s "$record_tmp" "$PIDFILE"; then
+      die "published dev server ownership record did not match the validated temporary record; launch cleanup will be attempted; see $LOG"
+    fi
+    verified_pid="$(owned_group)" || verified_pid=""
+    if [ "$verified_pid" != "$pid" ]; then
+      die "published dev server ownership record could not be verified; launch cleanup will be attempted; see $LOG"
+    fi
+    rm -f "$record_tmp" || die "could not remove this launch's temporary ownership record"
+    RECORD_TMP=""
+    RECORD_TMP_OWNED=0
+    remove_launch_file || die "could not verify removal of this launch's handoff file"
+    LAUNCH_HANDED_OFF=1
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
       if port_listening; then echo "Dev server listening on $PORT."; echo "RA_STATUS=started"; exit 0; fi
-      if ! group_has_live_members "$pid"; then rm -f "$PIDFILE"; die "dev server exited early; see $LOG"; fi
+      if ! group_has_live_members "$pid"; then
+        remove_launch_record || die "dev server exited early but its record changed; it was retained for inspection"
+        die "dev server exited early; see $LOG"
+      fi
       owned_group >/dev/null || die "dev server launch group could not be verified; ownership record retained"
       sleep 2
     done
-    if stop_owned 1; then rm -f "$PIDFILE"; die "dev server not listening after 30s (stopped it); see $LOG"; fi
+    if stop_owned 1; then
+      remove_launch_record || die "server stopped but its ownership record changed; it was retained for inspection"
+      die "dev server not listening after 30s (stopped it); see $LOG"
+    fi
     die "dev server did not stop cleanly; ownership record retained for safe recovery"
     ;;
   stop|stop-start)
     expected_run=""
     [ "$ACTION" = "stop-start" ] && expected_run="$RUN_ID"
     if [ -f "$PIDFILE" ]; then
+      pid_record_valid || die "recorded dev server metadata is malformed or mismatched; not signalling or removing it."
+      old_record="$(cat "$PIDFILE" 2>/dev/null)" || die "could not inspect server record; not signalling or removing it."
       if [ -n "$expected_run" ] && [ "$(meta_get run_id)" != "$expected_run" ]; then
         echo "No server started by this run; leaving the recorded server untouched."
         exit 0
@@ -233,8 +375,9 @@ case "$ACTION" in
       stop_owned "$FORCE"
       rc=$?
       if [ "$rc" -eq 0 ]; then
+        [ "$(cat "$PIDFILE" 2>/dev/null)" = "$old_record" ] || die "server record changed during shutdown; leaving it untouched."
         echo "Dev server stopped."
-        rm -f "$PIDFILE"
+        rm -f "$PIDFILE" || die "server stopped but its ownership record could not be removed."
       elif [ "$rc" -eq 1 ]; then
         die "dev server group did not exit within the grace period; ownership record retained. Re-run with --force."
       else

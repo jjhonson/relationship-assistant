@@ -7,8 +7,8 @@ Usage: scripts/dev-start.sh [--name CODESPACE] [--dry-run]
 Wakes (or reuses) the repository's Codespace over SSH, starts the Next.js dev server inside it, and a
 Mac-local port forward so http://localhost:3000 works (Gmail OAuth callback unchanged).
 Never switches, pulls or merges branches; never touches .env.local.
-If startup fails, everything this run launched (forward, server, and a Codespace this run
-started) is cleaned up; anything that was already running is left alone.
+If startup fails, the scripts attempt to clean up only resources this run launched; if ownership
+or termination cannot be verified, they retain metadata and report what needs inspection.
 Env: RA_CODESPACE, RA_REPO, RA_PORT, RA_REMOTE_DIR, RA_STATE_DIR, RA_DRY_RUN=1
 USAGE
 }
@@ -30,16 +30,10 @@ cleanup_failed_start() {
   log "Start failed; cleaning up what this run launched..."
   if [ "$RA_DRY_RUN" = "1" ]; then return; fi
   if [ -n "$STARTED_FWD" ]; then
-    if [ "$(sed -n 's/^pid=//p' "$(forward_meta_file)" 2>/dev/null | head -n1)" = "$STARTED_FWD" ] &&
-       [ "$(sed -n 's/^start=//p' "$(forward_meta_file)" 2>/dev/null | head -n1)" = "$STARTED_FWD_START" ] &&
-       [ "$(sed -n 's/^run_id=//p' "$(forward_meta_file)" 2>/dev/null | head -n1)" = "$RA_RUN_ID" ]; then
-      if stop_forward "$STARTED_FWD" 0 "$RA_RUN_ID"; then
-        log "[Mac] This run's port forward exited."
-      else
-        log "WARNING: this run's forward could not be verified as terminated; its ownership record was retained."
-      fi
+    if stop_forward_identity "$STARTED_FWD" "$STARTED_FWD_START" "$RA_RUN_ID" 0 0; then
+      log "[Mac] This run's port forward exited; only its matching ownership record was removed."
     else
-      log "WARNING: forward ownership record no longer identifies this run; it was left untouched."
+      log "WARNING: this run's forward could not be verified as terminated; no mismatched ownership record was changed."
     fi
   fi
   remote_run stop-start "$RA_RUN_ID" >/dev/null 2>&1 \
@@ -87,7 +81,11 @@ if pid="$(forward_pid_if_ours)"; then
   log "[Mac] Port forward already running (pid $pid); reusing."
 else
   if [ "$RA_DRY_RUN" != "1" ] && [ -f "$(forward_meta_file)" ]; then
-    start_fail "recorded forward does not match this Codespace/port or is stale; ownership record retained for inspection"
+    if cleanup_stale_forward_record; then
+      log "[Mac] Removed unchanged ownership metadata for a definitively exited forward."
+    else
+      start_fail "recorded forward is live, mismatched, malformed, or outside this Codespace/port; record retained for inspection at $(forward_meta_file)"
+    fi
   fi
   if local_port_in_use; then
     start_fail "localhost:$RA_PORT is already in use by a process this workflow did not start (or by a forward for another Codespace). Free it and retry."
@@ -99,7 +97,7 @@ else
     mkdir -p "$RA_STATE_DIR"
     nohup env RA_FORWARD_OWNER="$RA_RUN_ID" gh codespace ports forward "$RA_PORT:$RA_PORT" -c "$RA_CODESPACE" >"$RA_STATE_DIR/forward-$RA_CODESPACE.log" 2>&1 </dev/null &
     STARTED_FWD=$!
-    record_forward "$STARTED_FWD" || start_fail "port forward exited immediately; see $RA_STATE_DIR/forward-$RA_CODESPACE.log"
+    record_forward "$STARTED_FWD" || start_fail "port forward could not be recorded and verified; its process was independently checked for cleanup; see $RA_STATE_DIR/forward-$RA_CODESPACE.log"
     sleep 1
     forward_pid_if_ours >/dev/null || start_fail "port forward exited or could not be verified; see $RA_STATE_DIR/forward-$RA_CODESPACE.log"
   fi
