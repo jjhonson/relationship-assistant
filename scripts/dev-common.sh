@@ -135,6 +135,25 @@ forward_process_matches() {
   return 1
 }
 
+forward_launch_process_matches() {
+  local pid="$1" start="$2" run_id="$3" codespace="$4" port="$5" cmd
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ -n "$start" ] && [ "$(proc_start "$pid")" = "$start" ] || return 1
+  forward_owner_matches "$pid" "$run_id" || return 1
+  cmd="$(ps -p "$pid" -o command= 2>/dev/null)" || return 1
+  case "$cmd" in
+    *"gh codespace ports forward $port:$port -c $codespace"*) return 0 ;;
+  esac
+  return 1
+}
+
+forward_launch_pending_matches() {
+  local pid="$1" start="$2" run_id="$3"
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ -n "$start" ] && [ "$(proc_start "$pid")" = "$start" ] || return 1
+  forward_owner_matches "$pid" "$run_id"
+}
+
 forward_pid_if_ours() {
   local f pid start port cs run_id
   f="$(forward_meta_file)"
@@ -153,10 +172,14 @@ forward_pid_if_ours() {
 
 # Record a forward we just launched (PID $1).
 record_forward() {
-  local f tmp
-  STARTED_FWD_START="$(proc_start "$1")"
+  local f tmp i
+  for i in {1..50}; do
+    STARTED_FWD_START="$(proc_start "$1")"
+    [ -n "$STARTED_FWD_START" ] && break
+    sleep 0.1
+  done
   [ -n "$STARTED_FWD_START" ] || return 1
-  forward_process_matches "$1" "$STARTED_FWD_START" "$RA_RUN_ID" "$RA_CODESPACE" "$RA_PORT" || return 1
+  wait_forward_ready "$1" "$STARTED_FWD_START" "$RA_RUN_ID" "$RA_CODESPACE" "$RA_PORT" || return 1
   f="$(forward_meta_file)"
   tmp="$(mktemp "${f}.tmp.XXXXXX")" || return 1
   if ! printf 'pid=%s\nstart=%s\ncodespace=%s\nport=%s\nrun_id=%s\n' \
@@ -204,15 +227,37 @@ wait_forward_identity_exit() {
   local pid="$1" start="$2" run_id="$3" codespace="$4" port="$5" i
   for i in 1 2 3 4 5; do
     if forward_identity_has_exited "$pid" "$start"; then return 0; fi
-    forward_process_matches "$pid" "$start" "$run_id" "$codespace" "$port" || return 2
+    forward_process_matches "$pid" "$start" "$run_id" "$codespace" "$port" ||
+      forward_launch_process_matches "$pid" "$start" "$run_id" "$codespace" "$port" || return 2
     sleep 1
+  done
+  return 1
+}
+
+wait_forward_ready() {
+  local pid="$1" start="$2" run_id="$3" codespace="$4" port="$5" i
+  for i in {1..50}; do
+    if forward_process_matches "$pid" "$start" "$run_id" "$codespace" "$port"; then return 0; fi
+    forward_identity_has_exited "$pid" "$start" && return 1
+    forward_launch_process_matches "$pid" "$start" "$run_id" "$codespace" "$port" ||
+      forward_launch_pending_matches "$pid" "$start" "$run_id" || return 1
+    sleep 0.1
   done
   return 1
 }
 
 stop_forward_identity() {
   local pid="$1" start="$2" run_id="$3" force="$4" require_record="$5" rc
-  forward_process_matches "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT" || {
+  if ! forward_process_matches "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT" &&
+     ! forward_launch_process_matches "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT" &&
+     [ "$require_record" = "0" ] &&
+     forward_launch_pending_matches "$pid" "$start" "$run_id"; then
+    wait_forward_ready "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT" || {
+      forward_identity_has_exited "$pid" "$start" || return 2
+    }
+  fi
+  forward_process_matches "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT" ||
+    forward_launch_process_matches "$pid" "$start" "$run_id" "$RA_CODESPACE" "$RA_PORT" || {
     if forward_identity_has_exited "$pid" "$start"; then
       if [ -f "$(forward_meta_file)" ]; then
         remove_forward_record "$pid" "$start" "$run_id" || { [ "$require_record" = "0" ] || return 2; }

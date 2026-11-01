@@ -30,6 +30,13 @@ cleanup_failed_start() {
   log "Start failed; cleaning up what this run launched..."
   if [ "$RA_DRY_RUN" = "1" ]; then return; fi
   if [ -n "$STARTED_FWD" ]; then
+    if [ -z "$STARTED_FWD_START" ]; then
+      for i in {1..50}; do
+        STARTED_FWD_START="$(proc_start "$STARTED_FWD")"
+        [ -n "$STARTED_FWD_START" ] && break
+        sleep 0.1
+      done
+    fi
     if stop_forward_identity "$STARTED_FWD" "$STARTED_FWD_START" "$RA_RUN_ID" 0 0; then
       log "[Mac] This run's port forward exited; only its matching ownership record was removed."
     else
@@ -95,7 +102,7 @@ else
     log "[dry-run] gh codespace ports forward $RA_PORT:$RA_PORT -c $RA_CODESPACE"
   else
     mkdir -p "$RA_STATE_DIR"
-    nohup env RA_FORWARD_OWNER="$RA_RUN_ID" gh codespace ports forward "$RA_PORT:$RA_PORT" -c "$RA_CODESPACE" >"$RA_STATE_DIR/forward-$RA_CODESPACE.log" 2>&1 </dev/null &
+    RA_FORWARD_OWNER="$RA_RUN_ID" nohup env gh codespace ports forward "$RA_PORT:$RA_PORT" -c "$RA_CODESPACE" >"$RA_STATE_DIR/forward-$RA_CODESPACE.log" 2>&1 </dev/null &
     STARTED_FWD=$!
     record_forward "$STARTED_FWD" || start_fail "port forward could not be recorded and verified; its process was independently checked for cleanup; see $RA_STATE_DIR/forward-$RA_CODESPACE.log"
     sleep 1

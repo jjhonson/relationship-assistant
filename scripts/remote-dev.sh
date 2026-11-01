@@ -94,6 +94,37 @@ group_has_live_members() {
   return 1
 }
 
+launch_process_matches() {
+  local pid="$1" start="$2" owner="$3" dir="$4" port="$5" cmd
+  [ -n "$start" ] || return 1
+  [ "$(proc_field "$pid" 19)" = "$start" ] || return 1
+  [ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" = "$dir" ] || return 1
+  cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null)" || return 1
+  case "$cmd" in *"env RA_DEV_OWNER=$owner PORT=$port bash"*"npm run dev"*) return 0 ;; esac
+  return 1
+}
+
+launch_pending_matches() {
+  local pid="$1" start="$2" owner="$3" dir="$4"
+  [ -n "$start" ] || return 1
+  [ "$(proc_field "$pid" 19)" = "$start" ] || return 1
+  [ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" = "$dir" ] || return 1
+  has_env "$pid" RA_DEV_OWNER "$owner"
+}
+
+launch_identity_exited() {
+  local pid="$1" start="$2" current state
+  if [ ! -e "/proc/$pid" ]; then return 0; fi
+  [ -r "/proc/$pid/stat" ] || return 1
+  current="$(proc_field "$pid" 19)"
+  [ -n "$current" ] || return 1
+  if [ -n "$start" ] && [ "$current" != "$start" ]; then return 0; fi
+  [ -n "$start" ] || return 1
+  state="$(proc_field "$pid" 0)"
+  case "$state" in Z|X|'') return 0 ;; esac
+  return 1
+}
+
 stop_owned() {
   local pid i
   pid="$(meta_get pid)"
@@ -117,34 +148,66 @@ stop_owned() {
 }
 
 cleanup_launch() {
-  local pid="$1" start="$2" owner="$3" i leader_start leader_group leader_session
-  group_has_live_members "$pid" || return 0
-  [ -n "$start" ] || return 2
-  group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
-  leader_start="$(proc_field "$pid" 19)"
-  leader_group="$(proc_field "$pid" 2)"
-  leader_session="$(proc_field "$pid" 3)"
-  [ -z "$leader_start" ] || [ "$leader_start" = "$start" ] || return 2
-  if [ "$leader_group" = "$pid" ] && [ "$leader_session" = "$pid" ]; then
-    :
-  elif [ "$leader_group" = "$pid" ] || [ "$leader_session" = "$pid" ]; then
+  local pid="$1" start="$2" owner="$3" i target=""
+  for i in {1..50}; do
+    [ -n "$start" ] || start="$(proc_field "$pid" 19)"
+    if group_has_live_members "$pid" && group_members_valid "$pid" "$owner" "$DIR" "$PORT"; then
+      target=group
+      break
+    fi
+    if launch_process_matches "$pid" "$start" "$owner" "$DIR" "$PORT"; then
+      target=pid
+      break
+    fi
+    if ! group_has_live_members "$pid" && launch_identity_exited "$pid" "$start"; then return 0; fi
+    launch_pending_matches "$pid" "$start" "$owner" "$DIR" || return 2
+    sleep 0.1
+  done
+  case "$target" in
+    group) kill -TERM -- "-$pid" 2>/dev/null || true ;;
+    pid) kill -TERM "$pid" 2>/dev/null || true ;;
+    *) return 2 ;;
+  esac
+  for i in {1..5}; do
+    if ! group_has_live_members "$pid" && launch_identity_exited "$pid" "$start"; then return 0; fi
+    if group_has_live_members "$pid"; then
+      if ! group_members_valid "$pid" "$owner" "$DIR" "$PORT" &&
+         ! launch_process_matches "$pid" "$start" "$owner" "$DIR" "$PORT" &&
+         ! launch_pending_matches "$pid" "$start" "$owner" "$DIR"; then
+        return 2
+      fi
+    elif ! launch_process_matches "$pid" "$start" "$owner" "$DIR" "$PORT" &&
+         ! launch_pending_matches "$pid" "$start" "$owner" "$DIR"; then
+      launch_identity_exited "$pid" "$start" && return 0
+      return 2
+    fi
+    sleep 1
+  done
+  if group_has_live_members "$pid" && group_members_valid "$pid" "$owner" "$DIR" "$PORT"; then
+    kill -KILL -- "-$pid" 2>/dev/null || true
+  elif launch_process_matches "$pid" "$start" "$owner" "$DIR" "$PORT"; then
+    kill -KILL "$pid" 2>/dev/null || true
+  elif ! group_has_live_members "$pid" && launch_identity_exited "$pid" "$start"; then
+    return 0
+  else
     return 2
   fi
-  kill -TERM -- "-$pid" 2>/dev/null || true
-  for i in 1 2 3 4 5; do
-    group_has_live_members "$pid" || return 0
-    group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
+  for i in {1..5}; do
+    if ! group_has_live_members "$pid" && launch_identity_exited "$pid" "$start"; then return 0; fi
+    if group_has_live_members "$pid"; then
+      if ! group_members_valid "$pid" "$owner" "$DIR" "$PORT" &&
+         ! launch_process_matches "$pid" "$start" "$owner" "$DIR" "$PORT" &&
+         ! launch_pending_matches "$pid" "$start" "$owner" "$DIR"; then
+        return 2
+      fi
+    elif ! launch_process_matches "$pid" "$start" "$owner" "$DIR" "$PORT" &&
+         ! launch_pending_matches "$pid" "$start" "$owner" "$DIR"; then
+      launch_identity_exited "$pid" "$start" && return 0
+      return 2
+    fi
     sleep 1
   done
-  group_has_live_members "$pid" || return 0
-  group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
-  kill -KILL -- "-$pid" 2>/dev/null || true
-  for i in 1 2 3 4 5; do
-    group_has_live_members "$pid" || return 0
-    group_members_valid "$pid" "$owner" "$DIR" "$PORT" || return 2
-    sleep 1
-  done
-  group_has_live_members "$pid" && return 1
+  if group_has_live_members "$pid" || ! launch_identity_exited "$pid" "$start"; then return 1; fi
   return 0
 }
 
@@ -234,7 +297,7 @@ remote_exit_cleanup() {
       fi
       remove_launch_record || echo "WARNING: could not safely remove this launch's ownership record." >&2
     else
-      echo "WARNING: interrupted or failed launch could not be verified as terminated; inspect $LOG and retain its ownership record." >&2
+      echo "WARNING: interrupted or failed launch could not be verified as terminated; inspect $LOG. Remote lifecycle lock left in place: $LOCK_DIR" >&2
       [ "$status" -ne 0 ] || status=1
     fi
   fi
@@ -244,7 +307,9 @@ remote_exit_cleanup() {
   if [ "$RECORD_TMP_OWNED" = "1" ] && [ -n "$RECORD_TMP" ]; then
     rm -f "$RECORD_TMP" || echo "WARNING: could not remove this launch's temporary ownership record: $RECORD_TMP" >&2
   fi
-  release_remote_lock
+  if [ "$LAUNCH_HANDED_OFF" = "1" ] || [ "$launch_cleanup_ok" = "1" ] || [ -z "$LAUNCH_PID" ]; then
+    release_remote_lock
+  fi
   exit "$status"
 }
 
@@ -291,7 +356,7 @@ case "$ACTION" in
       die "this invocation's unique launch handoff path already exists; it was left untouched: $LAUNCH_FILE"
     fi
     LAUNCHING=1
-    setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null &
+    RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null &
     LAUNCH_PID=$!
     LAUNCH_START="$(proc_field "$LAUNCH_PID" 19)"
     LAUNCH_IDENTITY_READY=1

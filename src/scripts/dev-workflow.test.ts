@@ -7,6 +7,9 @@ import path from "node:path";
 const scripts = path.resolve(__dirname, "../../scripts");
 let tmp: string;
 let bin: string;
+const linux = process.platform === "linux";
+const linuxIt = linux ? it : it.skip;
+const linuxDescribe = linux ? describe : describe.skip;
 
 function fakeGh(listOutput: string) {
   const file = path.join(bin, "gh");
@@ -165,7 +168,7 @@ describe("dev-start / dev-stop (dry run)", () => {
     expect(existsSync(unusedState)).toBe(false);
   });
 
-  it("cleans up a Codespace it woke when the remote server fails before forwarding", () => {
+  linuxIt("cleans up a Codespace it woke when the remote server fails before forwarding", () => {
     fakeGh("cs-one\\tShutdown\\n");
     const work = path.join(tmp, "remote");
     mkdirSync(path.join(work, "node_modules"), { recursive: true });
@@ -205,13 +208,11 @@ describe("dev-start / dev-stop (dry run)", () => {
   }
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const live = (pid: number) => {
-    try {
-      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-      return !/^\d+ \(.*\) [ZX]/.test(stat);
-    } catch { return false; }
+    const state = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" }).stdout.trim();
+    return state !== "" && !/^[ZX]/.test(state);
   };
 
-  it("does not erase or signal another run's forward record during failed startup cleanup", () => {
+  linuxIt("does not erase or signal another run's forward record during failed startup cleanup", () => {
     fakeGh("cs-one\\tShutdown\\n");
     const work = path.join(tmp, "remote");
     mkdirSync(path.join(work, "node_modules"), { recursive: true });
@@ -269,7 +270,7 @@ describe("dev-start / dev-stop (dry run)", () => {
     }
   });
 
-  it("removes unchanged scoped metadata for an exited forward without signalling a reused PID", () => {
+  linuxIt("removes unchanged scoped metadata for an exited forward without signalling a reused PID", () => {
     fakeGh("cs-one\\tAvailable\\n");
     const work = path.join(tmp, "remote");
     mkdirSync(work);
@@ -329,7 +330,7 @@ describe("dev-start / dev-stop (dry run)", () => {
     expect(existsSync(metadata)).toBe(false);
   }, 20000);
 
-  it("preserves a live process record whose command or owner does not match", () => {
+  linuxIt("preserves a live process record whose command or owner does not match", () => {
     fakeGh("cs-one\\tAvailable\\n");
     const work = path.join(tmp, "remote");
     mkdirSync(work);
@@ -395,6 +396,106 @@ describe("dev-start / dev-stop (dry run)", () => {
     }
   }, 20000);
 
+  it("waits for a delayed forwarding launcher and cleans it up when interrupted", async () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const port = String(46500 + (process.pid % 400));
+    const state = path.join(tmp, "state");
+    const gate = path.join(tmp, "forward-gate");
+    const ready = path.join(tmp, "forward-ready");
+    const launcherPidFile = path.join(tmp, "forward-launcher.pid");
+    const realEnv = spawnSync("which", ["env"], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(
+      path.join(bin, "env"),
+      `#!/usr/bin/env bash
+printf '%s\\n' "$$" > "$RA_TEST_LAUNCHER_PID_FILE"
+: > "$RA_TEST_LAUNCHER_READY"
+while [ ! -e "$RA_TEST_LAUNCHER_GATE" ]; do sleep 0.02; done
+exec "${realEnv}" "$@"
+`,
+    );
+    chmodSync(path.join(bin, "env"), 0o755);
+    const launch = runAsync("dev-start.sh", [], {
+      RA_PORT: port,
+      RA_FAKE_GH_REMOTE_STUB: "1",
+      RA_TEST_LAUNCHER_GATE: gate,
+      RA_TEST_LAUNCHER_READY: ready,
+      RA_TEST_LAUNCHER_PID_FILE: launcherPidFile,
+    });
+    let launcherPid = 0;
+    try {
+      await waitFor(() => existsSync(ready));
+      launcherPid = Number(readFileSync(launcherPidFile, "utf8").trim());
+      expect(launcherPid).toBeGreaterThan(0);
+      expect(launch.child.exitCode).toBeNull();
+      expect(existsSync(path.join(state, "forward-cs-one.meta"))).toBe(false);
+
+      launch.child.kill("SIGTERM");
+      const result = await launch.done;
+      expect(result.status).not.toBe(0);
+      expect(live(launcherPid)).toBe(false);
+      expect(existsSync(path.join(state, "forward-cs-one.meta"))).toBe(false);
+    } finally {
+      writeFileSync(gate, "");
+      if (launcherPid > 0 && live(launcherPid)) {
+        try { process.kill(launcherPid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      if (launch.child.exitCode === null) launch.child.kill("SIGKILL");
+    }
+  }, 20000);
+
+  it("records the forward only after a delayed launcher becomes gh", async () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const port = String(46900 + (process.pid % 400));
+    const state = path.join(tmp, "state");
+    const gate = path.join(tmp, "forward-ready-gate");
+    const ready = path.join(tmp, "forward-ready-marker");
+    const launcherPidFile = path.join(tmp, "forward-ready-pid");
+    const realEnv = spawnSync("which", ["env"], { encoding: "utf8" }).stdout.trim();
+    const title = `gh codespace ports forward ${port}:${port} -c cs-one`;
+    writeFileSync(
+      path.join(bin, "env"),
+      `#!/usr/bin/env bash
+printf '%s\\n' "$$" > "$RA_TEST_LAUNCHER_PID_FILE"
+: > "$RA_TEST_LAUNCHER_READY"
+while [ ! -e "$RA_TEST_LAUNCHER_GATE" ]; do sleep 0.02; done
+exec "${realEnv}" "$@"
+`,
+    );
+    chmodSync(path.join(bin, "env"), 0o755);
+    const launch = runAsync("dev-start.sh", [], {
+      RA_PORT: port,
+      RA_FAKE_GH_REMOTE_STUB: "1",
+      RA_FAKE_GH_HTTP_SERVER: "1",
+      RA_FAKE_GH_TITLE: title,
+      RA_TEST_PORT: port,
+      RA_TEST_LAUNCHER_GATE: gate,
+      RA_TEST_LAUNCHER_READY: ready,
+      RA_TEST_LAUNCHER_PID_FILE: launcherPidFile,
+    });
+    let launcherPid = 0;
+    try {
+      await waitFor(() => existsSync(ready));
+      launcherPid = Number(readFileSync(launcherPidFile, "utf8").trim());
+      expect(launch.child.exitCode).toBeNull();
+      expect(existsSync(path.join(state, "forward-cs-one.meta"))).toBe(false);
+      writeFileSync(gate, "");
+      const result = await launch.done;
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(readFileSync(path.join(state, "forward-cs-one.meta"), "utf8")).toContain(`pid=${launcherPid}\n`);
+
+      expect(run("dev-stop.sh", [], {
+        RA_PORT: port,
+        RA_FAKE_GH_REMOTE_STUB: "1",
+      }).status).toBe(0);
+    } finally {
+      writeFileSync(gate, "");
+      if (launcherPid > 0 && live(launcherPid)) {
+        try { process.kill(launcherPid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      if (launch.child.exitCode === null) launch.child.kill("SIGKILL");
+    }
+  }, 20000);
+
   it("does not match a forward that belongs to a different Codespace", () => {
     fakeGh("cs-one\\tAvailable\\ncs-two\\tAvailable\\n");
     const fwd = fakeForward("codespace ports forward 3000:3000 -c cs-two");
@@ -407,7 +508,7 @@ describe("dev-start / dev-stop (dry run)", () => {
     }
   });
 
-  it("shares a host lifecycle lock between overlapping start and stop", async () => {
+  linuxIt("shares a host lifecycle lock between overlapping start and stop", async () => {
     fakeGh("cs-one\\tShutdown\\n");
     const work = path.join(tmp, "remote");
     mkdirSync(path.join(work, "node_modules"), { recursive: true });
@@ -435,7 +536,7 @@ describe("dev-start / dev-stop (dry run)", () => {
     }
   }, 20000);
 
-  it("retains a verified forward record when TERM is ignored and removes it only after forced exit", async () => {
+  linuxIt("retains a verified forward record when TERM is ignored and removes it only after forced exit", async () => {
     fakeGh("cs-one\\tAvailable\\n");
     const work = path.join(tmp, "remote");
     mkdirSync(work);
@@ -474,7 +575,7 @@ describe("dev-start / dev-stop (dry run)", () => {
     expect(r.stdout).not.toContain("stop -c a");
   });
 
-  it("uses the documented gh codespace ssh command and pipes bash -s arguments", () => {
+  linuxIt("uses the documented gh codespace ssh command and pipes bash -s arguments", () => {
     fakeGh("cs-one\\tAvailable\\n");
     const work = path.join(tmp, "remote");
     mkdirSync(path.join(work, "node_modules"), { recursive: true });
@@ -513,12 +614,18 @@ describe("dev-start / dev-stop (dry run)", () => {
   }, 30000);
 });
 
-describe("remote-dev.sh", () => {
+linuxDescribe("remote-dev.sh", () => {
   const PORT = String(38000 + (process.pid % 1000));
   let pidFile: string;
   let work: string;
   const sh = (cmd: string, cwd = work) => spawnSync("bash", ["-c", cmd], { cwd, encoding: "utf8" });
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const running = (pid: number) => {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      return !/^\d+ \(.*\) [ZX]/.test(stat);
+    } catch { return false; }
+  };
   const liveGroup = (group: number) => {
     try {
       return readdirSync("/proc").some((entry) => {
@@ -654,6 +761,42 @@ describe("remote-dev.sh", () => {
       expect(liveGroup(group)).toBe(false);
     } finally {
       launch.child.kill("SIGKILL");
+    }
+  }, 30000);
+
+  it("terminates a live pre-session launcher before releasing the remote lock", async () => {
+    fakeNpm("sleep 30");
+    const realSetsid = spawnSync("which", ["setsid"], { encoding: "utf8" }).stdout.trim();
+    const gate = path.join(tmp, "setsid-gate");
+    const launcherPidFile = path.join(tmp, "setsid-launcher.pid");
+    writeFileSync(
+      path.join(bin, "setsid"),
+      `#!/usr/bin/env bash
+printf '%s\\n' "$$" > "$RA_TEST_SETSID_PID_FILE"
+while [ ! -e "$RA_TEST_SETSID_GATE" ]; do sleep 0.02; done
+exec "${realSetsid}" "$@"
+`,
+    );
+    chmodSync(path.join(bin, "setsid"), 0o755);
+    const launch = remoteAsync("start", { RA_TEST_SETSID_GATE: gate, RA_TEST_SETSID_PID_FILE: launcherPidFile });
+    let launcherPid = 0;
+    try {
+      await waitFor(() => existsSync(launcherPidFile));
+      launcherPid = Number(readFileSync(launcherPidFile, "utf8").trim());
+      expect(launcherPid).toBeGreaterThan(0);
+
+      launch.child.kill("SIGTERM");
+      const result = await launch.done;
+      expect(result.status).toBe(143);
+      expect(running(launcherPid)).toBe(false);
+      expect(existsSync(pidFile)).toBe(false);
+      expect(existsSync(`${pidFile}.lock`)).toBe(false);
+      expect(readdirSync(tmp).some((entry) => entry.includes(".launch."))).toBe(false);
+    } finally {
+      if (launcherPid > 0 && alive(launcherPid)) {
+        try { process.kill(launcherPid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      if (launch.child.exitCode === null) launch.child.kill("SIGKILL");
     }
   }, 30000);
 
