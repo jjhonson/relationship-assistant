@@ -386,10 +386,10 @@ wait "$child"`);
     const f = () => path.join(work, "next-env.d.ts");
     const generated = 'import "./.next/dev/types/routes.d.ts";\n';
     const original = 'import "./.next/types/routes.d.ts";\n';
-    const writeMeta = (_clean: string) => writeFileSync(pidFile, `pid=99999999\nstart=0\ndir=${work}\nport=${PORT}\nowner=test-owner\nrun_id=test-run\n`);
+    const writeMeta = () => writeFileSync(pidFile, `pid=99999999\nstart=0\ndir=${work}\nport=${PORT}\nowner=test-owner\nrun_id=test-run\n`);
 
     it("leaves generated-only changes for manual review", () => {
-      writeMeta("1");
+      writeMeta();
       writeFileSync(f(), generated);
       const r = remote("stop");
       expect(r.stdout).toContain("left untouched");
@@ -397,7 +397,7 @@ wait "$child"`);
     });
 
     it("preserves unstaged user edits mixed with generated changes", () => {
-      writeMeta("1");
+      writeMeta();
       writeFileSync(f(), generated + "const mine = 1;\n");
       const contents = readFileSync(f(), "utf8");
       expect(remote("stop").stdout).toContain("left untouched");
@@ -405,7 +405,7 @@ wait "$child"`);
     });
 
     it("preserves staged and unstaged edits exactly", () => {
-      writeMeta("1");
+      writeMeta();
       writeFileSync(f(), original + "const staged = 1;\n");
       sh("git add next-env.d.ts");
       writeFileSync(f(), original + "const staged = 1;\n" + generated);
@@ -422,7 +422,7 @@ wait "$child"`);
       ["a custom triple-slash type reference", '/// <reference types="node" />\n'],
       ["a user edit resembling generated output", 'import "./.next/types/user-routes.d.ts";\n'],
     ])("preserves %s with forced color and external diff configured", (_label, edit) => {
-      writeMeta("1");
+      writeMeta();
       writeFileSync(f(), edit);
       const contents = readFileSync(f(), "utf8");
       const external = path.join(tmp, "external-diff-called");
