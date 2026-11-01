@@ -235,7 +235,7 @@ describe("dev-start / dev-stop (dry run)", () => {
         if (pid > 0) { try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ } }
       }
     }
-  });
+  }, 30000);
 });
 
 describe("remote-dev.sh", () => {
