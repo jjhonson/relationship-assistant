@@ -3,11 +3,14 @@
 import { useState, type FormEvent } from "react";
 import {
   buildPilotBrief,
+  getAssistancePlan,
   getEffectivePilotInterpretation,
+  getPilotHistory,
   MAX_PILOT_THREADS,
   pilotContacts,
   type PilotClassification,
-  type PilotRecommendation,
+  type PilotRelationshipGoal,
+  type PilotRelationshipState,
 } from "@/lib/context-pilot";
 
 const classifications: PilotClassification[] = [
@@ -19,12 +22,9 @@ const classifications: PilotClassification[] = [
   "Unknown",
 ];
 
-const recommendations: PilotRecommendation[] = [
-  "No action needed",
-  "Research more",
-  "Worthwhile reconnection",
-  "User judgment needed",
-];
+const states: PilotRelationshipState[] = ["Active", "Occasional", "Dormant", "Recently revived", "Unclear"];
+
+const goals: PilotRelationshipGoal[] = ["This feels right", "I want to stay better connected"];
 
 function ThreadCitations({ threadIds }: { threadIds: string[] }) {
   return (
@@ -44,22 +44,26 @@ export function ContextPilot() {
   const [consentGranted, setConsentGranted] = useState(false);
   const [reviewedId, setReviewedId] = useState("");
   const [classificationCorrection, setClassificationCorrection] = useState<PilotClassification | "">("");
-  const [recommendationCorrection, setRecommendationCorrection] = useState<PilotRecommendation | "">("");
+  const [stateCorrection, setStateCorrection] = useState<PilotRelationshipState | "">("");
+  const [goal, setGoal] = useState<PilotRelationshipGoal | "">("");
   const selected = pilotContacts.find((contact) => contact.id === selectedId);
   const brief = reviewedId === selectedId ? buildPilotBrief(selectedId, consentGranted) : undefined;
   const interpretation = brief
     ? getEffectivePilotInterpretation(brief, {
         classification: classificationCorrection || undefined,
-        recommendation: recommendationCorrection || undefined,
+        state: stateCorrection || undefined,
       })
     : undefined;
+  const history = brief ? getPilotHistory(brief) : undefined;
+  const plan = brief ? getAssistancePlan(brief, goal || undefined) : undefined;
 
   function selectContact(id: string) {
     setSelectedId(id);
     setConsentGranted(false);
     setReviewedId("");
     setClassificationCorrection("");
-    setRecommendationCorrection("");
+    setStateCorrection("");
+    setGoal("");
   }
 
   function reviewThreads(event: FormEvent<HTMLFormElement>) {
@@ -80,7 +84,7 @@ export function ContextPilot() {
       <aside className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
         <p className="font-semibold">Stage 1 wireframe only: prewritten examples, no AI relationship understanding</p>
         <p className="mt-1">
-          Every contact, message, classification, evidence reference, significance statement, and recommendation is invented
+          Every contact, message, classification, tag, history, state, open loop, evidence reference, significance statement, and reason to engage is invented
           and prewritten in local fixtures. Nothing is interpreted, fetched, stored, logged, sent to a provider, or used to
           contact anyone. These bundled examples are present in client code before consent; this checkbox only confirms that
           you want to display fiction. It is not a security gate or permission for live Gmail access.
@@ -141,7 +145,7 @@ export function ContextPilot() {
         </form>
       )}
 
-      {brief && interpretation && (
+      {brief && interpretation && plan && (
         <section className="space-y-5" aria-labelledby="brief-heading">
           <div className="rounded-2xl border border-stone-200 bg-white p-5">
             <h2 id="brief-heading" className="text-xl font-semibold">Prewritten fictional example brief · {brief.label}</h2>
@@ -150,13 +154,40 @@ export function ContextPilot() {
             </p>
             <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
               <div>
-                <dt className="font-semibold">Context and evidence</dt>
+                <dt className="font-semibold">Relationship type / categories</dt>
                 <dd className="mt-1">Suggested classification: {interpretation.suggestedClassification}. {brief.classificationEvidence}<ThreadCitations threadIds={brief.classificationSources} /></dd>
+                <dd className="mt-1">Categories: {brief.categories.join("; ")}</dd>
                 <dd className="mt-1 font-medium text-indigo-900">
-                  Effective interpretation: {interpretation.effectiveClassification}
+                  Effective classification: {interpretation.effectiveClassification}
                   {classificationCorrection ? " (your correction)" : " (suggested; not corrected)"}
                 </dd>
                 <dd className="mt-1 text-stone-600">Confidence: {brief.confidence}; this is a fictional example, not a verified fact.</dd>
+              </div>
+              <div>
+                <dt className="font-semibold">Shared context / tags</dt>
+                <dd className="mt-1">
+                  {brief.tags.map((tag) => (
+                    <span key={tag.label} className="mr-2 inline-block">{tag.label}<ThreadCitations threadIds={tag.sources} /></span>
+                  ))}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold">Relationship history (within the sample)</dt>
+                {history ? (
+                  <>
+                    <dd className="mt-1">First meaningful interaction: {history.firstMeaningful}. Most recent meaningful interaction: {history.mostRecentMeaningful}. Span: {history.span}.</dd>
+                    <dd className="mt-1">Pattern: {history.pattern}</dd>
+                  </>
+                ) : <dd className="mt-1">Unknown</dd>}
+              </div>
+              <div>
+                <dt className="font-semibold">Current state</dt>
+                <dd className="mt-1">Suggested state: {interpretation.suggestedState}. {brief.stateEvidence}<ThreadCitations threadIds={brief.stateSources} /></dd>
+                <dd className="mt-1 font-medium text-indigo-900">
+                  Effective state: {interpretation.effectiveState}
+                  {stateCorrection ? " (your correction)" : " (suggested; not corrected)"}
+                </dd>
+                <dd className="mt-1 text-stone-600">Confidence: {brief.stateConfidence}</dd>
               </div>
               <div>
                 <dt className="font-semibold">Observed significance</dt>
@@ -166,13 +197,30 @@ export function ContextPilot() {
                 <dt className="font-semibold">Current maintenance</dt>
                 <dd className="mt-1">{brief.maintenance}<ThreadCitations threadIds={brief.maintenanceSources} /></dd>
               </div>
-              <div>
-                <dt className="font-semibold">Potential assistance and why</dt>
-                <dd className="mt-1">Suggested action: {interpretation.suggestedRecommendation}. {brief.recommendationReason}</dd>
+              <div className="sm:col-span-2">
+                <dt className="font-semibold">Open loops / commitments</dt>
+                {plan.openLoops.length === 0 ? (
+                  <dd className="mt-1">None found in the fictional sample.</dd>
+                ) : plan.openLoops.map((loop) => (
+                  <dd key={loop.commitment} className="mt-1">
+                    {loop.commitment}. Owner: {loop.owner}. Last mentioned: {loop.lastMentioned}.<ThreadCitations threadIds={loop.sources} />
+                  </dd>
+                ))}
+                <dd className="mt-1 text-stone-600">Open commitments are shown for either goal; finishing an obligation is different from nurturing the relationship.</dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="font-semibold">Relationship goal and potential reasons to engage</dt>
                 <dd className="mt-1 font-medium text-indigo-900">
-                  Effective action: {interpretation.effectiveRecommendation}
-                  {recommendationCorrection ? " (your correction)" : " (suggested; not corrected)"}
+                  {goal ? `Your goal: ${goal}` : "Your goal: not chosen yet (no reconnection prompts are shown)"}
                 </dd>
+                {goal === "This feels right" && (
+                  <dd className="mt-1">Record kept in the background; no proactive prompts to increase contact.</dd>
+                )}
+                {plan.proactiveNudges && (plan.reasonsToEngage.length === 0 ? (
+                  <dd className="mt-1">No grounded reasons to reconnect found in the fictional sample.</dd>
+                ) : plan.reasonsToEngage.map((item) => (
+                  <dd key={item.reason} className="mt-1">{item.reason}<ThreadCitations threadIds={item.sources} /></dd>
+                )))}
               </div>
               <div className="sm:col-span-2">
                 <dt className="font-semibold">Unknowns and verification</dt>
@@ -192,22 +240,33 @@ export function ContextPilot() {
                 </select>
               </label>
               <label className="text-sm font-medium">
-                Correct the assistance suggestion
+                Correct the current state
                 <select
-                  value={recommendationCorrection || brief.recommendation}
-                  onChange={(event) => setRecommendationCorrection(event.target.value as PilotRecommendation)}
+                  value={stateCorrection || brief.state}
+                  onChange={(event) => setStateCorrection(event.target.value as PilotRelationshipState)}
                   className="mt-1 block w-full rounded-lg border border-stone-300 bg-white p-2"
                 >
-                  {recommendations.map((recommendation) => <option key={recommendation}>{recommendation}</option>)}
+                  {states.map((state) => <option key={state}>{state}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-medium sm:col-span-2">
+                Relationship goal (your decision; not inferred)
+                <select
+                  value={goal}
+                  onChange={(event) => setGoal(event.target.value as PilotRelationshipGoal | "")}
+                  className="mt-1 block w-full rounded-lg border border-stone-300 bg-white p-2"
+                >
+                  <option value="">Not chosen</option>
+                  {goals.map((item) => <option key={item}>{item}</option>)}
                 </select>
               </label>
             </div>
-            {(classificationCorrection || recommendationCorrection) && (
+            {(classificationCorrection || stateCorrection) && (
               <p className="mt-3 text-sm text-indigo-900">
-                Your corrections: {[classificationCorrection, recommendationCorrection].filter(Boolean).join("; ")}
+                Your corrections: {[classificationCorrection, stateCorrection].filter(Boolean).join("; ")}
               </p>
             )}
-            <p className="mt-3 text-xs text-stone-500">Corrections are held in page memory and reset when you change contacts or refresh.</p>
+            <p className="mt-3 text-xs text-stone-500">Corrections and the goal are held in page memory and reset when you change contacts or refresh.</p>
           </div>
 
           <div className="space-y-3">

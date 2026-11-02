@@ -3,7 +3,9 @@ import {
   MAX_PILOT_THREADS,
   buildPilotBrief,
   canReviewPilotContact,
+  getAssistancePlan,
   getEffectivePilotInterpretation,
+  getPilotHistory,
   pilotContacts,
 } from "./context-pilot";
 
@@ -54,26 +56,76 @@ describe("fictional contextual relationship pilot", () => {
     const transactional = buildPilotBrief("lodging-host", true);
     const dormant = buildPilotBrief("dormant-professional", true);
 
-    expect(frequent).toMatchObject({ significance: expect.stringContaining("mutual support"), recommendation: "No action needed" });
-    expect(transactional).toMatchObject({ significance: expect.stringContaining("completed transaction"), recommendation: "No action needed" });
+    expect(frequent).toMatchObject({ significance: expect.stringContaining("mutual support"), state: "Active" });
+    expect(transactional).toMatchObject({ significance: expect.stringContaining("completed transaction"), state: "Dormant" });
     expect(dormant).toMatchObject({
       significance: expect.stringContaining("Sparse email spans years"),
       maintenance: expect.stringContaining("not proof"),
-      recommendation: "Worthwhile reconnection",
+      state: "Dormant",
     });
   });
 
-  it("keeps ambiguous recruiter and coworker evidence open to user judgment", () => {
+  it("keeps ambiguous recruiter and coworker evidence low-confidence with unknowns", () => {
     expect(buildPilotBrief("recruiter", true)).toMatchObject({
       confidence: "Low",
-      recommendation: "Research more",
+      state: "Unclear",
       unknowns: [expect.stringContaining("outcome")],
     });
     expect(buildPilotBrief("new-coworker", true)).toMatchObject({
       confidence: "Low",
-      recommendation: "User judgment needed",
       unknowns: [expect.stringContaining("Work chat")],
     });
+  });
+
+  it("provides richer fields grounded in each contact's own fictional threads", () => {
+    for (const contact of pilotContacts) {
+      const ids = new Set(contact.threads.map((thread) => thread.id));
+      const cited = [
+        ...contact.tags.flatMap((tag) => tag.sources),
+        ...contact.stateSources,
+        ...contact.openLoops.flatMap((loop) => loop.sources),
+        ...contact.engagementReasons.flatMap((item) => item.sources),
+        contact.history.firstMeaningfulThreadId,
+        contact.history.mostRecentMeaningfulThreadId,
+      ];
+      expect(contact.categories.length).toBeGreaterThan(0);
+      expect(contact.tags.length).toBeGreaterThan(0);
+      expect(cited.every((id) => ids.has(id))).toBe(true);
+    }
+    expect(buildPilotBrief("dormant-professional", true)?.tags.length).toBeGreaterThan(1);
+  });
+
+  it("derives relationship history from the cited threads", () => {
+    expect(getPilotHistory(buildPilotBrief("dormant-professional", true)!)).toMatchObject({
+      firstMeaningful: "2019-03-19",
+      mostRecentMeaningful: "2023-06-17",
+      span: "about 4 years",
+    });
+    expect(getPilotHistory(buildPilotBrief("lodging-host", true)!)?.span).toBe("same day");
+  });
+
+  it("records open loops with owner and last mention, and none where the evidence has none", () => {
+    expect(buildPilotBrief("recruiter", true)?.openLoops[0]).toMatchObject({
+      commitment: expect.stringContaining("role description"),
+      owner: expect.stringContaining("Morgan Reed"),
+      lastMentioned: "2026-08-05",
+    });
+    expect(buildPilotBrief("lodging-host", true)?.openLoops).toEqual([]);
+  });
+
+  it("surfaces open loops for either goal but reconnection reasons only when the user wants to stay better connected", () => {
+    const brief = buildPilotBrief("new-coworker", true)!;
+    for (const goal of [undefined, "This feels right"] as const) {
+      const plan = getAssistancePlan(brief, goal);
+      expect(plan.openLoops).toEqual(brief.openLoops);
+      expect(plan.openLoops.length).toBeGreaterThan(0);
+      expect(plan.reasonsToEngage).toEqual([]);
+      expect(plan.proactiveNudges).toBe(false);
+    }
+    const connected = getAssistancePlan(brief, "I want to stay better connected");
+    expect(connected.proactiveNudges).toBe(true);
+    expect(connected.reasonsToEngage).toEqual(brief.engagementReasons);
+    expect(connected.openLoops).toEqual(brief.openLoops);
   });
 
   it("keeps authored suggestions separate from the user's effective corrections", () => {
@@ -82,18 +134,18 @@ describe("fictional contextual relationship pilot", () => {
     expect(getEffectivePilotInterpretation(brief!)).toEqual({
       suggestedClassification: "Recruiter",
       effectiveClassification: "Recruiter",
-      suggestedRecommendation: "Research more",
-      effectiveRecommendation: "Research more",
+      suggestedState: "Unclear",
+      effectiveState: "Unclear",
     });
 
     expect(getEffectivePilotInterpretation(brief!, {
       classification: "Professional contact",
-      recommendation: "No action needed",
+      state: "Dormant",
     })).toEqual({
       suggestedClassification: "Recruiter",
       effectiveClassification: "Professional contact",
-      suggestedRecommendation: "Research more",
-      effectiveRecommendation: "No action needed",
+      suggestedState: "Unclear",
+      effectiveState: "Dormant",
     });
   });
 });

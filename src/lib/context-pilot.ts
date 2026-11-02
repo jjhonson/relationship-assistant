@@ -6,15 +6,35 @@ export type PilotClassification =
   | "Professional contact"
   | "Unknown";
 
-export type PilotRecommendation =
-  | "No action needed"
-  | "Research more"
-  | "Worthwhile reconnection"
-  | "User judgment needed";
+export type PilotRelationshipState =
+  | "Active"
+  | "Occasional"
+  | "Dormant"
+  | "Recently revived"
+  | "Unclear";
+
+export type PilotRelationshipGoal = "This feels right" | "I want to stay better connected";
 
 export type PilotCorrections = {
   classification?: PilotClassification;
-  recommendation?: PilotRecommendation;
+  state?: PilotRelationshipState;
+};
+
+export type PilotTag = { label: string; sources: string[] };
+
+export type PilotOpenLoop = {
+  commitment: string;
+  owner: string;
+  lastMentioned: string;
+  sources: string[];
+};
+
+export type PilotReason = { reason: string; sources: string[] };
+
+export type PilotHistory = {
+  firstMeaningfulThreadId: string;
+  mostRecentMeaningfulThreadId: string;
+  pattern: string;
 };
 
 export type PilotThread = {
@@ -33,13 +53,20 @@ export type PilotContact = {
   classification: PilotClassification;
   classificationEvidence: string;
   classificationSources: string[];
+  categories: string[];
+  tags: PilotTag[];
+  history: PilotHistory;
+  state: PilotRelationshipState;
+  stateEvidence: string;
+  stateSources: string[];
+  stateConfidence: "Low" | "Moderate";
+  openLoops: PilotOpenLoop[];
+  engagementReasons: PilotReason[];
   confidence: "Low" | "Moderate";
   significance: string;
   significanceSources: string[];
   maintenance: string;
   maintenanceSources: string[];
-  recommendation: PilotRecommendation;
-  recommendationReason: string;
   unknowns: string[];
   threads: PilotThread[];
 };
@@ -54,13 +81,34 @@ export const pilotContacts: PilotContact[] = [
     classification: "Friend or family",
     classificationEvidence: "The messages refer to family gatherings and mutual emotional support.",
     classificationSources: ["family-1", "family-3"],
+    categories: ["Friend or family"],
+    tags: [
+      { label: "family gatherings", sources: ["family-1", "family-3"] },
+      { label: "emotional support", sources: ["family-1", "family-2"] },
+      { label: "relocation (a move)", sources: ["family-1"] },
+    ],
+    history: {
+      firstMeaningfulThreadId: "family-1",
+      mostRecentMeaningfulThreadId: "family-3",
+      pattern: "Regular, reciprocal exchanges roughly every few months within the sample.",
+    },
+    state: "Active",
+    stateEvidence: "The most recent message is recent and refers to plans for next weekend.",
+    stateSources: ["family-2", "family-3"],
+    stateConfidence: "Moderate",
+    openLoops: [
+      { commitment: "Have lunch again soon (no date set)", owner: "Unclear; both suggested it", lastMentioned: "2026-04-12", sources: ["family-1"] },
+      { commitment: "Help coordinate next weekend's family plans", owner: "You", lastMentioned: "2026-10-02", sources: ["family-3"] },
+    ],
+    engagementReasons: [
+      { reason: "Family gathering next weekend is a timely occasion to confirm plans.", sources: ["family-3"] },
+      { reason: "The earlier lunch idea was never scheduled.", sources: ["family-1"] },
+    ],
     confidence: "Moderate",
     significance: "Several exchanges describe ongoing mutual support and time together, not just logistics.",
     significanceSources: ["family-1", "family-2"],
     maintenance: "Recent, reciprocal email contact is visible; other channels are not represented.",
     maintenanceSources: ["family-2", "family-3"],
-    recommendation: "No action needed",
-    recommendationReason: "The fictional evidence shows an actively maintained relationship; a reminder would add little.",
     unknowns: ["The sample cannot establish the full relationship or the user's preferred contact cadence."],
     threads: [
       { id: "family-1", date: "2026-04-12", from: "Taylor Kim", to: "You", subject: "Sunday lunch", body: "Thanks for making time to talk through the move. It helped to hear your perspective. Let's do lunch again soon." },
@@ -75,13 +123,27 @@ export const pilotContacts: PilotContact[] = [
     classification: "Service provider",
     classificationEvidence: "The only supplied messages concern a reservation and check-in details.",
     classificationSources: ["stay-1", "stay-2"],
+    categories: ["Service provider"],
+    tags: [
+      { label: "travel", sources: ["stay-1"] },
+      { label: "lodging reservation", sources: ["stay-1", "stay-2"] },
+    ],
+    history: {
+      firstMeaningfulThreadId: "stay-1",
+      mostRecentMeaningfulThreadId: "stay-2",
+      pattern: "A single transactional exchange; no pattern can be inferred.",
+    },
+    state: "Dormant",
+    stateEvidence: "The exchange concluded with check-in details and no later email is included.",
+    stateSources: ["stay-2"],
+    stateConfidence: "Low",
+    openLoops: [],
+    engagementReasons: [],
     confidence: "Low",
     significance: "The correspondence supports a completed transaction, not broader personal significance.",
     significanceSources: ["stay-1", "stay-2"],
     maintenance: "A brief email exchange occurred around one stay; contact outside email is unknown.",
     maintenanceSources: ["stay-1", "stay-2"],
-    recommendation: "No action needed",
-    recommendationReason: "Nothing in this sample suggests an ongoing relationship or a reason to reconnect.",
     unknowns: ["A short transactional exchange says little about either person's importance or other contact channels."],
     threads: [
       { id: "stay-1", date: "2026-05-14", from: "You", to: "Casey Lane", subject: "Arrival time", body: "Our train arrives around 4 p.m. Is that a workable check-in time?" },
@@ -95,13 +157,32 @@ export const pilotContacts: PilotContact[] = [
     classification: "Recruiter",
     classificationEvidence: "The messages discuss an introductory call and a role description.",
     classificationSources: ["recruiter-1", "recruiter-2"],
+    categories: ["Recruiter"],
+    tags: [
+      { label: "job search", sources: ["recruiter-1"] },
+      { label: "product role", sources: ["recruiter-1", "recruiter-2"] },
+    ],
+    history: {
+      firstMeaningfulThreadId: "recruiter-1",
+      mostRecentMeaningfulThreadId: "recruiter-2",
+      pattern: "A short burst of two messages; nothing later is included.",
+    },
+    state: "Unclear",
+    stateEvidence: "The sample ends after the call was proposed, so whether it happened or continued is not shown.",
+    stateSources: ["recruiter-2"],
+    stateConfidence: "Low",
+    openLoops: [
+      { commitment: "Send the role description", owner: "Morgan Reed (whether sent is unknown)", lastMentioned: "2026-08-05", sources: ["recruiter-2"] },
+      { commitment: "Hold a short call on Thursday", owner: "You and Morgan Reed", lastMentioned: "2026-08-05", sources: ["recruiter-2"] },
+    ],
+    engagementReasons: [
+      { reason: "The role description you requested may still be outstanding.", sources: ["recruiter-2"] },
+    ],
     confidence: "Low",
     significance: "The exchange may matter professionally, but the sample does not show whether an opportunity progressed.",
     significanceSources: ["recruiter-1", "recruiter-2"],
     maintenance: "A short burst of email is visible; no later email is included.",
     maintenanceSources: ["recruiter-1", "recruiter-2"],
-    recommendation: "Research more",
-    recommendationReason: "Check whether the role or conversation remains relevant before deciding to reconnect.",
     unknowns: ["The sample does not establish the outcome, the user's interest, or contact through another channel."],
     threads: [
       { id: "recruiter-1", date: "2026-08-03", from: "Morgan Reed", to: "You", subject: "Introductory call", body: "Would you be available for a short conversation about a product role next week?" },
@@ -115,13 +196,33 @@ export const pilotContacts: PilotContact[] = [
     classification: "Coworker",
     classificationEvidence: "The messages refer to team onboarding, a project handoff, and a shared meeting.",
     classificationSources: ["coworker-1", "coworker-2", "coworker-3"],
+    categories: ["Coworker"],
+    tags: [
+      { label: "workplace", sources: ["coworker-1", "coworker-3"] },
+      { label: "onboarding", sources: ["coworker-1"] },
+      { label: "project handoff", sources: ["coworker-2"] },
+    ],
+    history: {
+      firstMeaningfulThreadId: "coworker-1",
+      mostRecentMeaningfulThreadId: "coworker-3",
+      pattern: "Frequent contact in a short onboarding window; later pattern is unknown.",
+    },
+    state: "Active",
+    stateEvidence: "Three messages in five days, the latest proposing a follow-up.",
+    stateSources: ["coworker-1", "coworker-2", "coworker-3"],
+    stateConfidence: "Low",
+    openLoops: [
+      { commitment: "Compare notes after both try the new workflow", owner: "You and Jamie Patel", lastMentioned: "2026-09-12", sources: ["coworker-3"] },
+      { commitment: "Answer the questions added to the shared notes", owner: "Jamie Patel (not confirmed)", lastMentioned: "2026-09-10", sources: ["coworker-2"] },
+    ],
+    engagementReasons: [
+      { reason: "The planned notes comparison is an unfinished thread.", sources: ["coworker-3"] },
+    ],
     confidence: "Low",
     significance: "There is evidence of a working connection, but not enough to infer personal importance from onboarding mail.",
     significanceSources: ["coworker-1", "coworker-2"],
     maintenance: "Several messages cluster around onboarding; later email activity is not shown.",
     maintenanceSources: ["coworker-1", "coworker-3"],
-    recommendation: "User judgment needed",
-    recommendationReason: "The user is best placed to decide whether the working connection merits a follow-up.",
     unknowns: ["Work chat or in-person contact may continue even if email becomes quiet."],
     threads: [
       { id: "coworker-1", date: "2026-09-08", from: "Jamie Patel", to: "You", subject: "Welcome to the team", body: "Happy to help with onboarding. Here are the project notes we mentioned." },
@@ -136,13 +237,31 @@ export const pilotContacts: PilotContact[] = [
     classification: "Professional contact",
     classificationEvidence: "The messages describe collaboration over several years and thoughtful career guidance.",
     classificationSources: ["dormant-1", "dormant-2", "dormant-3"],
+    categories: ["Former colleague (inferred)", "Possible mentor (low evidence)"],
+    tags: [
+      { label: "past workplace project", sources: ["dormant-1"] },
+      { label: "project launch", sources: ["dormant-1"] },
+      { label: "career guidance", sources: ["dormant-2", "dormant-3"] },
+    ],
+    history: {
+      firstMeaningfulThreadId: "dormant-1",
+      mostRecentMeaningfulThreadId: "dormant-3",
+      pattern: "Sparse, widely spaced exchanges roughly every two years; long quiet gaps between them.",
+    },
+    state: "Dormant",
+    stateEvidence: "The latest included email is from 2023 and nothing more recent is present; other channels are unknown.",
+    stateSources: ["dormant-3"],
+    stateConfidence: "Moderate",
+    openLoops: [],
+    engagementReasons: [
+      { reason: "Drew congratulated you on a new direction; an update on how it went is a natural reason to write.", sources: ["dormant-3"] },
+      { reason: "You previously thanked Drew for advice that shaped a next step.", sources: ["dormant-2"] },
+    ],
     confidence: "Moderate",
     significance: "Sparse email spans years and describes meaningful collaboration and support; volume understates that context.",
     significanceSources: ["dormant-1", "dormant-2"],
     maintenance: "No recent email is included. This is an email-only observation, not proof the relationship is inactive.",
     maintenanceSources: ["dormant-1", "dormant-2", "dormant-3"],
-    recommendation: "Worthwhile reconnection",
-    recommendationReason: "If the relationship still matters to the user, a low-pressure check-in could be worthwhile after verifying current context.",
     unknowns: ["The sample cannot show whether you are in touch by phone, in person, or another channel."],
     threads: [
       { id: "dormant-1", date: "2019-03-19", from: "Drew Foster", to: "You", subject: "Project launch", body: "It was a privilege to work through that launch together. Your careful planning made a difference." },
@@ -168,13 +287,48 @@ export function buildPilotBrief(contactId: string, consentGranted: boolean) {
 }
 
 export function getEffectivePilotInterpretation(
-  brief: Pick<PilotContact, "classification" | "recommendation">,
+  brief: Pick<PilotContact, "classification" | "state">,
   corrections: PilotCorrections = {},
 ) {
   return {
     suggestedClassification: brief.classification,
     effectiveClassification: corrections.classification ?? brief.classification,
-    suggestedRecommendation: brief.recommendation,
-    effectiveRecommendation: corrections.recommendation ?? brief.recommendation,
+    suggestedState: brief.state,
+    effectiveState: corrections.state ?? brief.state,
+  };
+}
+
+const DAY_MS = 86_400_000;
+
+function describeSpan(from: string, to: string) {
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / DAY_MS);
+  if (days < 1) return "same day";
+  if (days < 60) return `about ${days} days`;
+  if (days < 730) return `about ${Math.round(days / 30)} months`;
+  return `about ${Math.round(days / 365)} years`;
+}
+
+export function getPilotHistory(brief: Pick<PilotContact, "history" | "threads">) {
+  const first = brief.threads.find((thread) => thread.id === brief.history.firstMeaningfulThreadId);
+  const recent = brief.threads.find((thread) => thread.id === brief.history.mostRecentMeaningfulThreadId);
+  if (!first || !recent) return undefined;
+  return {
+    firstMeaningful: first.date,
+    mostRecentMeaningful: recent.date,
+    span: describeSpan(first.date, recent.date),
+    pattern: brief.history.pattern,
+  };
+}
+
+// Open commitments always surface; reconnection reasons and nudges only for an explicit "stay better connected" choice.
+export function getAssistancePlan(
+  brief: Pick<PilotContact, "openLoops" | "engagementReasons">,
+  goal?: PilotRelationshipGoal,
+) {
+  const proactive = goal === "I want to stay better connected";
+  return {
+    openLoops: brief.openLoops,
+    reasonsToEngage: proactive ? brief.engagementReasons : [],
+    proactiveNudges: proactive,
   };
 }
