@@ -50,6 +50,73 @@ cleanup_failed_start() {
       || log "WARNING: could not stop Codespace; run: gh codespace stop -c $RA_CODESPACE"
   fi
 }
+
+save_remote_diagnostic() {
+  local output="$1" diagnostic repo_root state_dir report bytes
+  diagnostic="$(printf '%s\n' "$output" | awk '
+    function value(field, prefix, pattern) {
+      return substr(field, 1, length(prefix)) == prefix && substr(field, length(prefix) + 1) ~ pattern
+    }
+    NF == 15 && length($0) <= 512 &&
+    $1 == "RA_DIAG" && $2 == "v=1" &&
+    value($3, "code=", "^(record_missing|record_symlink|record_unreadable|record_line_count|record_malformed|workspace_mismatch|port_mismatch|record_content_mismatch|member_inspection_unknown|member_disappeared|member_session_mismatch|member_cwd_mismatch|member_environment_unreadable|member_owner_mismatch|member_port_mismatch|group_member_not_found|process_disappeared|process_inspection_unknown|start_time_mismatch|process_group_mismatch|process_session_mismatch|process_environment_unreadable|owner_marker_mismatch|port_marker_mismatch|leader_command_mismatch)$") &&
+    value($4, "pid=", "^(unknown|[0-9]+)$") &&
+    value($5, "member_pid=", "^(unknown|[0-9]+)$") &&
+    value($6, "state=", "^(unknown|[A-Zt])$") &&
+    value($7, "record=", "^(match|mismatch|unknown)$") &&
+    value($8, "session=", "^(match|mismatch|unknown)$") &&
+    value($9, "group=", "^(match|mismatch|unknown)$") &&
+    value($10, "start=", "^(match|mismatch|unknown)$") &&
+    value($11, "cwd=", "^(match|mismatch|unknown)$") &&
+    value($12, "owner=", "^(match|mismatch|unknown)$") &&
+    value($13, "port=", "^(match|mismatch|unknown)$") &&
+    value($14, "command=", "^(match|mismatch|unknown)$") &&
+    value($15, "enumeration=", "^(match|mismatch|unknown)$") {
+      print
+      exit
+    }
+  ' )"
+  if [ -z "$diagnostic" ]; then
+    log "WARNING: remote diagnostic capture unavailable; no valid allowlisted fields were received."
+    return 1
+  fi
+  repo_root="$(git -C "$RA_SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || {
+    log "WARNING: remote diagnostic capture unavailable; repository location could not be verified."
+    return 1
+  }
+  repo_root="$(cd "$repo_root" 2>/dev/null && pwd -P)" || {
+    log "WARNING: remote diagnostic capture unavailable; repository location could not be verified."
+    return 1
+  }
+  state_dir="$(cd "$RA_STATE_DIR" 2>/dev/null && pwd -P)" || {
+    log "WARNING: remote diagnostic capture unavailable; state directory could not be verified."
+    return 1
+  }
+  case "$state_dir" in
+    "$repo_root"|"$repo_root"/*)
+      log "WARNING: remote diagnostic capture unavailable; state directory is inside the repository."
+      return 1
+      ;;
+  esac
+  report="$(umask 077; mktemp "$state_dir/dev-start-diagnostic.XXXXXX")" || {
+    log "WARNING: remote diagnostic capture unavailable; private report could not be created."
+    return 1
+  }
+  if ! printf '%s\n' "$diagnostic" >"$report" || ! chmod 600 "$report"; then
+    rm -f "$report"
+    log "WARNING: remote diagnostic capture unavailable; private report could not be secured."
+    return 1
+  fi
+  bytes="$(wc -c <"$report" 2>/dev/null | tr -d '[:space:]')"
+  case "$bytes" in ''|*[!0-9]*) bytes=999999 ;; esac
+  if [ "$bytes" -gt 1024 ]; then
+    rm -f "$report"
+    log "WARNING: remote diagnostic capture unavailable; report exceeded the size limit."
+    return 1
+  fi
+  log "Remote ownership diagnostic: $report"
+}
+
 start_fail() {
   printf 'ERROR: %s\n' "$*" >&2
   cleanup_failed_start
@@ -80,8 +147,13 @@ if [ "$RA_DRY_RUN" = "1" ]; then
   log "[dry-run] gh codespace ssh -c $RA_CODESPACE -- bash -s -- start $RA_REMOTE_DIR $RA_PORT 0 $RA_RUN_ID < remote-dev.sh"
 else
   mkdir -p "$RA_STATE_DIR"
-  out="$(remote_run start "$RA_RUN_ID")" || { printf '%s\n' "$out"; start_fail "remote start failed. Log: gh codespace ssh -c $RA_CODESPACE -- tail -n 50 /tmp/relationship-assistant-dev.log"; }
-  printf '%s\n' "$out"
+  if out="$(remote_run start "$RA_RUN_ID")"; then
+    printf '%s\n' "$out" | sed '/^RA_DIAG /d'
+  else
+    save_remote_diagnostic "$out" || true
+    printf '%s\n' "$out" | sed '/^RA_DIAG /d'
+    start_fail "remote start failed. Log: gh codespace ssh -c $RA_CODESPACE -- tail -n 50 /tmp/relationship-assistant-dev.log"
+  fi
 fi
 
 if pid="$(forward_pid_if_ours)"; then

@@ -3,6 +3,7 @@
 # Do not run on the Mac. It signals only the process group recorded by this workflow after
 # verifying its launch token, kernel start time, session/group, workspace and configured port.
 set -u
+exec 3>&1
 ACTION="${1:-}"; DIR="${2:-}"; PORT="${3:-3000}"; FORCE="${4:-0}"; RUN_ID="${5:-}"
 PIDFILE="${RA_PID_FILE:-/tmp/relationship-assistant-dev.pid}"
 LOG="${RA_LOG_FILE:-/tmp/relationship-assistant-dev.log}"
@@ -13,21 +14,41 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 meta_get() { sed -n "s/^$1=//p" "$PIDFILE" 2>/dev/null | head -n1; }
 port_listening() { (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; }
 
+emit_owned_diagnostic() {
+  local code="$1" pid="$2" member_pid="$3" state="$4"
+  local record="${5:-unknown}" session="${6:-unknown}" group="${7:-unknown}"
+  local start="${8:-unknown}" cwd="${9:-unknown}" owner="${10:-unknown}"
+  local port="${11:-unknown}" command="${12:-unknown}" enumeration="${13:-unknown}"
+  case "$pid" in ''|*[!0-9]*) pid=unknown ;; esac
+  case "$member_pid" in ''|*[!0-9]*) member_pid=unknown ;; esac
+  case "$state" in R|S|D|T|t|Z|X|I) ;; *) state=unknown ;; esac
+  printf 'RA_DIAG v=1 code=%s pid=%s member_pid=%s state=%s record=%s session=%s group=%s start=%s cwd=%s owner=%s port=%s command=%s enumeration=%s\n' \
+    "$code" "$pid" "$member_pid" "$state" "$record" "$session" "$group" "$start" "$cwd" "$owner" "$port" "$command" "$enumeration" >&3
+}
+
+record_invalid() {
+  OWNED_DIAG_CODE="$1"
+  return 1
+}
+
 pid_record_valid() {
   local content lines pid start dir port owner run_id expected
-  [ -f "$PIDFILE" ] && [ ! -L "$PIDFILE" ] || return 1
-  lines="$(wc -l <"$PIDFILE" 2>/dev/null | tr -d '[:space:]')" || return 1
-  [ "$lines" = "6" ] || return 1
-  content="$(cat "$PIDFILE" 2>/dev/null)" || return 1
+  OWNED_DIAG_CODE=record_valid
+  if [ ! -f "$PIDFILE" ]; then record_invalid record_missing; return 1; fi
+  if [ -L "$PIDFILE" ]; then record_invalid record_symlink; return 1; fi
+  lines="$(wc -l <"$PIDFILE" 2>/dev/null | tr -d '[:space:]')" || { record_invalid record_unreadable; return 1; }
+  [ "$lines" = "6" ] || { record_invalid record_line_count; return 1; }
+  content="$(cat "$PIDFILE" 2>/dev/null)" || { record_invalid record_unreadable; return 1; }
   pid="$(meta_get pid)"; start="$(meta_get start)"; dir="$(meta_get dir)"
   port="$(meta_get port)"; owner="$(meta_get owner)"; run_id="$(meta_get run_id)"
-  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-  case "$start" in ''|*[!0-9]*) return 1 ;; esac
-  case "$owner" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
-  case "$run_id" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
-  [ "$dir" = "$DIR" ] && [ "$port" = "$PORT" ] || return 1
+  case "$pid" in ''|*[!0-9]*) record_invalid record_malformed; return 1 ;; esac
+  case "$start" in ''|*[!0-9]*) record_invalid record_malformed; return 1 ;; esac
+  case "$owner" in ''|*[!A-Za-z0-9._-]*) record_invalid record_malformed; return 1 ;; esac
+  case "$run_id" in ''|*[!A-Za-z0-9._-]*) record_invalid record_malformed; return 1 ;; esac
+  [ "$dir" = "$DIR" ] || { record_invalid workspace_mismatch; return 1; }
+  [ "$port" = "$PORT" ] || { record_invalid port_mismatch; return 1; }
   expected="$(printf 'pid=%s\nstart=%s\ndir=%s\nport=%s\nowner=%s\nrun_id=%s' "$pid" "$start" "$dir" "$port" "$owner" "$run_id")"
-  [ "$content" = "$expected" ]
+  [ "$content" = "$expected" ] || { record_invalid record_content_mismatch; return 1; }
 }
 
 # /proc/PID/stat fields after "comm"; 0=state, 2=pgrp, 3=session, 19=starttime.
@@ -45,35 +66,118 @@ has_env() {
 # Verify every live member of this isolated session/group inherited our launch identity.
 group_members_valid() {
   local group="$1" owner="$2" dir="$3" port="$4" stat pid state found=0
+  GROUP_DIAG_CODE=group_member_not_found
+  GROUP_DIAG_PID=""
+  GROUP_DIAG_STATE=""
+  GROUP_DIAG_SESSION=unknown
+  GROUP_DIAG_GROUP=unknown
+  GROUP_DIAG_CWD=unknown
+  GROUP_DIAG_OWNER=unknown
+  GROUP_DIAG_PORT=unknown
+  GROUP_DIAG_ENUMERATION=unknown
   for stat in /proc/[0-9]*/stat; do
     [ -r "$stat" ] || continue
     pid="${stat#/proc/}"; pid="${pid%/stat}"
-    [ "$(proc_field "$pid" 2)" = "$group" ] || continue
-    [ "$(proc_field "$pid" 3)" = "$group" ] || return 1
+    member_group="$(proc_field "$pid" 2)"
+    [ -n "$member_group" ] || continue
+    [ "$member_group" = "$group" ] || continue
+    GROUP_DIAG_GROUP=match
+    GROUP_DIAG_ENUMERATION=match
+    GROUP_DIAG_PID="$pid"
+    member_session="$(proc_field "$pid" 3)"
+    if [ -z "$member_session" ]; then
+      GROUP_DIAG_CODE=member_inspection_unknown
+      [ -e "/proc/$pid" ] || GROUP_DIAG_CODE=member_disappeared
+      return 1
+    fi
+    if [ "$member_session" != "$group" ]; then
+      GROUP_DIAG_CODE=member_session_mismatch
+      GROUP_DIAG_SESSION=mismatch
+      return 1
+    fi
+    GROUP_DIAG_SESSION=match
     state="$(proc_field "$pid" 0)"
     case "$state" in Z|X|'') continue ;; esac
-    [ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" = "$dir" ] || return 1
-    has_env "$pid" RA_DEV_OWNER "$owner" || return 1
-    has_env "$pid" PORT "$port" || return 1
+    GROUP_DIAG_STATE="$state"
+    member_cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null)"
+    if [ -z "$member_cwd" ]; then
+      GROUP_DIAG_CODE=member_inspection_unknown
+      [ -e "/proc/$pid" ] || GROUP_DIAG_CODE=member_disappeared
+      return 1
+    fi
+    if [ "$member_cwd" != "$dir" ]; then
+      GROUP_DIAG_CODE=member_cwd_mismatch
+      GROUP_DIAG_CWD=mismatch
+      return 1
+    fi
+    GROUP_DIAG_CWD=match
+    if [ ! -r "/proc/$pid/environ" ]; then
+      GROUP_DIAG_CODE=member_environment_unreadable
+      return 1
+    fi
+    if ! has_env "$pid" RA_DEV_OWNER "$owner"; then
+      GROUP_DIAG_CODE=member_owner_mismatch
+      GROUP_DIAG_OWNER=mismatch
+      return 1
+    fi
+    GROUP_DIAG_OWNER=match
+    if ! has_env "$pid" PORT "$port"; then
+      GROUP_DIAG_CODE=member_port_mismatch
+      GROUP_DIAG_PORT=mismatch
+      return 1
+    fi
+    GROUP_DIAG_PORT=match
     found=1
   done
-  [ "$found" = "1" ]
+  if [ "$found" != "1" ]; then
+    GROUP_DIAG_CODE=group_member_not_found
+    GROUP_DIAG_ENUMERATION=mismatch
+    return 1
+  fi
+  return 0
 }
 
 owned_group() {
-  local pid start dir port owner cmd
-  pid_record_valid || return 1
+  local pid start dir port owner cmd diagnose="${1:-}" actual_start diag_start reason
+  if ! pid_record_valid; then
+    [ "$diagnose" = "diagnose" ] &&
+      emit_owned_diagnostic "$OWNED_DIAG_CODE" "$(meta_get pid)" unknown unknown mismatch unknown unknown unknown unknown unknown unknown unknown unknown
+    return 1
+  fi
   pid="$(meta_get pid)"; start="$(meta_get start)"
   dir="$(meta_get dir)"; port="$(meta_get port)"; owner="$(meta_get owner)"
-  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$dir" = "$DIR" ] && [ "$port" = "$PORT" ] && [ -n "$owner" ] || return 1
-  group_members_valid "$pid" "$owner" "$dir" "$port" || return 1
+  case "$pid" in ''|*[!0-9]*)
+    [ "$diagnose" = "diagnose" ] && emit_owned_diagnostic record_malformed unknown unknown unknown mismatch unknown unknown unknown unknown unknown unknown unknown unknown
+    return 1 ;;
+  esac
+  if ! group_members_valid "$pid" "$owner" "$dir" "$port"; then
+    diag_start=unknown
+    actual_start="$(proc_field "$pid" 19)"
+    if [ -n "$actual_start" ]; then
+      diag_start=mismatch
+      [ "$actual_start" = "$start" ] && diag_start=match
+    fi
+    [ "$diagnose" = "diagnose" ] &&
+      emit_owned_diagnostic "$GROUP_DIAG_CODE" "$pid" "${GROUP_DIAG_PID:-unknown}" "${GROUP_DIAG_STATE:-unknown}" match "${GROUP_DIAG_SESSION:-unknown}" "${GROUP_DIAG_GROUP:-unknown}" "$diag_start" "${GROUP_DIAG_CWD:-unknown}" "${GROUP_DIAG_OWNER:-unknown}" "${GROUP_DIAG_PORT:-unknown}" unknown "${GROUP_DIAG_ENUMERATION:-unknown}"
+    return 1
+  fi
   if [ "$(proc_field "$pid" 19)" = "$start" ] &&
      [ "$(proc_field "$pid" 2)" = "$pid" ] && [ "$(proc_field "$pid" 3)" = "$pid" ] &&
      [ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" = "$dir" ] &&
      has_env "$pid" RA_DEV_OWNER "$owner" && has_env "$pid" PORT "$port"; then
     cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/[[:space:]]*$//')"
-    case "$cmd" in *npm*" run dev") printf '%s' "$pid"; return 0 ;; esac
+    if [ -z "$cmd" ]; then
+      reason=process_inspection_unknown
+      [ -e "/proc/$pid" ] || reason=process_disappeared
+      [ "$diagnose" = "diagnose" ] &&
+        emit_owned_diagnostic "$reason" "$pid" unknown "$(proc_field "$pid" 0)" match match match match match match match unknown unknown match
+      return 1
+    fi
+    case "$cmd" in
+      *npm*" run dev") printf '%s' "$pid"; return 0 ;;
+    esac
+    [ "$diagnose" = "diagnose" ] &&
+      emit_owned_diagnostic leader_command_mismatch "$pid" unknown "$(proc_field "$pid" 0)" match match match match match match match mismatch unknown match
     return 1
   fi
   # The leader may exit before a child finishes. The surviving group is still attributable
@@ -356,7 +460,7 @@ case "$ACTION" in
       die "this invocation's unique launch handoff path already exists; it was left untouched: $LAUNCH_FILE"
     fi
     LAUNCHING=1
-    RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null &
+    RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
     LAUNCH_PID=$!
     LAUNCH_START="$(proc_field "$LAUNCH_PID" 19)"
     LAUNCH_IDENTITY_READY=1
@@ -403,7 +507,7 @@ case "$ACTION" in
     if ! cmp -s "$record_tmp" "$PIDFILE"; then
       die "published dev server ownership record did not match the validated temporary record; launch cleanup will be attempted; see $LOG"
     fi
-    verified_pid="$(owned_group)" || verified_pid=""
+    verified_pid="$(owned_group diagnose)" || verified_pid=""
     if [ "$verified_pid" != "$pid" ]; then
       die "published dev server ownership record could not be verified; launch cleanup will be attempted; see $LOG"
     fi
@@ -418,7 +522,7 @@ case "$ACTION" in
         remove_launch_record || die "dev server exited early but its record changed; it was retained for inspection"
         die "dev server exited early; see $LOG"
       fi
-      owned_group >/dev/null || die "dev server launch group could not be verified; ownership record retained"
+      owned_group diagnose >/dev/null || die "dev server launch group could not be verified; ownership record retained"
       sleep 2
     done
     if stop_owned 1; then

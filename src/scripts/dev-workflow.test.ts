@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, chmodSync, existsSync, symlinkSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, chmodSync, existsSync, symlinkSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -24,6 +24,16 @@ case "$2" in
   ssh)
     if [ "$3" != "-c" ] || [ "$5" != "--" ]; then echo "invalid ssh invocation: $*" >&2; exit 98; fi
     if [ "$6" = "true" ]; then exit 0; fi
+    if [ "$6" = "bash" ] && [ "$7" = "-s" ] && [ "$8" = "--" ] &&
+       [ "\${RA_FAKE_GH_DIAGNOSTIC_MODE:-}" != "" ] && [ "\${9:-}" = "start" ]; then
+      if [ "$RA_FAKE_GH_DIAGNOSTIC_MODE" = "valid" ]; then
+        printf '%s\\n' 'RA_DIAG v=1 code=member_cwd_mismatch pid=321 member_pid=322 state=S record=match session=match group=match start=unknown cwd=mismatch owner=unknown port=unknown command=unknown enumeration=unknown'
+        printf '%s\\n' 'RA_DIAG v=1 code=member_cwd_mismatch pid=321 member_pid=322 state=S owner=SECRET_COMMAND_AND_ENV'
+      else
+        printf '%s\\n' 'RA_DIAG v=1 code=SECRET pid=321 command=SECRET_COMMAND_AND_ENV'
+      fi
+      exit 1
+    fi
     if [ "$6" = "bash" ] && [ "$7" = "-s" ] && [ "$8" = "--" ]; then
       if [ "\${RA_FAKE_GH_REMOTE_STUB:-0}" = "1" ]; then
         [ "\${9:-}" = "start" ] && echo "RA_STATUS=started"
@@ -114,9 +124,41 @@ describe("dev-start / dev-stop (dry run)", () => {
     expect(r.stdout).toContain("[dry-run] gh codespace ports forward 3000:3000 -c cs-one");
     expect(ghCalls()).not.toContain("codespace start");
     expect(ghCalls()).not.toContain("ports");
+    expect(existsSync(path.join(tmp, "state"))).toBe(false);
     const unsupported = spawnSync(path.join(bin, "gh"), ["codespace", "start", "-c", "cs-one"], { encoding: "utf8" });
     expect(unsupported.status).toBe(97);
     expect(unsupported.stderr).toContain("unsupported gh codespace subcommand");
+  });
+
+  it("writes only validated remote diagnostics to a private report before cleanup", () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const result = run("dev-start.sh", [], { RA_FAKE_GH_DIAGNOSTIC_MODE: "valid" });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("Remote ownership diagnostic:");
+    expect(result.stdout).not.toContain("SECRET_COMMAND_AND_ENV");
+    expect(result.stdout).not.toContain("RA_DIAG ");
+    const reportPath = result.stdout.match(/Remote ownership diagnostic: (.+)/)?.[1];
+    expect(reportPath).toBeTruthy();
+    expect(path.dirname(reportPath!)).toBe(path.join(tmp, "state"));
+    expect(readFileSync(reportPath!, "utf8")).toBe(
+      "RA_DIAG v=1 code=member_cwd_mismatch pid=321 member_pid=322 state=S record=match session=match group=match start=unknown cwd=mismatch owner=unknown port=unknown command=unknown enumeration=unknown\n",
+    );
+    expect(statSync(reportPath!).mode & 0o777).toBe(0o600);
+    expect(statSync(reportPath!).size).toBeLessThanOrEqual(1024);
+    expect(ghCalls()).toContain("ssh -c cs-one -- bash -s -- stop-start");
+    expect(existsSync(path.join(tmp, "state/lifecycle.lock"))).toBe(false);
+  });
+
+  it("reports unavailable capture without saving unallowlisted output", () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const result = run("dev-start.sh", [], { RA_FAKE_GH_DIAGNOSTIC_MODE: "invalid" });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("remote diagnostic capture unavailable");
+    expect(result.stdout).not.toContain("SECRET_COMMAND_AND_ENV");
+    expect(result.stdout).not.toContain("RA_DIAG ");
+    expect(readdirSync(path.join(tmp, "state")).some((entry) => entry.includes("diagnostic"))).toBe(false);
+    expect(ghCalls()).toContain("ssh -c cs-one -- bash -s -- stop-start");
+    expect(existsSync(path.join(tmp, "state/lifecycle.lock"))).toBe(false);
   });
 
   it("shows only verified process recovery instructions in stop help", () => {
@@ -742,6 +784,38 @@ linuxDescribe("remote-dev.sh", () => {
     expect(stopped.status).toBe(0);
     expect(listening()).toBe(false);
     expect(existsSync(pidFile)).toBe(false);
+  }, 30000);
+
+  it("reports the exact failed member predicate without changing cleanup behavior", () => {
+    fakeNpm(serverNpm);
+    const realReadlink = spawnSync("which", ["readlink"], { encoding: "utf8" }).stdout.trim();
+    const readlinkCount = path.join(tmp, "readlink-count");
+    writeFileSync(
+      path.join(bin, "readlink"),
+      `#!/usr/bin/env bash
+if [ "\${1:-}" = "-f" ] && [[ "\${2:-}" = /proc/*/cwd ]]; then
+  count=0
+  [ ! -f "\${RA_TEST_READLINK_COUNT}" ] || count="$(cat "\${RA_TEST_READLINK_COUNT}")"
+  count=$((count + 1))
+  printf '%s\\n' "$count" > "\${RA_TEST_READLINK_COUNT}"
+  if [ "$count" -eq 1 ]; then printf '%s\\n' /diagnostic-test-mismatch; exit 0; fi
+fi
+exec "${realReadlink}" "$@"
+`,
+    );
+    chmodSync(path.join(bin, "readlink"), 0o755);
+
+    const result = remote("start", { RA_TEST_READLINK_COUNT: readlinkCount }, "0", "diag-test");
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("published dev server ownership record could not be verified");
+    expect(result.stdout).toMatch(
+      /RA_DIAG v=1 code=member_cwd_mismatch pid=\d+ member_pid=\d+ state=[A-Z] record=match session=match group=match start=match cwd=mismatch owner=unknown port=unknown command=unknown enumeration=match/,
+    );
+    expect(result.stdout).not.toContain("RA_DEV_OWNER=");
+    expect(result.stdout).not.toContain("npm run dev");
+    expect(existsSync(pidFile)).toBe(false);
+    expect(existsSync(`${pidFile}.lock`)).toBe(false);
+    expect(listening()).toBe(false);
   }, 30000);
 
   it("cleans up an interrupted launch before its ownership record is published", async () => {
