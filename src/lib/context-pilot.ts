@@ -22,14 +22,18 @@ export type PilotCorrections = {
 
 export type PilotTag = { label: string; sources: string[] };
 
+export type PilotOpenLoopStatus = "Open" | "Overdue" | "Unclear";
+
 export type PilotOpenLoop = {
   commitment: string;
   owner: string;
   lastMentioned: string;
+  status: PilotOpenLoopStatus;
   sources: string[];
 };
 
 export type PilotReason = { reason: string; sources: string[] };
+export type PilotDevelopment = { development: string; sources: string[] };
 
 export type PilotHistory = {
   firstMeaningfulThreadId: string;
@@ -62,6 +66,7 @@ export type PilotContact = {
   stateConfidence: "Low" | "Moderate";
   openLoops: PilotOpenLoop[];
   engagementReasons: PilotReason[];
+  developments: PilotDevelopment[];
   confidence: "Low" | "Moderate";
   significance: string;
   significanceSources: string[];
@@ -96,14 +101,11 @@ export const pilotContacts: PilotContact[] = [
     stateEvidence: "The most recent message is recent and refers to plans for next weekend.",
     stateSources: ["family-2", "family-3"],
     stateConfidence: "Moderate",
-    openLoops: [
-      { commitment: "Have lunch again soon (no date set)", owner: "Unclear; both suggested it", lastMentioned: "2026-04-12", sources: ["family-1"] },
-      { commitment: "Help coordinate next weekend's family plans", owner: "You", lastMentioned: "2026-10-02", sources: ["family-3"] },
-    ],
+    openLoops: [],
     engagementReasons: [
-      { reason: "Family gathering next weekend is a timely occasion to confirm plans.", sources: ["family-3"] },
-      { reason: "The earlier lunch idea was never scheduled.", sources: ["family-1"] },
+      { reason: "You both previously suggested getting lunch again; that could be an easy way to spend time together.", sources: ["family-1"] },
     ],
+    developments: [],
     confidence: "Moderate",
     significance: "Several exchanges describe ongoing mutual support and time together, not just logistics.",
     significanceSources: ["family-1", "family-2"],
@@ -139,6 +141,7 @@ export const pilotContacts: PilotContact[] = [
     stateConfidence: "Low",
     openLoops: [],
     engagementReasons: [],
+    developments: [],
     confidence: "Low",
     significance: "The correspondence supports a completed transaction, not broader personal significance.",
     significanceSources: ["stay-1", "stay-2"],
@@ -172,12 +175,10 @@ export const pilotContacts: PilotContact[] = [
     stateSources: ["recruiter-2"],
     stateConfidence: "Low",
     openLoops: [
-      { commitment: "Send the role description", owner: "Morgan Reed (whether sent is unknown)", lastMentioned: "2026-08-05", sources: ["recruiter-2"] },
-      { commitment: "Hold a short call on Thursday", owner: "You and Morgan Reed", lastMentioned: "2026-08-05", sources: ["recruiter-2"] },
+      { commitment: "Send the role description", owner: "Morgan Reed", lastMentioned: "2026-08-05", status: "Unclear", sources: ["recruiter-2"] },
     ],
-    engagementReasons: [
-      { reason: "The role description you requested may still be outstanding.", sources: ["recruiter-2"] },
-    ],
+    engagementReasons: [],
+    developments: [],
     confidence: "Low",
     significance: "The exchange may matter professionally, but the sample does not show whether an opportunity progressed.",
     significanceSources: ["recruiter-1", "recruiter-2"],
@@ -212,12 +213,10 @@ export const pilotContacts: PilotContact[] = [
     stateSources: ["coworker-1", "coworker-2", "coworker-3"],
     stateConfidence: "Low",
     openLoops: [
-      { commitment: "Compare notes after both try the new workflow", owner: "You and Jamie Patel", lastMentioned: "2026-09-12", sources: ["coworker-3"] },
-      { commitment: "Answer the questions added to the shared notes", owner: "Jamie Patel (not confirmed)", lastMentioned: "2026-09-10", sources: ["coworker-2"] },
+      { commitment: "Compare notes after both try the new workflow", owner: "You and Jamie Patel", lastMentioned: "2026-09-12", status: "Unclear", sources: ["coworker-3"] },
     ],
-    engagementReasons: [
-      { reason: "The planned notes comparison is an unfinished thread.", sources: ["coworker-3"] },
-    ],
+    engagementReasons: [],
+    developments: [],
     confidence: "Low",
     significance: "There is evidence of a working connection, but not enough to infer personal importance from onboarding mail.",
     significanceSources: ["coworker-1", "coworker-2"],
@@ -257,6 +256,7 @@ export const pilotContacts: PilotContact[] = [
       { reason: "Drew congratulated you on a new direction; an update on how it went is a natural reason to write.", sources: ["dormant-3"] },
       { reason: "You previously thanked Drew for advice that shaped a next step.", sources: ["dormant-2"] },
     ],
+    developments: [],
     confidence: "Moderate",
     significance: "Sparse email spans years and describes meaningful collaboration and support; volume understates that context.",
     significanceSources: ["dormant-1", "dormant-2"],
@@ -284,6 +284,10 @@ export function buildPilotBrief(contactId: string, consentGranted: boolean) {
   const contact = getPilotContact(contactId);
   if (!contact) return undefined;
   return { ...contact, threads: contact.threads.slice(0, MAX_PILOT_THREADS) };
+}
+
+export function normalizePilotCorrection<T extends string>(suggested: T, selected: T) {
+  return selected === suggested ? undefined : selected;
 }
 
 export function getEffectivePilotInterpretation(
