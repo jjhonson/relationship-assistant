@@ -6,6 +6,7 @@ import {
   getAssistancePlan,
   getEffectivePilotInterpretation,
   getPilotHistory,
+  normalizePilotCorrection,
   pilotContacts,
 } from "./context-pilot";
 
@@ -85,6 +86,7 @@ describe("fictional contextual relationship pilot", () => {
         ...contact.stateSources,
         ...contact.openLoops.flatMap((loop) => loop.sources),
         ...contact.engagementReasons.flatMap((item) => item.sources),
+        ...contact.developments.flatMap((item) => item.sources),
         contact.history.firstMeaningfulThreadId,
         contact.history.mostRecentMeaningfulThreadId,
       ];
@@ -104,21 +106,31 @@ describe("fictional contextual relationship pilot", () => {
     expect(getPilotHistory(buildPilotBrief("lodging-host", true)!)?.span).toBe("same day");
   });
 
-  it("records open loops with owner and last mention, and none where the evidence has none", () => {
-    expect(buildPilotBrief("recruiter", true)?.openLoops[0]).toMatchObject({
-      commitment: expect.stringContaining("role description"),
-      owner: expect.stringContaining("Morgan Reed"),
-      lastMentioned: "2026-08-05",
-    });
+  it("does not keep clearly past plans as current open loops", () => {
+    expect(buildPilotBrief("frequent-family", true)?.openLoops).toEqual([]);
+    expect(buildPilotBrief("recruiter", true)?.openLoops).toEqual([
+      expect.objectContaining({
+        commitment: expect.stringContaining("role description"),
+        owner: "Morgan Reed",
+        status: "Unclear",
+        lastMentioned: "2026-08-05",
+      }),
+    ]);
+    expect(buildPilotBrief("new-coworker", true)?.openLoops).toEqual([
+      expect.objectContaining({
+        commitment: expect.stringContaining("Compare notes"),
+        status: "Unclear",
+      }),
+    ]);
     expect(buildPilotBrief("lodging-host", true)?.openLoops).toEqual([]);
   });
 
-  it("surfaces open loops for either goal but reconnection reasons only when the user wants to stay better connected", () => {
-    const brief = buildPilotBrief("new-coworker", true)!;
+  it("surfaces current or unclear open loops for either goal but reconnection reasons only when the user wants to stay better connected", () => {
+    const brief = buildPilotBrief("dormant-professional", true)!;
     for (const goal of [undefined, "This feels right"] as const) {
       const plan = getAssistancePlan(brief, goal);
       expect(plan.openLoops).toEqual(brief.openLoops);
-      expect(plan.openLoops.length).toBeGreaterThan(0);
+      expect(plan.openLoops).toEqual([]);
       expect(plan.reasonsToEngage).toEqual([]);
       expect(plan.proactiveNudges).toBe(false);
     }
@@ -126,6 +138,14 @@ describe("fictional contextual relationship pilot", () => {
     expect(connected.proactiveNudges).toBe(true);
     expect(connected.reasonsToEngage).toEqual(brief.engagementReasons);
     expect(connected.openLoops).toEqual(brief.openLoops);
+    expect(connected.reasonsToEngage.length).toBeGreaterThan(0);
+  });
+
+  it("clears a correction when the user returns to the authored suggestion", () => {
+    expect(normalizePilotCorrection("Recruiter", "Professional contact")).toBe("Professional contact");
+    expect(normalizePilotCorrection("Recruiter", "Recruiter")).toBeUndefined();
+    expect(normalizePilotCorrection("Dormant", "Active")).toBe("Active");
+    expect(normalizePilotCorrection("Dormant", "Dormant")).toBeUndefined();
   });
 
   it("keeps authored suggestions separate from the user's effective corrections", () => {
