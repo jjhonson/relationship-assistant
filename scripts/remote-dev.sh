@@ -138,7 +138,7 @@ group_members_valid() {
 }
 
 owned_group() {
-  local pid start dir port owner cmd diagnose="${1:-}" actual_start diag_start reason
+  local pid start dir port owner diagnose="${1:-}" actual_start diag_start reason
   if ! pid_record_valid; then
     [ "$diagnose" = "diagnose" ] &&
       emit_owned_diagnostic "$OWNED_DIAG_CODE" "$(meta_get pid)" unknown unknown mismatch unknown unknown unknown unknown unknown unknown unknown unknown
@@ -161,24 +161,13 @@ owned_group() {
       emit_owned_diagnostic "$GROUP_DIAG_CODE" "$pid" "${GROUP_DIAG_PID:-unknown}" "${GROUP_DIAG_STATE:-unknown}" match "${GROUP_DIAG_SESSION:-unknown}" "${GROUP_DIAG_GROUP:-unknown}" "$diag_start" "${GROUP_DIAG_CWD:-unknown}" "${GROUP_DIAG_OWNER:-unknown}" "${GROUP_DIAG_PORT:-unknown}" unknown "${GROUP_DIAG_ENUMERATION:-unknown}"
     return 1
   fi
+  # The handoff PID and process markers establish ownership; npm/Next may change its title.
   if [ "$(proc_field "$pid" 19)" = "$start" ] &&
      [ "$(proc_field "$pid" 2)" = "$pid" ] && [ "$(proc_field "$pid" 3)" = "$pid" ] &&
      [ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" = "$dir" ] &&
      has_env "$pid" RA_DEV_OWNER "$owner" && has_env "$pid" PORT "$port"; then
-    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/[[:space:]]*$//')"
-    if [ -z "$cmd" ]; then
-      reason=process_inspection_unknown
-      [ -e "/proc/$pid" ] || reason=process_disappeared
-      [ "$diagnose" = "diagnose" ] &&
-        emit_owned_diagnostic "$reason" "$pid" unknown "$(proc_field "$pid" 0)" match match match match match match match unknown unknown match
-      return 1
-    fi
-    case "$cmd" in
-      *npm*" run dev") printf '%s' "$pid"; return 0 ;;
-    esac
-    [ "$diagnose" = "diagnose" ] &&
-      emit_owned_diagnostic leader_command_mismatch "$pid" unknown "$(proc_field "$pid" 0)" match match match match match match match mismatch unknown match
-    return 1
+    printf '%s' "$pid"
+    return 0
   fi
   # The leader may exit before a child finishes. The surviving group is still attributable
   # only when every live member carries the unpredictable owner token and launch settings.

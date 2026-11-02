@@ -786,6 +786,19 @@ linuxDescribe("remote-dev.sh", () => {
     expect(existsSync(pidFile)).toBe(false);
   }, 30000);
 
+  it("reuses and stops the handoff leader after a legitimate title transition", () => {
+    fakeNpm(`exec node -e 'process.title="next dev"; require("http").createServer((q,r)=>r.end("ok")).listen(Number(process.env.PORT)); setInterval(()=>{},1000)'`);
+    const first = remote("start", {}, "0", "title-transition");
+    expect(first.status, `${first.stdout}\n${first.stderr}`).toBe(0);
+    expect(first.stdout).toContain("RA_STATUS=started");
+    const pid = Number(meta("pid"));
+    expect(readFileSync(`/proc/${pid}/cmdline`).toString().startsWith("next dev")).toBe(true);
+    expect(remote("start").stdout).toContain("RA_STATUS=reused");
+    expect(remote("stop").status).toBe(0);
+    expect(alive(pid)).toBe(false);
+    expect(listening()).toBe(false);
+  }, 30000);
+
   it("reports the exact failed member predicate without changing cleanup behavior", () => {
     fakeNpm(serverNpm);
     const realReadlink = spawnSync("which", ["readlink"], { encoding: "utf8" }).stdout.trim();
