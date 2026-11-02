@@ -27,6 +27,60 @@ npm run dev        # http://localhost:3000
 | `npm run typecheck` | TypeScript check |
 | `npm test` | Run unit tests (Vitest) |
 
+## Codespaces dev start/stop (run on the Mac host)
+
+Optional convenience scripts (bash + [GitHub CLI](https://cli.github.com/)). **Mac-local:** `scripts/dev-start.sh`, `scripts/dev-stop.sh`, `scripts/dev-common.sh`. **Codespace-only:** `scripts/remote-dev.sh`, which the Mac scripts pipe to `bash -s` over `gh codespace ssh` (never run it on the Mac). The reviewed script is sent from the local checkout; no script is fetched from a URL, and `.env.local` is not read or copied.
+
+### One-time Mac setup
+
+The scripts live in this repository, so the Mac needs a checkout. If your only checkout is the browser Codespace:
+
+1. Wait until the PR containing the scripts is reviewed and merged. Until then they exist only on the PR branch, not on `main`.
+2. In Mac Terminal, run `gh auth login` if needed, then `gh repo clone jjhonson/relationship-assistant ~/projects/relationship-assistant`. GitHub CLI authentication stays on the Mac; do not copy credentials or `.env.local` into the repository. The scripts become available on `main` only after review and merge. To use a reviewed PR branch before merge, fetch and check out that branch yourself only after reviewing its diff.
+3. Requires a Codespace for this repository with an SSH server (see `gh codespace ssh --help`) and a `.env.local` already present in it. The scripts never read, copy or print `.env.local`.
+
+### Daily use
+
+```bash
+cd ~/projects/relationship-assistant
+scripts/dev-start.sh [--name CODESPACE] [--dry-run]   # then open http://localhost:3000
+scripts/dev-stop.sh  [--name CODESPACE] [--force] [--dry-run]
+```
+
+- The Codespace is auto-selected if the repository (`RA_REPO`, default `jjhonson/relationship-assistant`) has exactly one; otherwise pass `--name` or `RA_CODESPACE`. Other overrides: `RA_PORT`, `RA_REMOTE_DIR` (default `/workspaces/relationship-assistant`), `RA_STATE_DIR`.
+- Start is idempotent: it reuses a running Codespace, dev server and port forward. For a stopped Codespace it uses `gh codespace ssh -c NAME -- true` to wake/connect, retrying up to 12 times; it does not call an unsupported `gh codespace start` subcommand. It fails clearly if `localhost:3000` is held by something else and finishes by checking `http://localhost:3000`, so the default Gmail callback stays `http://localhost:3000/api/gmail/callback`.
+- `RA_PORT` defaults to 3000 and is passed as `PORT` to Next.js. Changing it does not rewrite Gmail OAuth settings; Gmail callback configuration remains manual and may not work on a non-default port.
+- If start fails or is interrupted, it attempts to clean up only what *that run* launched, including a just-created forward whose metadata could not be published. Termination is verified before matching metadata is removed; if the process cannot be safely verified or stopped, any existing record is preserved and a warning is printed. A Codespace already running beforehand is left alone.
+- If remote ownership verification fails, start saves a small private, allowlisted predicate report in `RA_STATE_DIR` (outside the repository) before cleanup. It contains numeric process IDs/state and match statuses only—not commands, environments, logs, or application data. If validation or writing fails, the controller says so and continues safe cleanup.
+- It never switches, pulls or merges branches (it prints the current branch/status), and never touches Gmail. Connect/disconnect Gmail manually.
+
+### Process ownership
+
+- Local forward: the PID, process start time, selected Codespace, port and launch ID are recorded in `~/.local/state/relationship-assistant/forward-<codespace>.meta`. The launch ID is also inherited by the process. It is reused or signalled only if the record, process start time, owner environment and exact command details match. Stop waits for exit before removing the record; `--force` escalates only after re-verifying identity. Failed-start cleanup verifies its in-memory launch identity even if record creation failed. An unchanged, correctly scoped record is removed without signalling only after its original process is definitively gone; live mismatches and malformed or out-of-scope records are retained for inspection.
+- Local start/stop share an atomic lock at `~/.local/state/relationship-assistant/lifecycle.lock`. Remote start/stop also share a lock beside the PID record, protecting calls from different Mac terminals. Concurrent commands fail clearly rather than queue or replace ownership metadata. If a machine or shell is killed while holding a lock, inspect that no matching operation remains before manually removing the stale lock.
+- Remote dev server: launched via `setsid` as its own session/group; `/tmp/relationship-assistant-dev.pid` records the PID, kernel start time, physical workspace path, port, unique inherited launch token and start-run ID. Launch handoff files are invocation-specific. Before signalling or reusing the server, the script verifies the handoff PID's start time, group/session, workdir, configured port and owner marker, plus every live group member. It does not depend on the process title, which npm/Next may change during startup. Before publishing ownership, the temporary record is checked for complete expected content; interruption or write/publication failure triggers bounded cleanup of only the verified in-flight launch.
+- Mismatches fail closed: nothing is signalled and the record is retained for safe inspection. Stop waits for the entire verified group to exit; `--force` escalates to SIGKILL only after re-verifying the remaining group. Failed-start cleanup only stops a remote server whose run ID matches that start invocation, and only stops Codespace compute when that invocation woke a previously shut-down Codespace.
+
+### `next-env.d.ts`
+
+Next.js may rewrite this tracked file. Shutdown **never restores or edits it automatically**. If it changed, the script reports that staged and unstaged content was left untouched. Review `git diff HEAD -- next-env.d.ts` in the Codespace, then manually discard only changes you have confirmed are generated; automatic cleanup is deferred to avoid losing user edits.
+
+### Manual recovery
+
+- Mac forward: inspect `~/.local/state/relationship-assistant/forward-NAME.meta`, then use `scripts/dev-stop.sh --name NAME --force` to re-verify ownership before escalation.
+- Codespace server: use `scripts/dev-stop.sh --name NAME --force`; do not signal a PID copied from a possibly stale record without verifying its identity.
+- Compute: `gh codespace stop -c NAME`, then confirm with `gh codespace list`. Server log: `/tmp/relationship-assistant-dev.log` in the Codespace.
+
+### Smoke-test checklist (after review; no Gmail needed)
+
+1. `scripts/dev-start.sh --dry-run`: shows the selected Codespace and planned SSH wake/start/forward commands. Confirm the configured state directory and any existing metadata are unchanged.
+2. After reviewing this branch, start with a non-Gmail Codespace; verify `curl -I http://localhost:3000` succeeds. Run start again and confirm the server/forward are reused rather than duplicated.
+3. Stop gracefully; verify `gh codespace list` shows the selected Codespace shut down and the local forward is gone. Repeat with a deliberately staged `next-env.d.ts` edit and confirm both its staged and working-tree contents remain unchanged.
+4. With `localhost:3000` occupied by an unrelated process, start should fail without signalling it. For a startup failure after wake, verify only that invocation's server/forward are cleaned up and only its newly awakened Codespace is stopped.
+5. To recover manually, inspect `scripts/dev-start.sh` / `scripts/dev-stop.sh` and `gh codespace list`; use `scripts/dev-stop.sh --name NAME --force` only after confirming the selected name. Do not use Gmail for this smoke test.
+
+Unit tests (`src/scripts/dev-workflow.test.ts`) use a rejecting fake `gh`, fake `npm`, and isolated local processes. They exercise `gh codespace ssh -c NAME -- bash -s -- ...` argument/stdin handling and process-group lifecycle, but do not contact GitHub or prove behavior on a real Mac/Codespace. The first real-host smoke test remains unperformed and should happen only after review.
+
 ## Structure
 
 - `src/app/page.tsx` – "Your Relationships" dashboard

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Run on the Mac host. Stops only what dev-start.sh launched, then stops the Codespace.
+usage() {
+  cat <<'USAGE'
+Usage: scripts/dev-stop.sh [--name CODESPACE] [--force] [--dry-run]
+
+Gracefully stops the dev server started by dev-start.sh (SIGTERM; --force escalates to SIGKILL),
+closes a verified recorded port forward, reports any next-env.d.ts changes without modifying
+them, then stops the selected Codespace. Other processes and Codespaces are never touched.
+Manual recovery:
+  Inspect:   the ownership record and process logs; do not signal a PID copied from a record.
+  Retry:     scripts/dev-stop.sh --name NAME --force
+  Compute:   gh codespace stop -c NAME (only after confirming NAME)
+USAGE
+}
+set -u
+RA_FORCE=0
+. "$(dirname "${BASH_SOURCE[0]}")/dev-common.sh"
+parse_common_args "$@"
+require_tools
+acquire_host_lock
+trap release_host_lock EXIT
+
+resolve_codespace
+status=0
+if [ "$RA_STATE" = "Available" ]; then
+  log "[Codespace] Stopping dev server..."
+  if [ "$RA_DRY_RUN" = "1" ]; then
+    log "[dry-run] gh codespace ssh -c $RA_CODESPACE -- bash -s -- stop $RA_REMOTE_DIR $RA_PORT"
+  else
+    remote_run stop || { log "WARNING: remote stop reported a problem; Codespace will NOT be stopped so nothing is orphaned. See --help for recovery."; status=1; }
+  fi
+else
+  log "[Codespace] Not running ($RA_STATE); nothing to stop remotely."
+fi
+
+if pid="$(forward_pid_if_ours)"; then
+  log "[Mac] Closing port forward (pid $pid)"
+  if [ "$RA_DRY_RUN" = "1" ]; then
+    log "[dry-run] would send SIGTERM and verify exit before removing ownership metadata"
+  else
+    forward_run_id="$(sed -n 's/^run_id=//p' "$(forward_meta_file)" | head -n1)"
+    if stop_forward "$pid" "$RA_FORCE" "$forward_run_id"; then
+      log "[Mac] Port forward exited; ownership record removed."
+    else
+      log "WARNING: port forward did not terminate or could not be verified; ownership record retained."
+      status=1
+    fi
+  fi
+elif [ -f "$(forward_meta_file)" ]; then
+  if [ "$RA_DRY_RUN" = "1" ]; then
+    log "[dry-run] recorded forward was not verified; metadata and process were left untouched."
+  elif cleanup_stale_forward_record; then
+    log "[Mac] Removed unchanged ownership metadata for a definitively exited forward; no process was signalled."
+  else
+    log "[Mac] Recorded forward is live, mismatched, malformed, or outside this Codespace/port; not signalling it. Inspect $(forward_meta_file) before recovery."
+    status=1
+  fi
+fi
+
+if [ "$status" -ne 0 ]; then exit "$status"; fi
+if [ "$RA_STATE" = "Available" ] || [ "$RA_STATE" = "Starting" ]; then
+  log "[Mac] Stopping Codespace $RA_CODESPACE"
+  run_mutating gh codespace stop -c "$RA_CODESPACE" || fail "could not stop Codespace; run: gh codespace stop -c $RA_CODESPACE"
+fi
+log "Done."
