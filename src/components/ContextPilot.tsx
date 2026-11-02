@@ -6,6 +6,7 @@ import {
   getAssistancePlan,
   getEffectivePilotInterpretation,
   getPilotHistory,
+  normalizePilotCorrection,
   MAX_PILOT_THREADS,
   pilotContacts,
   type PilotClassification,
@@ -175,7 +176,7 @@ export function ContextPilot() {
                 <dt className="font-semibold">Relationship history (within the sample)</dt>
                 {history ? (
                   <>
-                    <dd className="mt-1">First meaningful interaction: {history.firstMeaningful}. Most recent meaningful interaction: {history.mostRecentMeaningful}. Span: {history.span}.</dd>
+                    <dd className="mt-1">Earliest observed meaningful interaction: {history.firstMeaningful}. Latest observed meaningful interaction: {history.mostRecentMeaningful}. Span: {history.span}.</dd>
                     <dd className="mt-1">Pattern: {history.pattern}</dd>
                   </>
                 ) : <dd className="mt-1">Unknown</dd>}
@@ -203,10 +204,18 @@ export function ContextPilot() {
                   <dd className="mt-1">None found in the fictional sample.</dd>
                 ) : plan.openLoops.map((loop) => (
                   <dd key={loop.commitment} className="mt-1">
-                    {loop.commitment}. Owner: {loop.owner}. Last mentioned: {loop.lastMentioned}.<ThreadCitations threadIds={loop.sources} />
+                    {loop.commitment}. Owner: {loop.owner}. Status: {loop.status}. Last mentioned: {loop.lastMentioned}.<ThreadCitations threadIds={loop.sources} />
                   </dd>
                 ))}
                 <dd className="mt-1 text-stone-600">Open commitments are shown for either goal; finishing an obligation is different from nurturing the relationship.</dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="font-semibold">Developments observed since the last interaction</dt>
+                {brief.developments.length === 0 ? (
+                  <dd className="mt-1">None available in this fictional pilot.</dd>
+                ) : brief.developments.map((item) => (
+                  <dd key={item.development} className="mt-1">{item.development}<ThreadCitations threadIds={item.sources} /></dd>
+                ))}
               </div>
               <div className="sm:col-span-2">
                 <dt className="font-semibold">Relationship goal and potential reasons to engage</dt>
@@ -233,7 +242,10 @@ export function ContextPilot() {
                 Correct the relationship classification
                 <select
                   value={classificationCorrection || brief.classification}
-                  onChange={(event) => setClassificationCorrection(event.target.value as PilotClassification)}
+                  onChange={(event) => {
+                    const selected = event.target.value as PilotClassification;
+                    setClassificationCorrection(normalizePilotCorrection(brief.classification, selected) ?? "");
+                  }}
                   className="mt-1 block w-full rounded-lg border border-stone-300 bg-white p-2"
                 >
                   {classifications.map((classification) => <option key={classification}>{classification}</option>)}
@@ -243,7 +255,10 @@ export function ContextPilot() {
                 Correct the current state
                 <select
                   value={stateCorrection || brief.state}
-                  onChange={(event) => setStateCorrection(event.target.value as PilotRelationshipState)}
+                  onChange={(event) => {
+                    const selected = event.target.value as PilotRelationshipState;
+                    setStateCorrection(normalizePilotCorrection(brief.state, selected) ?? "");
+                  }}
                   className="mt-1 block w-full rounded-lg border border-stone-300 bg-white p-2"
                 >
                   {states.map((state) => <option key={state}>{state}</option>)}
