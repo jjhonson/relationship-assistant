@@ -125,19 +125,25 @@ describe("fictional contextual relationship pilot", () => {
     expect(buildPilotBrief("lodging-host", true)?.openLoops).toEqual([]);
   });
 
-  it("surfaces current or unclear open loops for either goal but reconnection reasons only when the user wants to stay better connected", () => {
+  it("surfaces current or unclear open loops regardless of relationship goal", () => {
+    const brief = buildPilotBrief("recruiter", true)!;
+    for (const goal of [undefined, "This feels right", "I want to stay better connected"] as const) {
+      const plan = getAssistancePlan(brief, goal);
+      expect(plan.openLoops).toEqual(brief.openLoops);
+      expect(plan.openLoops.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("shows reconnection reasons only when the user wants to stay better connected", () => {
     const brief = buildPilotBrief("dormant-professional", true)!;
     for (const goal of [undefined, "This feels right"] as const) {
       const plan = getAssistancePlan(brief, goal);
-      expect(plan.openLoops).toEqual(brief.openLoops);
-      expect(plan.openLoops).toEqual([]);
       expect(plan.reasonsToEngage).toEqual([]);
       expect(plan.proactiveNudges).toBe(false);
     }
     const connected = getAssistancePlan(brief, "I want to stay better connected");
     expect(connected.proactiveNudges).toBe(true);
     expect(connected.reasonsToEngage).toEqual(brief.engagementReasons);
-    expect(connected.openLoops).toEqual(brief.openLoops);
     expect(connected.reasonsToEngage.length).toBeGreaterThan(0);
   });
 
