@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import {
   buildPilotBrief,
+  getEffectivePilotInterpretation,
   MAX_PILOT_THREADS,
   pilotContacts,
   type PilotClassification,
@@ -46,6 +47,12 @@ export function ContextPilot() {
   const [recommendationCorrection, setRecommendationCorrection] = useState<PilotRecommendation | "">("");
   const selected = pilotContacts.find((contact) => contact.id === selectedId);
   const brief = reviewedId === selectedId ? buildPilotBrief(selectedId, consentGranted) : undefined;
+  const interpretation = brief
+    ? getEffectivePilotInterpretation(brief, {
+        classification: classificationCorrection || undefined,
+        recommendation: recommendationCorrection || undefined,
+      })
+    : undefined;
 
   function selectContact(id: string) {
     setSelectedId(id);
@@ -65,15 +72,18 @@ export function ContextPilot() {
       <header>
         <h1 className="text-3xl font-bold tracking-tight">Context pilot · fictional data</h1>
         <p className="mt-2 max-w-3xl text-stone-600">
-          Select one example to review a small, fictional thread set and an evidence-based brief. This does not access Gmail.
+          Select one example to review prewritten fictional threads and a prewritten example brief. This does not access Gmail
+          or interpret message content.
         </p>
       </header>
 
       <aside className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
-        <p className="font-semibold">Stage 1 only: no real email, external AI, or provider integration</p>
+        <p className="font-semibold">Stage 1 wireframe only: prewritten examples, no AI relationship understanding</p>
         <p className="mt-1">
-          All names and messages are invented and bundled with this local prototype. Nothing is fetched, stored, logged,
-          sent to a provider, or used to contact anyone. Reviewing an example does not grant permission for live Gmail access.
+          Every contact, message, classification, evidence reference, significance statement, and recommendation is invented
+          and prewritten in local fixtures. Nothing is interpreted, fetched, stored, logged, sent to a provider, or used to
+          contact anyone. These bundled examples are present in client code before consent; this checkbox only confirms that
+          you want to display fiction. It is not a security gate or permission for live Gmail access.
         </p>
       </aside>
 
@@ -131,14 +141,21 @@ export function ContextPilot() {
         </form>
       )}
 
-      {brief && (
+      {brief && interpretation && (
         <section className="space-y-5" aria-labelledby="brief-heading">
           <div className="rounded-2xl border border-stone-200 bg-white p-5">
-            <h2 id="brief-heading" className="text-xl font-semibold">Relationship brief · {brief.label}</h2>
+            <h2 id="brief-heading" className="text-xl font-semibold">Prewritten fictional example brief · {brief.label}</h2>
+            <p className="mt-1 text-sm text-stone-600">
+              Not AI-generated and not an interpretation of message content. All brief fields below are authored fixture text.
+            </p>
             <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
               <div>
                 <dt className="font-semibold">Context and evidence</dt>
-                <dd className="mt-1">Suggested: {brief.classification}. {brief.classificationEvidence}<ThreadCitations threadIds={brief.classificationSources} /></dd>
+                <dd className="mt-1">Suggested classification: {interpretation.suggestedClassification}. {brief.classificationEvidence}<ThreadCitations threadIds={brief.classificationSources} /></dd>
+                <dd className="mt-1 font-medium text-indigo-900">
+                  Effective interpretation: {interpretation.effectiveClassification}
+                  {classificationCorrection ? " (your correction)" : " (suggested; not corrected)"}
+                </dd>
                 <dd className="mt-1 text-stone-600">Confidence: {brief.confidence}; this is a fictional example, not a verified fact.</dd>
               </div>
               <div>
@@ -151,7 +168,11 @@ export function ContextPilot() {
               </div>
               <div>
                 <dt className="font-semibold">Potential assistance and why</dt>
-                <dd className="mt-1">Suggested: {brief.recommendation}. {brief.recommendationReason}</dd>
+                <dd className="mt-1">Suggested action: {interpretation.suggestedRecommendation}. {brief.recommendationReason}</dd>
+                <dd className="mt-1 font-medium text-indigo-900">
+                  Effective action: {interpretation.effectiveRecommendation}
+                  {recommendationCorrection ? " (your correction)" : " (suggested; not corrected)"}
+                </dd>
               </div>
               <div className="sm:col-span-2">
                 <dt className="font-semibold">Unknowns and verification</dt>

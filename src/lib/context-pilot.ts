@@ -12,6 +12,11 @@ export type PilotRecommendation =
   | "Worthwhile reconnection"
   | "User judgment needed";
 
+export type PilotCorrections = {
+  classification?: PilotClassification;
+  recommendation?: PilotRecommendation;
+};
+
 export type PilotThread = {
   id: string;
   date: string;
@@ -160,4 +165,16 @@ export function buildPilotBrief(contactId: string, consentGranted: boolean) {
   const contact = getPilotContact(contactId);
   if (!contact) return undefined;
   return { ...contact, threads: contact.threads.slice(0, MAX_PILOT_THREADS) };
+}
+
+export function getEffectivePilotInterpretation(
+  brief: Pick<PilotContact, "classification" | "recommendation">,
+  corrections: PilotCorrections = {},
+) {
+  return {
+    suggestedClassification: brief.classification,
+    effectiveClassification: corrections.classification ?? brief.classification,
+    suggestedRecommendation: brief.recommendation,
+    effectiveRecommendation: corrections.recommendation ?? brief.recommendation,
+  };
 }

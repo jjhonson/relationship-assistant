@@ -3,6 +3,7 @@ import {
   MAX_PILOT_THREADS,
   buildPilotBrief,
   canReviewPilotContact,
+  getEffectivePilotInterpretation,
   pilotContacts,
 } from "./context-pilot";
 
@@ -27,13 +28,17 @@ describe("fictional contextual relationship pilot", () => {
     expect(canReviewPilotContact("", true)).toBe(false);
     expect(canReviewPilotContact("not-a-contact", true)).toBe(false);
     expect(buildPilotBrief("recruiter", false)).toBeUndefined();
+    expect(pilotContacts.every((contact) => buildPilotBrief(contact.id, false) === undefined)).toBe(true);
   });
 
-  it("does not make content requests when reviewing fictional evidence", () => {
+  it("uses only bundled fictional records and makes no content requests", () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
-    buildPilotBrief("frequent-family", false);
-    buildPilotBrief("frequent-family", true);
+    for (const contact of pilotContacts) {
+      expect(contact.threads.every((thread) => !thread.from.includes("@") && !thread.to.includes("@"))).toBe(true);
+      buildPilotBrief(contact.id, false);
+      buildPilotBrief(contact.id, true);
+    }
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -68,6 +73,27 @@ describe("fictional contextual relationship pilot", () => {
       confidence: "Low",
       recommendation: "User judgment needed",
       unknowns: [expect.stringContaining("Work chat")],
+    });
+  });
+
+  it("keeps authored suggestions separate from the user's effective corrections", () => {
+    const brief = buildPilotBrief("recruiter", true);
+    expect(brief).toBeDefined();
+    expect(getEffectivePilotInterpretation(brief!)).toEqual({
+      suggestedClassification: "Recruiter",
+      effectiveClassification: "Recruiter",
+      suggestedRecommendation: "Research more",
+      effectiveRecommendation: "Research more",
+    });
+
+    expect(getEffectivePilotInterpretation(brief!, {
+      classification: "Professional contact",
+      recommendation: "No action needed",
+    })).toEqual({
+      suggestedClassification: "Recruiter",
+      effectiveClassification: "Professional contact",
+      suggestedRecommendation: "Research more",
+      effectiveRecommendation: "No action needed",
     });
   });
 });
