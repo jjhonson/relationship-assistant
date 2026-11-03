@@ -13,11 +13,13 @@ export type PilotRelationshipState =
   | "Recently revived"
   | "Unclear";
 
+export type PilotRelationshipDisposition = "Relationship worth managing" | "Background only" | "Unclear";
 export type PilotRelationshipGoal = "This feels right" | "I want to stay better connected";
 
 export type PilotCorrections = {
   classification?: PilotClassification;
   state?: PilotRelationshipState;
+  disposition?: PilotRelationshipDisposition;
 };
 
 export type PilotTag = { label: string; sources: string[] };
@@ -64,6 +66,10 @@ export type PilotContact = {
   stateEvidence: string;
   stateSources: string[];
   stateConfidence: "Low" | "Moderate";
+  disposition: PilotRelationshipDisposition;
+  dispositionEvidence: string;
+  dispositionSources: string[];
+  dispositionConfidence: "Low" | "Moderate";
   openLoops: PilotOpenLoop[];
   engagementReasons: PilotReason[];
   developments: PilotDevelopment[];
@@ -98,9 +104,13 @@ export const pilotContacts: PilotContact[] = [
       pattern: "Regular, reciprocal exchanges roughly every few months within the sample.",
     },
     state: "Active",
-    stateEvidence: "The most recent message is recent and refers to plans for next weekend.",
+    stateEvidence: "The latest observed message is from October 2 and shows an upcoming family gathering at that time; no later email is included.",
     stateSources: ["family-2", "family-3"],
     stateConfidence: "Moderate",
+    disposition: "Relationship worth managing",
+    dispositionEvidence: "The sample shows recurring personal contact and mutual support rather than a one-time transaction.",
+    dispositionSources: ["family-1", "family-2", "family-3"],
+    dispositionConfidence: "Moderate",
     openLoops: [],
     engagementReasons: [
       { reason: "You both previously suggested getting lunch again; that could be an easy way to spend time together.", sources: ["family-1"] },
@@ -111,7 +121,7 @@ export const pilotContacts: PilotContact[] = [
     significanceSources: ["family-1", "family-2"],
     maintenance: "Recent, reciprocal email contact is visible; other channels are not represented.",
     maintenanceSources: ["family-2", "family-3"],
-    unknowns: ["The sample cannot establish the full relationship or the user's preferred contact cadence."],
+    unknowns: ["The sample cannot establish the full relationship or whether the user wants this level of connection to remain as-is or become closer."],
     threads: [
       { id: "family-1", date: "2026-04-12", from: "Taylor Kim", to: "You", subject: "Sunday lunch", body: "Thanks for making time to talk through the move. It helped to hear your perspective. Let's do lunch again soon." },
       { id: "family-2", date: "2026-07-06", from: "You", to: "Taylor Kim", subject: "Checking in", body: "I appreciated your call last week. I'm glad we could catch up, and I'm here if you want to talk more." },
@@ -139,6 +149,10 @@ export const pilotContacts: PilotContact[] = [
     stateEvidence: "The exchange concluded with check-in details and no later email is included.",
     stateSources: ["stay-2"],
     stateConfidence: "Low",
+    disposition: "Background only",
+    dispositionEvidence: "The supplied messages describe a completed one-time lodging transaction with no evidence of an ongoing relationship to manage.",
+    dispositionSources: ["stay-1", "stay-2"],
+    dispositionConfidence: "Moderate",
     openLoops: [],
     engagementReasons: [],
     developments: [],
@@ -174,6 +188,10 @@ export const pilotContacts: PilotContact[] = [
     stateEvidence: "The sample ends after the call was proposed, so whether it happened or continued is not shown.",
     stateSources: ["recruiter-2"],
     stateConfidence: "Low",
+    disposition: "Relationship worth managing",
+    dispositionEvidence: "The exchange concerns a potentially relevant professional opportunity, so retaining the relationship may be useful even though the outcome is unknown.",
+    dispositionSources: ["recruiter-1", "recruiter-2"],
+    dispositionConfidence: "Low",
     openLoops: [
       { commitment: "Send the role description", owner: "Morgan Reed", lastMentioned: "2026-08-05", status: "Unclear", sources: ["recruiter-2"] },
     ],
@@ -212,6 +230,10 @@ export const pilotContacts: PilotContact[] = [
     stateEvidence: "Three messages in five days, the latest proposing a follow-up.",
     stateSources: ["coworker-1", "coworker-2", "coworker-3"],
     stateConfidence: "Low",
+    disposition: "Relationship worth managing",
+    dispositionEvidence: "The messages show an ongoing workplace relationship with shared work and an unfinished collaborative thread.",
+    dispositionSources: ["coworker-1", "coworker-2", "coworker-3"],
+    dispositionConfidence: "Low",
     openLoops: [
       { commitment: "Compare notes after both try the new workflow", owner: "You and Jamie Patel", lastMentioned: "2026-09-12", status: "Unclear", sources: ["coworker-3"] },
     ],
@@ -251,6 +273,10 @@ export const pilotContacts: PilotContact[] = [
     stateEvidence: "The latest included email is from 2023 and nothing more recent is present; other channels are unknown.",
     stateSources: ["dormant-3"],
     stateConfidence: "Moderate",
+    disposition: "Relationship worth managing",
+    dispositionEvidence: "The correspondence spans years and contains meaningful collaboration and career guidance, so the relationship appears worth retaining despite dormancy.",
+    dispositionSources: ["dormant-1", "dormant-2", "dormant-3"],
+    dispositionConfidence: "Moderate",
     openLoops: [],
     engagementReasons: [
       { reason: "Drew congratulated you on a new direction; an update on how it went is a natural reason to write.", sources: ["dormant-3"] },
@@ -291,7 +317,7 @@ export function normalizePilotCorrection<T extends string>(suggested: T, selecte
 }
 
 export function getEffectivePilotInterpretation(
-  brief: Pick<PilotContact, "classification" | "state">,
+  brief: Pick<PilotContact, "classification" | "state" | "disposition">,
   corrections: PilotCorrections = {},
 ) {
   return {
@@ -299,6 +325,8 @@ export function getEffectivePilotInterpretation(
     effectiveClassification: corrections.classification ?? brief.classification,
     suggestedState: brief.state,
     effectiveState: corrections.state ?? brief.state,
+    suggestedDisposition: brief.disposition,
+    effectiveDisposition: corrections.disposition ?? brief.disposition,
   };
 }
 
@@ -327,9 +355,10 @@ export function getPilotHistory(brief: Pick<PilotContact, "history" | "threads">
 // Open commitments always surface; reconnection reasons and nudges only for an explicit "stay better connected" choice.
 export function getAssistancePlan(
   brief: Pick<PilotContact, "openLoops" | "engagementReasons">,
+  disposition: PilotRelationshipDisposition,
   goal?: PilotRelationshipGoal,
 ) {
-  const proactive = goal === "I want to stay better connected";
+  const proactive = disposition === "Relationship worth managing" && goal === "I want to stay better connected";
   return {
     openLoops: brief.openLoops,
     reasonsToEngage: proactive ? brief.engagementReasons : [],
