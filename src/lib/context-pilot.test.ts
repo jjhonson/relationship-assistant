@@ -91,6 +91,7 @@ describe("fictional contextual relationship pilot", () => {
       const cited = [
         ...contact.tags.flatMap((tag) => tag.sources),
         ...contact.stateSources,
+        ...contact.dispositionSources,
         ...contact.openLoops.flatMap((loop) => loop.sources),
         ...contact.engagementReasons.flatMap((item) => item.sources),
         ...contact.developments.flatMap((item) => item.sources),
