@@ -10,6 +10,7 @@ import {
   MAX_PILOT_THREADS,
   pilotContacts,
   type PilotClassification,
+  type PilotRelationshipDisposition,
   type PilotRelationshipGoal,
   type PilotRelationshipState,
 } from "@/lib/context-pilot";
@@ -25,6 +26,7 @@ const classifications: PilotClassification[] = [
 
 const states: PilotRelationshipState[] = ["Active", "Occasional", "Dormant", "Recently revived", "Unclear"];
 
+const dispositions: PilotRelationshipDisposition[] = ["Relationship worth managing", "Background only", "Unclear"];
 const goals: PilotRelationshipGoal[] = ["This feels right", "I want to stay better connected"];
 
 function ThreadCitations({ threadIds }: { threadIds: string[] }) {
@@ -46,6 +48,7 @@ export function ContextPilot() {
   const [reviewedId, setReviewedId] = useState("");
   const [classificationCorrection, setClassificationCorrection] = useState<PilotClassification | "">("");
   const [stateCorrection, setStateCorrection] = useState<PilotRelationshipState | "">("");
+  const [dispositionCorrection, setDispositionCorrection] = useState<PilotRelationshipDisposition | "">("");
   const [goal, setGoal] = useState<PilotRelationshipGoal | "">("");
   const selected = pilotContacts.find((contact) => contact.id === selectedId);
   const brief = reviewedId === selectedId ? buildPilotBrief(selectedId, consentGranted) : undefined;
@@ -53,10 +56,13 @@ export function ContextPilot() {
     ? getEffectivePilotInterpretation(brief, {
         classification: classificationCorrection || undefined,
         state: stateCorrection || undefined,
+        disposition: dispositionCorrection || undefined,
       })
     : undefined;
   const history = brief ? getPilotHistory(brief) : undefined;
-  const plan = brief ? getAssistancePlan(brief, goal || undefined) : undefined;
+  const plan = brief && interpretation
+    ? getAssistancePlan(brief, interpretation.effectiveDisposition, goal || undefined)
+    : undefined;
 
   function selectContact(id: string) {
     setSelectedId(id);
@@ -64,6 +70,7 @@ export function ContextPilot() {
     setReviewedId("");
     setClassificationCorrection("");
     setStateCorrection("");
+    setDispositionCorrection("");
     setGoal("");
   }
 
@@ -157,7 +164,9 @@ export function ContextPilot() {
               <div>
                 <dt className="font-semibold">Relationship type / categories</dt>
                 <dd className="mt-1">Suggested classification: {interpretation.suggestedClassification}. {brief.classificationEvidence}<ThreadCitations threadIds={brief.classificationSources} /></dd>
-                <dd className="mt-1">Categories: {brief.categories.join("; ")}</dd>
+                {brief.categories.some((category) => category !== brief.classification) && (
+                  <dd className="mt-1">Additional categories: {brief.categories.filter((category) => category !== brief.classification).join("; ")}</dd>
+                )}
                 <dd className="mt-1 font-medium text-indigo-900">
                   Effective classification: {interpretation.effectiveClassification}
                   {classificationCorrection ? " (your correction)" : " (suggested; not corrected)"}
@@ -191,6 +200,15 @@ export function ContextPilot() {
                 <dd className="mt-1 text-stone-600">Confidence: {brief.stateConfidence}</dd>
               </div>
               <div>
+                <dt className="font-semibold">Relationship disposition</dt>
+                <dd className="mt-1">Suggested disposition: {interpretation.suggestedDisposition}. {brief.dispositionEvidence}<ThreadCitations threadIds={brief.dispositionSources} /></dd>
+                <dd className="mt-1 font-medium text-indigo-900">
+                  Effective disposition: {interpretation.effectiveDisposition}
+                  {dispositionCorrection ? " (your correction)" : " (suggested; not corrected)"}
+                </dd>
+                <dd className="mt-1 text-stone-600">Confidence: {brief.dispositionConfidence}</dd>
+              </div>
+              <div>
                 <dt className="font-semibold">Observed significance</dt>
                 <dd className="mt-1">{brief.significance}<ThreadCitations threadIds={brief.significanceSources} /></dd>
               </div>
@@ -219,17 +237,25 @@ export function ContextPilot() {
               </div>
               <div className="sm:col-span-2">
                 <dt className="font-semibold">Relationship goal and potential reasons to engage</dt>
-                <dd className="mt-1 font-medium text-indigo-900">
-                  {goal ? `Your goal: ${goal}` : "Your goal: not chosen yet (no reconnection prompts are shown)"}
-                </dd>
-                {goal === "This feels right" && (
-                  <dd className="mt-1">Record kept in the background; no proactive prompts to increase contact.</dd>
+                {interpretation.effectiveDisposition === "Background only" ? (
+                  <dd className="mt-1">Background only: keep this contact searchable, but do not provide relationship-management prompts unless you change the disposition.</dd>
+                ) : interpretation.effectiveDisposition === "Unclear" ? (
+                  <dd className="mt-1">Relationship goal is deferred until you decide whether this relationship is worth managing.</dd>
+                ) : (
+                  <>
+                    <dd className="mt-1 font-medium text-indigo-900">
+                      {goal ? `Your goal: ${goal}` : "Your goal: not chosen yet (no reconnection prompts are shown)"}
+                    </dd>
+                    {goal === "This feels right" && (
+                      <dd className="mt-1">Record kept in the background; no proactive prompts to increase contact.</dd>
+                    )}
+                    {plan.proactiveNudges && (plan.reasonsToEngage.length === 0 ? (
+                      <dd className="mt-1">No grounded reasons to reconnect found in the fictional sample.</dd>
+                    ) : plan.reasonsToEngage.map((item) => (
+                      <dd key={item.reason} className="mt-1">{item.reason}<ThreadCitations threadIds={item.sources} /></dd>
+                    )))}
+                  </>
                 )}
-                {plan.proactiveNudges && (plan.reasonsToEngage.length === 0 ? (
-                  <dd className="mt-1">No grounded reasons to reconnect found in the fictional sample.</dd>
-                ) : plan.reasonsToEngage.map((item) => (
-                  <dd key={item.reason} className="mt-1">{item.reason}<ThreadCitations threadIds={item.sources} /></dd>
-                )))}
               </div>
               <div className="sm:col-span-2">
                 <dt className="font-semibold">Unknowns and verification</dt>
@@ -265,20 +291,36 @@ export function ContextPilot() {
                 </select>
               </label>
               <label className="text-sm font-medium sm:col-span-2">
-                Relationship goal (your decision; not inferred)
+                Correct the relationship disposition
                 <select
-                  value={goal}
-                  onChange={(event) => setGoal(event.target.value as PilotRelationshipGoal | "")}
+                  value={dispositionCorrection || brief.disposition}
+                  onChange={(event) => {
+                    const selected = event.target.value as PilotRelationshipDisposition;
+                    setDispositionCorrection(normalizePilotCorrection(brief.disposition, selected) ?? "");
+                    if (selected !== "Relationship worth managing") setGoal("");
+                  }}
                   className="mt-1 block w-full rounded-lg border border-stone-300 bg-white p-2"
                 >
-                  <option value="">Not chosen</option>
-                  {goals.map((item) => <option key={item}>{item}</option>)}
+                  {dispositions.map((item) => <option key={item}>{item}</option>)}
                 </select>
               </label>
+              {interpretation.effectiveDisposition === "Relationship worth managing" && (
+                <label className="text-sm font-medium sm:col-span-2">
+                  Relationship goal (your decision; not inferred)
+                  <select
+                    value={goal}
+                    onChange={(event) => setGoal(event.target.value as PilotRelationshipGoal | "")}
+                    className="mt-1 block w-full rounded-lg border border-stone-300 bg-white p-2"
+                  >
+                    <option value="">Not chosen</option>
+                    {goals.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
-            {(classificationCorrection || stateCorrection) && (
+            {(classificationCorrection || stateCorrection || dispositionCorrection) && (
               <p className="mt-3 text-sm text-indigo-900">
-                Your corrections: {[classificationCorrection, stateCorrection].filter(Boolean).join("; ")}
+                Your corrections: {[classificationCorrection, stateCorrection, dispositionCorrection].filter(Boolean).join("; ")}
               </p>
             )}
             <p className="mt-3 text-xs text-stone-500">Corrections and the goal are held in page memory and reset when you change contacts or refresh.</p>
