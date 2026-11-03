@@ -52,6 +52,13 @@ describe("fictional contextual relationship pilot", () => {
     expect(brief?.threads.every((thread) => thread.id.startsWith("recruiter-"))).toBe(true);
   });
 
+  it("assigns a relationship-management disposition separately from relationship type", () => {
+    expect(buildPilotBrief("frequent-family", true)?.disposition).toBe("Relationship worth managing");
+    expect(buildPilotBrief("recruiter", true)?.disposition).toBe("Relationship worth managing");
+    expect(buildPilotBrief("dormant-professional", true)?.disposition).toBe("Relationship worth managing");
+    expect(buildPilotBrief("lodging-host", true)?.disposition).toBe("Background only");
+  });
+
   it("does not confuse email volume with significance or maintenance", () => {
     const frequent = buildPilotBrief("frequent-family", true);
     const transactional = buildPilotBrief("lodging-host", true);
@@ -128,7 +135,7 @@ describe("fictional contextual relationship pilot", () => {
   it("surfaces current or unclear open loops regardless of relationship goal", () => {
     const brief = buildPilotBrief("recruiter", true)!;
     for (const goal of [undefined, "This feels right", "I want to stay better connected"] as const) {
-      const plan = getAssistancePlan(brief, goal);
+      const plan = getAssistancePlan(brief, brief.disposition, goal);
       expect(plan.openLoops).toEqual(brief.openLoops);
       expect(plan.openLoops.length).toBeGreaterThan(0);
     }
@@ -137,14 +144,21 @@ describe("fictional contextual relationship pilot", () => {
   it("shows reconnection reasons only when the user wants to stay better connected", () => {
     const brief = buildPilotBrief("dormant-professional", true)!;
     for (const goal of [undefined, "This feels right"] as const) {
-      const plan = getAssistancePlan(brief, goal);
+      const plan = getAssistancePlan(brief, brief.disposition, goal);
       expect(plan.reasonsToEngage).toEqual([]);
       expect(plan.proactiveNudges).toBe(false);
     }
-    const connected = getAssistancePlan(brief, "I want to stay better connected");
+    const connected = getAssistancePlan(brief, brief.disposition, "I want to stay better connected");
     expect(connected.proactiveNudges).toBe(true);
     expect(connected.reasonsToEngage).toEqual(brief.engagementReasons);
     expect(connected.reasonsToEngage.length).toBeGreaterThan(0);
+  });
+
+  it("never makes a background-only contact proactive", () => {
+    const brief = buildPilotBrief("lodging-host", true)!;
+    const plan = getAssistancePlan(brief, brief.disposition, "I want to stay better connected");
+    expect(plan.proactiveNudges).toBe(false);
+    expect(plan.reasonsToEngage).toEqual([]);
   });
 
   it("clears a correction when the user returns to the authored suggestion", () => {
@@ -152,6 +166,8 @@ describe("fictional contextual relationship pilot", () => {
     expect(normalizePilotCorrection("Recruiter", "Recruiter")).toBeUndefined();
     expect(normalizePilotCorrection("Dormant", "Active")).toBe("Active");
     expect(normalizePilotCorrection("Dormant", "Dormant")).toBeUndefined();
+    expect(normalizePilotCorrection("Background only", "Relationship worth managing")).toBe("Relationship worth managing");
+    expect(normalizePilotCorrection("Background only", "Background only")).toBeUndefined();
   });
 
   it("keeps authored suggestions separate from the user's effective corrections", () => {
@@ -162,16 +178,21 @@ describe("fictional contextual relationship pilot", () => {
       effectiveClassification: "Recruiter",
       suggestedState: "Unclear",
       effectiveState: "Unclear",
+      suggestedDisposition: "Relationship worth managing",
+      effectiveDisposition: "Relationship worth managing",
     });
 
     expect(getEffectivePilotInterpretation(brief!, {
       classification: "Professional contact",
       state: "Dormant",
+      disposition: "Background only",
     })).toEqual({
       suggestedClassification: "Recruiter",
       effectiveClassification: "Professional contact",
       suggestedState: "Unclear",
       effectiveState: "Dormant",
+      suggestedDisposition: "Relationship worth managing",
+      effectiveDisposition: "Background only",
     });
   });
 });
