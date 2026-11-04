@@ -13,6 +13,8 @@ Rules:
 - Do not invent external developments, employers, titles, events, or facts.
 - Do not infer whether the user wants more or less contact. The user's relationship goal is explicitly outside this inference task.
 - "Background only" is appropriate for completed transactional contacts that do not appear to need relationship management.
+- Tags must be short, stable, reusable categories or context that could organize many contacts into smart collections (for example: hiking, job search, forecasting, Seattle).
+- Do not use tags to summarize a one-time event, completion status, sentiment, praise, or message outcome.
 - Return JSON only. No markdown.
 
 Allowed classification values:
