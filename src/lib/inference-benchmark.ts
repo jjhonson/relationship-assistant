@@ -168,7 +168,7 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       currentState: "Dormant",
       tags: ["travel", "airport transportation"],
       tagAliases: {
-        "airport transportation": ["airport pickup", "airport pickup service", "airport transfer"],
+        "airport transportation": ["airport pickup", "airport pickup service", "airport transfer", "transportation"],
       },
       earliestObservedMeaningfulInteraction: "2026-06-04",
       latestObservedMeaningfulInteraction: "2026-06-05",
