@@ -108,6 +108,19 @@ describe("fictional relationship inference benchmark", () => {
     expect(report.invalidCitations).toEqual(["made-up-thread"]);
   });
 
+  it("accepts configured tag aliases but still penalizes unrelated extra tags", () => {
+    const benchmark = relationshipBenchmarkCases.find((item) => item.id === "transactional-service")!;
+    const inference: RelationshipInference = groundTruthAsInference(benchmark);
+    inference.tags = [
+      { label: "airport pickup service", evidenceIds: ["service-1", "service-2"] },
+      { label: "completed transaction; positive feedback", evidenceIds: ["service-3"] },
+    ];
+    const report = evaluateRelationshipInference(benchmark, inference);
+    expect(report.tags.matched).toBe(1);
+    expect(report.tags.recall).toBe(0.5);
+    expect(report.tags.precision).toBe(0.5);
+  });
+
   it("penalizes unsupported extra tags instead of rewarding verbosity", () => {
     const benchmark = relationshipBenchmarkCases.find((item) => item.id === "active-personal")!;
     const inference: RelationshipInference = groundTruthAsInference(benchmark);
