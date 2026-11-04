@@ -58,6 +58,7 @@ export type BenchmarkGroundTruth = {
   disposition: PilotRelationshipDisposition;
   currentState: PilotRelationshipState;
   tags: string[];
+  tagAliases?: Record<string, string[]>;
   earliestObservedMeaningfulInteraction: string;
   latestObservedMeaningfulInteraction: string;
   openLoops: Array<{
@@ -114,6 +115,11 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       disposition: "Relationship worth managing",
       currentState: "Active",
       tags: ["hiking", "emotional support", "relocation"],
+      tagAliases: {
+        "hiking": ["hike", "outdoor hiking"],
+        "emotional support": ["personal support", "support"],
+        "relocation": ["move", "moving"],
+      },
       earliestObservedMeaningfulInteraction: "2026-03-16",
       latestObservedMeaningfulInteraction: "2026-10-20",
       openLoops: [],
@@ -161,6 +167,9 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       disposition: "Background only",
       currentState: "Dormant",
       tags: ["travel", "airport transportation"],
+      tagAliases: {
+        "airport transportation": ["airport pickup", "airport pickup service", "airport transfer"],
+      },
       earliestObservedMeaningfulInteraction: "2026-06-04",
       latestObservedMeaningfulInteraction: "2026-06-05",
       openLoops: [],
@@ -208,6 +217,10 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       disposition: "Relationship worth managing",
       currentState: "Unclear",
       tags: ["job search", "growth leadership"],
+      tagAliases: {
+        "job search": ["job opportunity", "career opportunity", "recruiting"],
+        "growth leadership": ["growth role", "leadership role"],
+      },
       earliestObservedMeaningfulInteraction: "2026-10-08",
       latestObservedMeaningfulInteraction: "2026-10-09",
       openLoops: [
@@ -261,6 +274,10 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       disposition: "Relationship worth managing",
       currentState: "Active",
       tags: ["workplace", "forecasting", "onboarding"],
+      tagAliases: {
+        "workplace": ["work", "coworker"],
+        "forecasting": ["forecast", "forecast model"],
+      },
       earliestObservedMeaningfulInteraction: "2026-10-13",
       latestObservedMeaningfulInteraction: "2026-10-16",
       openLoops: [
@@ -314,6 +331,11 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       disposition: "Relationship worth managing",
       currentState: "Dormant",
       tags: ["former colleague", "career guidance", "past project"],
+      tagAliases: {
+        "former colleague": ["former coworker", "past colleague"],
+        "career guidance": ["career advice", "professional guidance"],
+        "past project": ["shared project", "project collaboration"],
+      },
       earliestObservedMeaningfulInteraction: "2018-09-21",
       latestObservedMeaningfulInteraction: "2024-04-03",
       openLoops: [],
@@ -353,6 +375,10 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       disposition: "Unclear",
       currentState: "Unclear",
       tags: ["conference", "scaling teams", "Seattle"],
+      tagAliases: {
+        "conference": ["summit", "industry event"],
+        "scaling teams": ["team scaling", "scaling organizations"],
+      },
       earliestObservedMeaningfulInteraction: "2026-09-18",
       latestObservedMeaningfulInteraction: "2026-09-19",
       openLoops: [],
@@ -480,6 +506,37 @@ function setMetrics(expected: string[], actual: string[]) {
   return { precision, recall, matched, expected: expectedSet.size, actual: actualSet.size };
 }
 
+function tagMetrics(expected: string[], actual: string[], aliases: Record<string, string[]> = {}) {
+  const concepts = expected.map((canonical) => ({
+    canonical,
+    accepted: new Set([canonical, ...(aliases[canonical] ?? [])].map(normalize)),
+  }));
+  const actualNormalized = actual.map(normalize);
+  const matchedConcepts = new Set<number>();
+  let matchedActual = 0;
+
+  for (const value of actualNormalized) {
+    const index = concepts.findIndex((concept) => concept.accepted.has(value));
+    if (index >= 0 && !matchedConcepts.has(index)) {
+      matchedConcepts.add(index);
+      matchedActual += 1;
+    }
+  }
+
+  const precision = actualNormalized.length === 0
+    ? (concepts.length === 0 ? 1 : 0)
+    : matchedActual / actualNormalized.length;
+  const recall = concepts.length === 0 ? 1 : matchedConcepts.size / concepts.length;
+
+  return {
+    precision,
+    recall,
+    matched: matchedConcepts.size,
+    expected: concepts.length,
+    actual: actualNormalized.length,
+  };
+}
+
 export function evaluateRelationshipInference(
   benchmark: RelationshipBenchmarkCase,
   inference: RelationshipInference,
@@ -496,7 +553,11 @@ export function evaluateRelationshipInference(
   ];
   const invalidCitations = [...new Set(citedIds.filter((id) => !threadIds.has(id)))];
 
-  const tagMetrics = setMetrics(benchmark.groundTruth.tags, inference.tags.map((tag) => tag.label));
+  const tags = tagMetrics(
+    benchmark.groundTruth.tags,
+    inference.tags.map((tag) => tag.label),
+    benchmark.groundTruth.tagAliases,
+  );
   const loopMetrics = setMetrics(
     benchmark.groundTruth.openLoops.map((loop) => loop.commitment),
     inference.openLoops.map((loop) => loop.commitment),
@@ -515,7 +576,7 @@ export function evaluateRelationshipInference(
       inference.history.earliestObservedMeaningfulInteraction === benchmark.groundTruth.earliestObservedMeaningfulInteraction,
     latestObservedCorrect:
       inference.history.latestObservedMeaningfulInteraction === benchmark.groundTruth.latestObservedMeaningfulInteraction,
-    tags: tagMetrics,
+    tags,
     openLoops: loopMetrics,
     reasonsToEngage: reasonMetrics,
     invalidCitations,
