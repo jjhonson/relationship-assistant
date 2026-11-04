@@ -102,7 +102,21 @@ The Stage 2 contract:
 - validates citations against the supplied fictional thread IDs;
 - evaluates classification/disposition/state, exact normalized tag/open-loop/reason matches, observed dates, and invalid citations while retaining explicit human-review checks for things the model must not infer.
 
-`src/lib/inference-prompt.ts` contains the provider-neutral prompt contract. It does not include benchmark ground truth. No AI provider is wired yet, no credentials are required for the benchmark, and no real Gmail body content is authorized or processed in Stage 2A-C.
+`src/lib/inference-prompt.ts` contains the provider-neutral prompt contract. It does not include benchmark ground truth.
+
+### Stage 2D OpenAI benchmark adapter
+
+The draft Stage 2 branch includes a local-development-only OpenAI adapter in `src/lib/openai-inference.ts` and a POST-only runner at `/api/inference-benchmark`.
+
+- Default model: `gpt-6.1-sol` (override with `OPENAI_RELATIONSHIP_MODEL`).
+- Authentication: `OPENAI_API_KEY` loaded server-side from `.env.local`; never expose it in client code or commit it.
+- API: OpenAI Responses API with `store: false`.
+- Output: strict JSON Schema Structured Outputs, followed by the benchmark's independent local validation and evaluator.
+- Scope: one selected fictional case or all six fictional cases. No real Gmail content, contact identity, OAuth change, database, analytics or deployment.
+- Failures: provider response bodies are not echoed into application errors; refusals and malformed responses become controlled benchmark failures.
+
+The endpoint is disabled in production. A POST with an empty JSON body runs all six fictional cases. A body such as `{"caseId":"dormant-professional"}` runs one case. Do not add a real API key until the branch has passed tests/lint/typecheck/build.
+
 
 ## Gmail read-only proof of concept
 
