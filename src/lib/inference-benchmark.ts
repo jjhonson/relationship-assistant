@@ -506,15 +506,6 @@ function normalize(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function setMetrics(expected: string[], actual: string[]) {
-  const expectedSet = new Set(expected.map(normalize));
-  const actualSet = new Set(actual.map(normalize));
-  const matched = [...actualSet].filter((value) => expectedSet.has(value)).length;
-  const precision = actualSet.size === 0 ? (expectedSet.size === 0 ? 1 : 0) : matched / actualSet.size;
-  const recall = expectedSet.size === 0 ? 1 : matched / expectedSet.size;
-  return { precision, recall, matched, expected: expectedSet.size, actual: actualSet.size };
-}
-
 function tagMetrics(expected: string[], actual: string[], aliases: Record<string, string[]> = {}) {
   const concepts = expected.map((canonical) => ({
     canonical,
