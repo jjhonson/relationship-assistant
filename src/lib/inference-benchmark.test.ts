@@ -82,20 +82,20 @@ describe("fictional relationship inference benchmark", () => {
     })).toEqual(expect.arrayContaining(["classification is invalid.", "confidence is invalid."]));
   });
 
-  it("scores a ground-truth-shaped inference as correct", () => {
+  it("passes every hard gate for a ground-truth-shaped inference", () => {
     for (const benchmark of relationshipBenchmarkCases) {
       const report = evaluateRelationshipInference(benchmark, groundTruthAsInference(benchmark));
-      expect(report.classificationCorrect).toBe(true);
-      expect(report.dispositionCorrect).toBe(true);
-      expect(report.currentStateCorrect).toBe(true);
-      expect(report.earliestObservedCorrect).toBe(true);
-      expect(report.latestObservedCorrect).toBe(true);
-      expect(report.tags.precision).toBe(1);
-      expect(report.tags.recall).toBe(1);
-      expect(report.openLoops.precision).toBe(1);
-      expect(report.openLoops.recall).toBe(1);
-      expect(report.reasonsToEngage.precision).toBe(1);
-      expect(report.reasonsToEngage.recall).toBe(1);
+      expect(report.hardGatePass).toBe(true);
+      expect(report.hardGates.classificationAccepted).toBe(true);
+      expect(report.hardGates.dispositionCorrect).toBe(true);
+      expect(report.hardGates.currentStateCorrect).toBe(true);
+      expect(report.hardGates.earliestObservedCorrect).toBe(true);
+      expect(report.hardGates.latestObservedCorrect).toBe(true);
+      expect(report.hardGates.citationsValid).toBe(true);
+      expect(report.hardGates.openLoopHardPass).toBe(true);
+      expect(report.hardGates.uncertaintyPresent).toBe(true);
+      expect(report.softReview.tags.precision).toBe(1);
+      expect(report.softReview.tags.recall).toBe(1);
       expect(report.invalidCitations).toEqual([]);
     }
   });
@@ -116,9 +116,9 @@ describe("fictional relationship inference benchmark", () => {
       { label: "completed transaction; positive feedback", evidenceIds: ["service-3"] },
     ];
     const report = evaluateRelationshipInference(benchmark, inference);
-    expect(report.tags.matched).toBe(1);
-    expect(report.tags.recall).toBe(0.5);
-    expect(report.tags.precision).toBe(0.5);
+    expect(report.softReview.tags.matched).toBe(1);
+    expect(report.softReview.tags.recall).toBe(0.5);
+    expect(report.softReview.tags.precision).toBe(0.5);
   });
 
   it("penalizes unsupported extra tags instead of rewarding verbosity", () => {
@@ -126,8 +126,34 @@ describe("fictional relationship inference benchmark", () => {
     const inference: RelationshipInference = groundTruthAsInference(benchmark);
     inference.tags.push({ label: "venture capital", evidenceIds: ["personal-1"] });
     const report = evaluateRelationshipInference(benchmark, inference);
-    expect(report.tags.recall).toBe(1);
-    expect(report.tags.precision).toBeLessThan(1);
+    expect(report.softReview.tags.recall).toBe(1);
+    expect(report.softReview.tags.precision).toBeLessThan(1);
+  });
+
+  it("accepts a defensible professional-contact classification for the ambiguous case", () => {
+    const benchmark = relationshipBenchmarkCases.find((item) => item.id === "ambiguous-contact")!;
+    const inference = groundTruthAsInference(benchmark);
+    inference.classification.value = "Professional contact";
+    const report = evaluateRelationshipInference(benchmark, inference);
+    expect(report.hardGates.classificationAccepted).toBe(true);
+    expect(report.hardGatePass).toBe(true);
+  });
+
+  it("allows conservative omission of an optional coworker open loop", () => {
+    const benchmark = relationshipBenchmarkCases.find((item) => item.id === "coworker-operational")!;
+    const inference = groundTruthAsInference(benchmark);
+    inference.openLoops = [];
+    const report = evaluateRelationshipInference(benchmark, inference);
+    expect(report.hardGates.openLoopHardPass).toBe(true);
+  });
+
+  it("still requires the explicit overdue recruiter promise", () => {
+    const benchmark = relationshipBenchmarkCases.find((item) => item.id === "recruiter-ambiguous")!;
+    const inference = groundTruthAsInference(benchmark);
+    inference.openLoops = [];
+    const report = evaluateRelationshipInference(benchmark, inference);
+    expect(report.hardGates.openLoopHardPass).toBe(false);
+    expect(report.hardGatePass).toBe(false);
   });
 
   it("does not include the user's two-state relationship goal in the inference contract", () => {
