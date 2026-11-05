@@ -77,8 +77,9 @@ describe("OpenAI fictional relationship inference adapter", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(result.provider).toBe("openai");
     expect(result.responseId).toBe("resp_test");
-    expect(result.report.classificationCorrect).toBe(true);
-    expect(result.report.dispositionCorrect).toBe(true);
+    expect(result.report.hardGatePass).toBe(true);
+    expect(result.report.hardGates.classificationAccepted).toBe(true);
+    expect(result.report.hardGates.dispositionCorrect).toBe(true);
     expect(result.report.invalidCitations).toEqual([]);
     expect(result.usage.totalTokens).toBe(1000);
   });
