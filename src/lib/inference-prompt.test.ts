@@ -12,6 +12,8 @@ describe("relationship inference prompt", () => {
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Do not convert vague social language into a firm commitment");
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Tags must be short, stable, reusable categories");
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Do not use tags to summarize a one-time event");
+    expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("A reason to engage must be a concrete, grounded trigger");
+    expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("General relevance, relationship context");
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Return JSON only");
   });
 
