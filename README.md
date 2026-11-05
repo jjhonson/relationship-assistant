@@ -91,6 +91,34 @@ Unit tests (`src/scripts/dev-workflow.test.ts`) use a rejecting fake `gh`, fake 
 - `src/components/` – small shared UI components
 - `src/lib/gmail/discovery.ts` – deterministic, metadata-only candidate ranking and exclusions
 
+## Stage 2 fictional relationship-inference benchmark
+
+Issue #18 moves beyond the prewritten Stage 1 briefs without using real Gmail content. The benchmark lives in `src/lib/inference-benchmark.ts` and contains six wholly fictional cases with independent ground truth: an active personal relationship, completed one-time service transaction, recruiter with an ambiguous outcome, new coworker, dormant meaningful professional relationship, and deliberately ambiguous acquaintance.
+
+The Stage 2 contract:
+- gives the model only the selected fictional messages plus an explicit as-of date;
+- requires structured JSON with classification, relationship disposition, current state, tags, observed history, open loops, reasons to engage, unknowns, confidence, and supporting fictional thread IDs;
+- excludes the user's **This feels right / I want to stay better connected** goal from model inference;
+- validates citations against the supplied fictional thread IDs;
+- separates **hard gates** from **soft semantic review**. Hard gates cover acceptable classification, disposition, current state, observed dates, citation validity, uncertainty, and safe open-loop handling. Tags and reasons-to-engage are reviewed semantically rather than treated as exact-answer fields;
+- allows defensible alternate classifications for intentionally ambiguous cases and conservative omission of uncertain old open loops, while still requiring explicit overdue commitments where the evidence is clear.
+
+`src/lib/inference-prompt.ts` contains the provider-neutral prompt contract. It does not include benchmark ground truth.
+
+### Stage 2D OpenAI benchmark adapter
+
+The draft Stage 2 branch includes a local-development-only OpenAI adapter in `src/lib/openai-inference.ts` and a POST-only runner at `/api/inference-benchmark`.
+
+- Default model: `gpt-6.1-sol` (override with `OPENAI_RELATIONSHIP_MODEL`).
+- Authentication: `OPENAI_API_KEY` loaded server-side from `.env.local`; never expose it in client code or commit it.
+- API: OpenAI Responses API with `store: false`.
+- Output: strict JSON Schema Structured Outputs, followed by the benchmark's independent local validation and evaluator.
+- Scope: one selected fictional case or all six fictional cases. No real Gmail content, contact identity, OAuth change, database, analytics or deployment.
+- Failures: provider response bodies are not echoed into application errors; refusals and malformed responses become controlled benchmark failures.
+
+The endpoint is disabled in production. A POST with an empty JSON body runs all six fictional cases. A body such as `{"caseId":"dormant-professional"}` runs one case. Do not add a real API key until the branch has passed tests/lint/typecheck/build.
+
+
 ## Gmail read-only proof of concept
 
 Server-side OAuth (authorization code + PKCE) requesting only `https://www.googleapis.com/auth/gmail.readonly`. The `/gmail` proof of concept samples up to 50 messages. `/discover` is a separate, on-demand experiment with a bounded two-stage metadata sample (`GMAIL_DISCOVERY_SAMPLE_SIZE`, 1–200 total message fetches). Stage 1 samples Sent mail (`in:sent`, no drafts) in two passes: a breadth pass takes the newest Sent message of each calendar month for up to 10 years (so a sparse, long-running correspondent is not crowded out by busy quarters), then a depth pass spends any remaining budget on calendar quarters with an adaptive quota. This costs up to 120 + 40 cheap list calls but never more than the detail ceiling in message fetches. The account owner's own Gmail profile address is suppressed from candidates. Stage 2 looks up a few incoming messages for the most frequent single-recipient Sent contacts, to look for evidence of replies. It requests headers and labels only, then applies deterministic rules (bulk/list headers, group mail, generic automated addresses) to surface up to 10 possible direct contacts; lone inbound messages are not recommended, and one-way sent contacts stay labeled "Possible". Sampling remains biased and incomplete, so a missing contact may reflect sampling limits, another account, or filtering; the page shows count-only diagnostics (sent/received examined, exclusions by category, months covered) to help tell these apart. If bounded sampling is too sparse, a larger Sent-seeded first stage followed by bounded per-contact enrichment is the intended next step. The page distinguishes viable candidates from the displayed top ten. In `npm run dev` only (never in production builds), a positive-control panel lets you privately enter the address of a known correspondent and reports whether it was displayed, viable but below the cutoff, sampled but excluded (with the reason), not sampled, or inconclusive, using the same filtering and ranking code as discovery. The address travels in a POST body, is only compared in memory, and is never displayed, logged or stored. An optional bounded lookup (one list call, at most 10 header fetches) checks whether Gmail has matching metadata; an empty or capped result does not prove absence or relationship quality. Known limitation / follow-up: other past aliases of the owner and multiple addresses of one person are not merged; a safe design would let the user confirm aliases explicitly, per session, rather than infer them from names. Results are not persisted, and feedback remains in page memory only. Message contents are not fetched, stored, logged, or sent to any third party.
