@@ -100,7 +100,8 @@ The Stage 2 contract:
 - requires structured JSON with classification, relationship disposition, current state, tags, observed history, open loops, reasons to engage, unknowns, confidence, and supporting fictional thread IDs;
 - excludes the user's **This feels right / I want to stay better connected** goal from model inference;
 - validates citations against the supplied fictional thread IDs;
-- evaluates classification/disposition/state, exact normalized tag/open-loop/reason matches, observed dates, and invalid citations while retaining explicit human-review checks for things the model must not infer.
+- separates **hard gates** from **soft semantic review**. Hard gates cover acceptable classification, disposition, current state, observed dates, citation validity, uncertainty, and safe open-loop handling. Tags and reasons-to-engage are reviewed semantically rather than treated as exact-answer fields;
+- allows defensible alternate classifications for intentionally ambiguous cases and conservative omission of uncertain old open loops, while still requiring explicit overdue commitments where the evidence is clear.
 
 `src/lib/inference-prompt.ts` contains the provider-neutral prompt contract. It does not include benchmark ground truth.
 
