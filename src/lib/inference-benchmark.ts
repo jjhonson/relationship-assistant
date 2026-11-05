@@ -55,6 +55,7 @@ export type RelationshipInference = {
 
 export type BenchmarkGroundTruth = {
   classification: PilotClassification;
+  acceptableClassifications?: PilotClassification[];
   disposition: PilotRelationshipDisposition;
   currentState: PilotRelationshipState;
   tags: string[];
@@ -66,6 +67,7 @@ export type BenchmarkGroundTruth = {
     owner: string;
     status: PilotOpenLoopStatus;
   }>;
+  openLoopExpectation: "none" | "optional" | "required";
   reasonsToEngage: string[];
   unknowns: string[];
   mustNotInfer: string[];
@@ -123,6 +125,7 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       earliestObservedMeaningfulInteraction: "2026-03-16",
       latestObservedMeaningfulInteraction: "2026-10-20",
       openLoops: [],
+      openLoopExpectation: "none",
       reasonsToEngage: ["A shared interest in hiking provides a natural future reason to connect."],
       unknowns: ["The sample does not establish contact through phone, text, or in person outside these references."],
       mustNotInfer: [
@@ -173,6 +176,7 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       earliestObservedMeaningfulInteraction: "2026-06-04",
       latestObservedMeaningfulInteraction: "2026-06-05",
       openLoops: [],
+      openLoopExpectation: "none",
       reasonsToEngage: [],
       unknowns: ["The correspondence does not establish any relationship beyond the completed service."],
       mustNotInfer: [
@@ -230,6 +234,7 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
           status: "Overdue",
         },
       ],
+      openLoopExpectation: "required",
       reasonsToEngage: ["The promised company overview and compensation range appear outstanding."],
       unknowns: ["The sample does not establish whether the planned Tuesday conversation happened through another channel."],
       mustNotInfer: [
@@ -287,6 +292,7 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
           status: "Unclear",
         },
       ],
+      openLoopExpectation: "optional",
       reasonsToEngage: [],
       unknowns: ["The sample cannot show whether the remaining question was resolved in person or in work chat."],
       mustNotInfer: [
@@ -339,6 +345,7 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       earliestObservedMeaningfulInteraction: "2018-09-21",
       latestObservedMeaningfulInteraction: "2024-04-03",
       openLoops: [],
+      openLoopExpectation: "none",
       reasonsToEngage: ["A career update would naturally continue the thread of prior guidance and updates."],
       unknowns: ["The sample does not show whether the relationship continued through other channels after April 2024."],
       mustNotInfer: [
@@ -372,6 +379,7 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
     ],
     groundTruth: {
       classification: "Unknown",
+      acceptableClassifications: ["Unknown", "Professional contact"],
       disposition: "Unclear",
       currentState: "Unclear",
       tags: ["conference", "scaling teams", "Seattle"],
@@ -382,6 +390,7 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
       earliestObservedMeaningfulInteraction: "2026-09-18",
       latestObservedMeaningfulInteraction: "2026-09-19",
       openLoops: [],
+      openLoopExpectation: "none",
       reasonsToEngage: [],
       unknowns: [
         "The sample does not establish whether this is a professional contact, potential friend, customer, recruiter, or another relationship type.",
@@ -558,30 +567,57 @@ export function evaluateRelationshipInference(
     inference.tags.map((tag) => tag.label),
     benchmark.groundTruth.tagAliases,
   );
-  const loopMetrics = setMetrics(
-    benchmark.groundTruth.openLoops.map((loop) => loop.commitment),
-    inference.openLoops.map((loop) => loop.commitment),
-  );
-  const reasonMetrics = setMetrics(
-    benchmark.groundTruth.reasonsToEngage,
-    inference.reasonsToEngage.map((reason) => reason.reason),
-  );
 
-  return {
-    caseId: benchmark.id,
-    classificationCorrect: inference.classification.value === benchmark.groundTruth.classification,
+  const acceptableClassifications = new Set(
+    benchmark.groundTruth.acceptableClassifications ?? [benchmark.groundTruth.classification],
+  );
+  const classificationAccepted = acceptableClassifications.has(inference.classification.value);
+
+  let openLoopHardPass = true;
+  if (benchmark.groundTruth.openLoopExpectation === "none") {
+    openLoopHardPass = inference.openLoops.length === 0;
+  } else if (benchmark.groundTruth.openLoopExpectation === "required") {
+    openLoopHardPass = benchmark.groundTruth.openLoops.every((expected) =>
+      inference.openLoops.some(
+        (actual) =>
+          normalize(actual.owner) === normalize(expected.owner) &&
+          actual.status === expected.status,
+      ),
+    );
+  }
+
+  const hardGates = {
+    classificationAccepted,
     dispositionCorrect: inference.disposition.value === benchmark.groundTruth.disposition,
     currentStateCorrect: inference.currentState.value === benchmark.groundTruth.currentState,
     earliestObservedCorrect:
       inference.history.earliestObservedMeaningfulInteraction === benchmark.groundTruth.earliestObservedMeaningfulInteraction,
     latestObservedCorrect:
       inference.history.latestObservedMeaningfulInteraction === benchmark.groundTruth.latestObservedMeaningfulInteraction,
-    tags,
-    openLoops: loopMetrics,
-    reasonsToEngage: reasonMetrics,
+    citationsValid: invalidCitations.length === 0,
+    openLoopHardPass,
+    uncertaintyPresent: inference.unknowns.length > 0,
+  };
+
+  return {
+    caseId: benchmark.id,
+    hardGates,
+    hardGatePass: Object.values(hardGates).every(Boolean),
+    softReview: {
+      tags,
+      expectedTags: benchmark.groundTruth.tags,
+      actualTags: inference.tags.map((tag) => tag.label),
+      expectedReasonsToEngage: benchmark.groundTruth.reasonsToEngage,
+      actualReasonsToEngage: inference.reasonsToEngage.map((reason) => reason.reason),
+      expectedOpenLoops: benchmark.groundTruth.openLoops,
+      actualOpenLoops: inference.openLoops.map((loop) => ({
+        commitment: loop.commitment,
+        owner: loop.owner,
+        status: loop.status,
+      })),
+      manualMustNotInferChecks: benchmark.groundTruth.mustNotInfer,
+    },
     invalidCitations,
-    unknownsPresent: inference.unknowns.length > 0,
-    manualMustNotInferChecks: benchmark.groundTruth.mustNotInfer,
   };
 }
 
