@@ -32,7 +32,7 @@ export default async function RealPilotPage() {
       <div className="max-w-2xl">
         <h1 className="text-3xl font-bold tracking-tight">Real-contact pilot</h1>
         <p className="mt-2 text-stone-600">
-          Select one real person, confirm their email identities, and review candidate Gmail threads using metadata only.
+          Select one real person, confirm their email identities, review candidate Gmail threads, and explicitly approve any content analysis.
         </p>
         <p role="status" className="mt-5 rounded-xl bg-amber-100 p-4 text-amber-950">
           {cfg.ok
@@ -61,8 +61,9 @@ export default async function RealPilotPage() {
           </span>
         </div>
         <p className="mt-2 max-w-3xl text-stone-600">
-          Test identity resolution and thread selection on one person you know well. This stage reads Gmail headers and metadata only.
-          It does not retrieve message bodies, attachments or snippets, and it does not call OpenAI.
+          Identity and thread discovery remain metadata-only. Message bodies are retrieved only after you review the exact selected
+          threads and explicitly approve analysis. Attachments are ignored, content is bounded and minimized, OpenAI API storage is
+          disabled, and message bodies are not persisted by this pilot.
         </p>
       </header>
 
