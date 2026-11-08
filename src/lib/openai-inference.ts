@@ -191,7 +191,7 @@ async function requestRelationshipInference(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: \`Bearer \${options.apiKey}\`,
+      Authorization: `Bearer ${options.apiKey}`,
     },
     body: JSON.stringify({
       model,
@@ -211,7 +211,7 @@ async function requestRelationshipInference(
   });
 
   if (!result.ok) {
-    throw new Error(\`OpenAI inference request failed with status \${result.status}.\`);
+    throw new Error(`OpenAI inference request failed with status ${result.status}.`);
   }
 
   const response = (await result.json()) as OpenAIResponse;
@@ -225,7 +225,7 @@ async function requestRelationshipInference(
 
   const validationIssues = validateRelationshipInference(inference);
   if (validationIssues.length > 0) {
-    throw new Error(\`Structured inference failed local validation: \${validationIssues.join(" ")}\`);
+    throw new Error(`Structured inference failed local validation: ${validationIssues.join(" ")}`);
   }
 
   const invalidCitations = invalidInferenceCitations(input, inference);
