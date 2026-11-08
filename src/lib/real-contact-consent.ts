@@ -1,20 +1,21 @@
 import { createHash } from "node:crypto";
+import type { CorrespondenceSelection, CorrespondenceSource } from "./correspondence";
 import { seal, unseal } from "./gmail/crypto";
 import {
-  MAX_REAL_PILOT_THREADS,
+  MAX_REAL_PILOT_CONVERSATIONS,
   buildPilotAnalysisDisclosure,
   type PilotAnalysisDisclosure,
-  type PilotThreadSelection,
 } from "./real-contact-pilot";
 
-const CONSENT_VERSION = 1;
+const CONSENT_VERSION = 2;
 export const REAL_PILOT_CONSENT_TTL_MS = 10 * 60 * 1000;
 
 type ConsentPayload = {
-  version: 1;
+  version: 2;
+  source: CorrespondenceSource;
   personLabel: string;
-  confirmedAliases: string[];
-  selectedThreadIds: string[];
+  confirmedIdentityKeys: string[];
+  selectedConversationIds: string[];
   connectionFingerprint: string;
   issuedAt: number;
   expiresAt: number;
@@ -26,8 +27,8 @@ export type PreparedRealPilotConsent = {
   disclosure: PilotAnalysisDisclosure;
 };
 
-function connectionFingerprint(accessToken: string) {
-  return createHash("sha256").update(accessToken).digest("base64url").slice(0, 24);
+function connectionFingerprint(connectionBinding: string) {
+  return createHash("sha256").update(connectionBinding).digest("base64url").slice(0, 24);
 }
 
 function validStringArray(value: unknown, maximum: number): value is string[] {
@@ -39,36 +40,50 @@ function validStringArray(value: unknown, maximum: number): value is string[] {
   );
 }
 
+function validSource(value: unknown): value is CorrespondenceSource {
+  return ["gmail", "linkedin", "sms", "whatsapp", "slack", "meeting", "fixture"].includes(
+    String(value),
+  );
+}
+
 export function prepareRealPilotConsent(
-  selection: PilotThreadSelection,
+  selection: CorrespondenceSelection,
   options: {
     sessionSecret: string;
-    accessToken: string;
+    connectionBinding: string;
     now?: number;
   },
 ): PreparedRealPilotConsent {
   const now = options.now ?? Date.now();
-  const uniqueThreadIds = [...new Set(selection.selectedThreadIds)];
-  const uniqueAliases = [...new Set(selection.confirmedAliases.map((item) => item.trim().toLowerCase()))];
+  const selectedConversationIds = [...new Set(selection.selectedConversationIds)];
+  const confirmedIdentityKeys = [
+    ...new Set(selection.confirmedIdentityKeys.map((item) => item.trim().toLowerCase())),
+  ];
 
-  if (uniqueThreadIds.length === 0 || uniqueThreadIds.length > MAX_REAL_PILOT_THREADS) {
-    throw new Error(`Consent requires between 1 and ${MAX_REAL_PILOT_THREADS} selected threads.`);
+  if (
+    selectedConversationIds.length === 0 ||
+    selectedConversationIds.length > MAX_REAL_PILOT_CONVERSATIONS
+  ) {
+    throw new Error(
+      \`Consent requires between 1 and \${MAX_REAL_PILOT_CONVERSATIONS} selected conversations.\`,
+    );
   }
-  if (uniqueAliases.length === 0) {
-    throw new Error("Consent requires at least one confirmed email address.");
+  if (confirmedIdentityKeys.length === 0) {
+    throw new Error("Consent requires at least one confirmed identity.");
   }
 
-  const normalizedSelection: PilotThreadSelection = {
+  const normalizedSelection: CorrespondenceSelection = {
+    source: selection.source,
     personLabel: selection.personLabel.trim(),
-    confirmedAliases: uniqueAliases,
-    selectedThreadIds: uniqueThreadIds,
+    confirmedIdentityKeys,
+    selectedConversationIds,
   };
   if (!normalizedSelection.personLabel) throw new Error("Consent requires a person label.");
 
   const payload: ConsentPayload = {
     version: CONSENT_VERSION,
     ...normalizedSelection,
-    connectionFingerprint: connectionFingerprint(options.accessToken),
+    connectionFingerprint: connectionFingerprint(options.connectionBinding),
     issuedAt: now,
     expiresAt: now + REAL_PILOT_CONSENT_TTL_MS,
   };
@@ -84,10 +99,10 @@ export function readRealPilotConsent(
   token: string,
   options: {
     sessionSecret: string;
-    accessToken: string;
+    connectionBinding: string;
     now?: number;
   },
-): PilotThreadSelection {
+): CorrespondenceSelection {
   const raw = unseal(token, options.sessionSecret);
   if (!raw) throw new Error("Analysis approval is invalid or was altered.");
 
@@ -104,9 +119,10 @@ export function readRealPilotConsent(
 
   if (
     value.version !== CONSENT_VERSION ||
+    !validSource(value.source) ||
     typeof value.personLabel !== "string" ||
-    !validStringArray(value.confirmedAliases, 5) ||
-    !validStringArray(value.selectedThreadIds, MAX_REAL_PILOT_THREADS) ||
+    !validStringArray(value.confirmedIdentityKeys, 10) ||
+    !validStringArray(value.selectedConversationIds, MAX_REAL_PILOT_CONVERSATIONS) ||
     typeof value.connectionFingerprint !== "string" ||
     typeof value.issuedAt !== "number" ||
     typeof value.expiresAt !== "number"
@@ -115,16 +131,19 @@ export function readRealPilotConsent(
   }
 
   if (value.expiresAt <= now || value.issuedAt > now + 60_000) {
-    throw new Error("Analysis approval expired. Review the selected threads again.");
+    throw new Error("Analysis approval expired. Review the selected conversations again.");
   }
 
-  if (value.connectionFingerprint !== connectionFingerprint(options.accessToken)) {
-    throw new Error("Analysis approval belongs to a different Gmail connection.");
+  if (value.connectionFingerprint !== connectionFingerprint(options.connectionBinding)) {
+    throw new Error("Analysis approval belongs to a different source connection.");
   }
 
   return {
+    source: value.source,
     personLabel: value.personLabel,
-    confirmedAliases: [...new Set(value.confirmedAliases.map((item) => item.trim().toLowerCase()))],
-    selectedThreadIds: [...new Set(value.selectedThreadIds)],
+    confirmedIdentityKeys: [
+      ...new Set(value.confirmedIdentityKeys.map((item) => item.trim().toLowerCase())),
+    ],
+    selectedConversationIds: [...new Set(value.selectedConversationIds)],
   };
 }
