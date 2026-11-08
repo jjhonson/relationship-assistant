@@ -10,7 +10,7 @@ function candidate(
   lastDate: string,
   messageCount: number,
   participantAddresses = [confirmed, "owner@example.test"],
-  flags: Pick<ThreadCandidate, "isAutomated" | "isCalendarArtifact" | "isDraft"> = {},
+  flags: Partial<Pick<ThreadCandidate, "isAutomated" | "isCalendarArtifact" | "isDraft" | "isGroupOnly">> = {},
 ): ThreadCandidate {
   return {
     id,
@@ -19,6 +19,7 @@ function candidate(
     lastDate,
     messageCount,
     participantAddresses,
+    isGroupOnly: false,
     ...flags,
   };
 }
@@ -36,7 +37,7 @@ describe("metadata-only representative evidence planning", () => {
         confirmed,
         "owner@example.test",
         "third-party@example.test",
-      ]),
+      ], { isGroupOnly: true }),
       candidate("unrelated", "2026-06-01", "2026-06-10", 7, ["other-person@example.test"]),
       candidate("isolated", "2026-06-01", "2026-06-01", 1),
     ];
@@ -84,6 +85,42 @@ describe("metadata-only representative evidence planning", () => {
       "anchor",
     ]);
     expect(recommendations[0].role).toBe("Recent activity");
+  });
+
+  it("uses the adapter's message-aware group-only flag", () => {
+    const recommendations = planRepresentativeEvidence(
+      [
+        candidate(
+          "two-owner-addresses",
+          "2021-01-01",
+          "2021-04-01",
+          4,
+          [confirmed, "owner-one@example.test", "owner-two@example.test"],
+        ),
+        candidate(
+          "mixed-direct-and-group",
+          "2022-01-01",
+          "2022-06-01",
+          5,
+          [confirmed, "owner-one@example.test", "colleague@example.test"],
+        ),
+        candidate(
+          "group-only",
+          "2023-01-01",
+          "2023-06-01",
+          6,
+          [confirmed, "owner-one@example.test", "colleague@example.test"],
+          { isGroupOnly: true },
+        ),
+      ],
+      [confirmed],
+      new Date("2026-06-15T00:00:00Z"),
+    );
+
+    expect(recommendations.map(({ conversationId }) => conversationId)).toEqual([
+      "mixed-direct-and-group",
+      "two-owner-addresses",
+    ]);
   });
 
   it("degrades gracefully for sparse history without inventing recent activity", () => {

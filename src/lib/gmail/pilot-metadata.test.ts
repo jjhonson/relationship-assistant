@@ -193,6 +193,75 @@ describe("real-contact Gmail metadata interpretation", () => {
       });
     }
   });
+
+  it("classifies group status from individual messages, not aggregate thread participants", () => {
+    const messages = [
+      metadataMessage(
+        "m-direct-a",
+        "t-owner-aliases",
+        "2026-02-01T12:00:00Z",
+        "Person A <person-a@example.test>",
+        "Owner <owner-one@example.test>",
+      ),
+      metadataMessage(
+        "m-direct-b",
+        "t-owner-aliases",
+        "2026-02-02T12:00:00Z",
+        "Owner <owner-two@example.test>",
+        "Person A <person-a@example.test>",
+      ),
+      metadataMessage(
+        "m-mixed-direct",
+        "t-mixed",
+        "2026-02-03T12:00:00Z",
+        "Person A <person-a@example.test>",
+        "Owner <owner-one@example.test>",
+      ),
+      metadataMessage(
+        "m-mixed-group",
+        "t-mixed",
+        "2026-02-04T12:00:00Z",
+        "Owner <owner-one@example.test>",
+        "Person A <person-a@example.test>",
+        "Synthetic group follow-up",
+        "Colleague <colleague@example.test>",
+      ),
+      metadataMessage(
+        "m-group-only-a",
+        "t-group-only",
+        "2026-02-05T12:00:00Z",
+        "Person A <person-a@example.test>",
+        "Owner <owner-one@example.test>",
+        "Synthetic group exchange",
+        "Colleague <colleague@example.test>",
+      ),
+      metadataMessage(
+        "m-group-only-b",
+        "t-group-only",
+        "2026-02-06T12:00:00Z",
+        "Owner <owner-one@example.test>",
+        "Person A <person-a@example.test>",
+        "Re: Synthetic group exchange",
+        "Colleague <colleague@example.test>",
+      ),
+    ];
+    const candidates = threadCandidatesFromMetadata(messages, ["person-a@example.test"]);
+
+    expect(candidates.find(({ id }) => id === "t-owner-aliases")).toMatchObject({
+      participantAddresses: [
+        "owner-one@example.test",
+        "owner-two@example.test",
+        "person-a@example.test",
+      ],
+      isGroupOnly: false,
+    });
+    expect(candidates.find(({ id }) => id === "t-mixed")).toMatchObject({
+      isGroupOnly: false,
+    });
+    expect(candidates.find(({ id }) => id === "t-group-only")).toMatchObject({
+      isGroupOnly: true,
+    });
+  });
 });
 
 describe("bounded Gmail metadata network calls", () => {

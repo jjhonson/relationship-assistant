@@ -31,12 +31,6 @@ function hasConfirmedIdentity(candidate: ThreadCandidate, aliases: Set<string>):
   return candidate.participantAddresses.some((address) => aliases.has(normalizeEmailAddress(address)));
 }
 
-function isGroupOnly(candidate: ThreadCandidate, aliases: Set<string>): boolean {
-  return candidate.participantAddresses.filter(
-    (address) => !aliases.has(normalizeEmailAddress(address)),
-  ).length > 1;
-}
-
 function matchesStrongerDirectExchange(candidate: ThreadCandidate): boolean {
   return candidate.messageCount > 1;
 }
@@ -55,7 +49,7 @@ export function planRepresentativeEvidence(
       !candidate.isAutomated &&
       !candidate.isCalendarArtifact &&
       !candidate.isDraft &&
-      !isGroupOnly(candidate, aliases),
+      !candidate.isGroupOnly,
   );
   const hasStrongerExchange = direct.some(matchesStrongerDirectExchange);
   const historicalEligible = direct.filter(

@@ -18,6 +18,10 @@ import {
   planRepresentativeEvidence,
   type EvidenceRecommendation,
 } from "@/lib/gmail/evidence-planner";
+import {
+  formatPilotMetadataSamplingStats,
+  type PilotMetadataSamplingStats,
+} from "@/lib/gmail/pilot-sampling";
 import { RealRelationshipBrief } from "@/components/RealRelationshipBrief";
 
 type ReadyConsent = Extract<PilotConsentResult, { kind: "ready" }>;
@@ -32,6 +36,7 @@ export function RealContactPilot() {
   const [threads, setThreads] = useState<ThreadCandidate[]>([]);
   const [selectedThreads, setSelectedThreads] = useState<string[]>([]);
   const [threadTruncated, setThreadTruncated] = useState(false);
+  const [samplingStats, setSamplingStats] = useState<PilotMetadataSamplingStats | null>(null);
   const [consent, setConsent] = useState<ReadyConsent | null>(null);
   const [analysis, setAnalysis] = useState<ReadyAnalysis | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -47,6 +52,7 @@ export function RealContactPilot() {
     setMessage(null);
     setThreads([]);
     setSelectedThreads([]);
+    setSamplingStats(null);
     setSelectedAliases([]);
     clearAnalysis();
 
@@ -71,6 +77,7 @@ export function RealContactPilot() {
     setMessage(null);
     setThreads([]);
     setSelectedThreads([]);
+    setSamplingStats(null);
     clearAnalysis();
 
     startTransition(() => {
@@ -81,6 +88,7 @@ export function RealContactPilot() {
         }
         setThreads(result.candidates);
         setThreadTruncated(result.truncated);
+        setSamplingStats(result.stats);
         setSelectedThreads(
           planRepresentativeEvidence(result.candidates, selectedAliases)
             .map(({ conversationId }) => conversationId)
@@ -96,6 +104,7 @@ export function RealContactPilot() {
   const toggleAlias = (address: string) => {
     setThreads([]);
     setSelectedThreads([]);
+    setSamplingStats(null);
     setMessage(null);
     clearAnalysis();
     setSelectedAliases((current) =>
@@ -286,7 +295,7 @@ export function RealContactPilot() {
         </section>
       )}
 
-      {threads.length > 0 && (
+      {(threads.length > 0 || samplingStats !== null) && (
         <section className="rounded-2xl border border-stone-200 bg-white p-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -299,6 +308,12 @@ export function RealContactPilot() {
               {selectedThreads.length}/{MAX_REAL_PILOT_CONVERSATIONS} selected
             </span>
           </div>
+
+          {samplingStats && (
+            <p className="mt-3 text-xs text-stone-500">
+              {formatPilotMetadataSamplingStats(samplingStats)}
+            </p>
+          )}
 
           <div className="mt-5">
             <h3 className="font-semibold">Recommended evidence set</h3>
@@ -313,7 +328,7 @@ export function RealContactPilot() {
               </div>
             ) : (
               <p className="mt-3 rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
-                No direct, non-automated recommendation was available from this sample. Review the other candidates manually.
+                No direct, non-automated recommendation was available from this sample. Review other candidates manually if any were found.
               </p>
             )}
           </div>
@@ -327,7 +342,12 @@ export function RealContactPilot() {
               {threads.filter((thread) => !recommendedIds.has(thread.id)).map((thread) =>
                 renderCandidate(thread),
               )}
-              {threads.every((thread) => recommendedIds.has(thread.id)) && (
+              {threads.length === 0 && (
+                <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
+                  No candidate conversations were found in this sample.
+                </p>
+              )}
+              {threads.length > 0 && threads.every((thread) => recommendedIds.has(thread.id)) && (
                 <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
                   No additional candidates in this sample.
                 </p>

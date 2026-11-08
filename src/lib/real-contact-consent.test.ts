@@ -146,6 +146,7 @@ describe("real-contact consent", () => {
         lastDate: "2026-01-02",
         messageCount: 2,
         participantAddresses: ["person-a@example.test", "owner@example.test"],
+        isGroupOnly: false,
       },
       {
         id: "manual-replacement",
@@ -154,6 +155,7 @@ describe("real-contact consent", () => {
         lastDate: "2022-02-01",
         messageCount: 3,
         participantAddresses: ["person-a@example.test", "owner@example.test"],
+        isGroupOnly: false,
       },
     ];
     const selected = selectPilotThreads(identity, candidates, ["manual-replacement"]);

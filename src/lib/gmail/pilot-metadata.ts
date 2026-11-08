@@ -6,6 +6,7 @@ import {
 } from "../real-contact-pilot";
 import { calendarWindows, isLookupAddress, type CalendarWindow } from "./messages";
 import { AuthError } from "./oauth";
+import type { PilotMetadataSamplingStats } from "./pilot-sampling";
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -51,14 +52,8 @@ export type BoundedMetadataResult = {
   stats?: PilotMetadataSamplingStats;
 };
 
-export type PilotMetadataSamplingStats = {
-  listRequests: number;
-  listRecordsReturned: number;
-  detailRequests: number;
-  windowsQueried: number;
-  monthWindowsQueried: number;
-  quarterWindowsQueried: number;
-  recordsReturned: number;
+export type PilotThreadMetadataResult = BoundedMetadataResult & {
+  stats: PilotMetadataSamplingStats;
 };
 
 export class PilotMetadataError extends Error {}
@@ -291,7 +286,7 @@ export async function fetchPilotThreadMetadata(
   token: string,
   aliases: string[],
   now = new Date(),
-): Promise<BoundedMetadataResult> {
+): Promise<PilotThreadMetadataResult> {
   const normalized = [...new Set(aliases.map(normalizeEmailAddress).filter(Boolean))];
   if (normalized.length === 0 || normalized.length > MAX_PILOT_ALIASES) {
     throw new PilotMetadataError(`Confirm between 1 and ${MAX_PILOT_ALIASES} email addresses.`);
@@ -406,6 +401,8 @@ export function threadCandidatesFromMetadata(
       isAutomated: boolean;
       isCalendarArtifact: boolean;
       isDraft: boolean;
+      hasDirectExchange: boolean;
+      hasGroupMessage: boolean;
     }
   >();
 
@@ -422,6 +419,8 @@ export function threadCandidatesFromMetadata(
     const autoSubmitted = header(message, "Auto-Submitted").toLowerCase();
     const autoResponseSuppress = header(message, "X-Auto-Response-Suppress").trim();
     const calendarArtifact = isCalendarArtifactSubject(subject);
+    const hasDirectExchange = mailboxes.length === 2;
+    const hasGroupMessage = mailboxes.length > 2;
     const automated =
       headerNames.has("list-id") ||
       headerNames.has("list-unsubscribe") ||
@@ -437,6 +436,8 @@ export function threadCandidatesFromMetadata(
       isAutomated: false,
       isCalendarArtifact: false,
       isDraft: false,
+      hasDirectExchange: false,
+      hasGroupMessage: false,
     };
 
     current.first = Math.min(current.first, when);
@@ -445,6 +446,8 @@ export function threadCandidatesFromMetadata(
     current.isAutomated ||= automated;
     current.isCalendarArtifact ||= calendarArtifact;
     current.isDraft ||= message.labelIds?.includes("DRAFT") ?? false;
+    current.hasDirectExchange ||= hasDirectExchange;
+    current.hasGroupMessage ||= hasGroupMessage;
     if (current.subject === "(no subject)" && subject !== "(no subject)") current.subject = subject;
     for (const mailbox of mailboxes) current.participantAddresses.add(mailbox.address);
     threads.set(id, current);
@@ -461,6 +464,7 @@ export function threadCandidatesFromMetadata(
       isAutomated: value.isAutomated,
       isCalendarArtifact: value.isCalendarArtifact,
       isDraft: value.isDraft,
+      isGroupOnly: value.hasGroupMessage && !value.hasDirectExchange,
     }))
     .sort(
       (a, b) =>

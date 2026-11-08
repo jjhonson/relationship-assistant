@@ -23,6 +23,7 @@ export type ThreadCandidate = {
   isAutomated?: boolean;
   isCalendarArtifact?: boolean;
   isDraft?: boolean;
+  isGroupOnly: boolean;
 };
 
 export type ConfirmedIdentity = {
