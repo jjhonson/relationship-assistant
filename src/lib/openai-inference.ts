@@ -7,6 +7,7 @@ import {
 import {
   RELATIONSHIP_INFERENCE_SYSTEM_PROMPT,
   buildRelationshipInferenceUserPrompt,
+  type RelationshipInferenceInput,
 } from "./inference-prompt";
 
 export const DEFAULT_OPENAI_RELATIONSHIP_MODEL = "gpt-6.1-sol";
@@ -141,21 +142,47 @@ function extractOutputText(response: OpenAIResponse) {
     }
   }
 
-  if (refusals.length > 0) throw new Error("Model refused the fictional inference request.");
+  if (refusals.length > 0) throw new Error("Model refused the relationship inference request.");
   const text = texts.join("\n").trim();
   if (!text) throw new Error("Model returned no structured text output.");
   return text;
 }
 
-export async function inferRelationshipWithOpenAI(
-  benchmark: RelationshipBenchmarkCase,
-  options: {
-    apiKey: string;
-    model?: string;
-    fetchImpl?: typeof fetch;
-  },
+function citedEvidenceIds(inference: RelationshipInference): string[] {
+  return [
+    ...inference.classification.evidenceIds,
+    ...inference.disposition.evidenceIds,
+    ...inference.currentState.evidenceIds,
+    ...inference.history.evidenceIds,
+    ...inference.tags.flatMap((tag) => tag.evidenceIds),
+    ...inference.openLoops.flatMap((loop) => loop.evidenceIds),
+    ...inference.reasonsToEngage.flatMap((reason) => reason.evidenceIds),
+  ];
+}
+
+export function invalidInferenceCitations(
+  input: RelationshipInferenceInput,
+  inference: RelationshipInference,
+): string[] {
+  const allowed = new Set(input.threads.map((thread) => thread.id));
+  return [...new Set(citedEvidenceIds(inference).filter((id) => !allowed.has(id)))];
+}
+
+type InferenceOptions = {
+  apiKey: string;
+  model?: string;
+  fetchImpl?: typeof fetch;
+};
+
+async function requestRelationshipInference(
+  input: RelationshipInferenceInput,
+  options: InferenceOptions,
 ) {
   if (!options.apiKey) throw new Error("OPENAI_API_KEY is required.");
+  if (input.threads.length === 0) throw new Error("At least one correspondence message is required.");
+  if (new Set(input.threads.map((thread) => thread.id)).size !== input.threads.length) {
+    throw new Error("Correspondence evidence IDs must be unique.");
+  }
 
   const fetchImpl = options.fetchImpl ?? fetch;
   const model = options.model ?? DEFAULT_OPENAI_RELATIONSHIP_MODEL;
@@ -171,7 +198,7 @@ export async function inferRelationshipWithOpenAI(
       store: false,
       reasoning: { effort: "medium" },
       instructions: RELATIONSHIP_INFERENCE_SYSTEM_PROMPT,
-      input: buildRelationshipInferenceUserPrompt(benchmark),
+      input: buildRelationshipInferenceUserPrompt(input),
       text: {
         format: {
           type: "json_schema",
@@ -201,16 +228,39 @@ export async function inferRelationshipWithOpenAI(
     throw new Error(`Structured inference failed local validation: ${validationIssues.join(" ")}`);
   }
 
+  const invalidCitations = invalidInferenceCitations(input, inference);
+  if (invalidCitations.length > 0) {
+    throw new Error("Structured inference cited evidence that was not supplied.");
+  }
+
   return {
     provider: "openai" as const,
     model: response.model ?? model,
     responseId: response.id ?? null,
     inference,
-    report: evaluateRelationshipInference(benchmark, inference),
+    invalidCitations,
     usage: {
       inputTokens: response.usage?.input_tokens ?? null,
       outputTokens: response.usage?.output_tokens ?? null,
       totalTokens: response.usage?.total_tokens ?? null,
     },
+  };
+}
+
+export async function inferRelationshipFromCorrespondence(
+  input: RelationshipInferenceInput,
+  options: InferenceOptions,
+) {
+  return requestRelationshipInference(input, options);
+}
+
+export async function inferRelationshipWithOpenAI(
+  benchmark: RelationshipBenchmarkCase,
+  options: InferenceOptions,
+) {
+  const result = await requestRelationshipInference(benchmark, options);
+  return {
+    ...result,
+    report: evaluateRelationshipInference(benchmark, result.inference),
   };
 }
