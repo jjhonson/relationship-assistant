@@ -31,6 +31,12 @@ function hasConfirmedIdentity(candidate: ThreadCandidate, aliases: Set<string>):
   return candidate.participantAddresses.some((address) => aliases.has(normalizeEmailAddress(address)));
 }
 
+function hasInspectableCounterparty(candidate: ThreadCandidate, aliases: Set<string>): boolean {
+  return candidate.participantAddresses.some(
+    (address) => !aliases.has(normalizeEmailAddress(address)),
+  );
+}
+
 function matchesStrongerDirectExchange(candidate: ThreadCandidate): boolean {
   return candidate.messageCount > 1;
 }
@@ -46,6 +52,7 @@ export function planRepresentativeEvidence(
   const direct = candidates.filter(
     (candidate) =>
       hasConfirmedIdentity(candidate, aliases) &&
+      hasInspectableCounterparty(candidate, aliases) &&
       !candidate.isAutomated &&
       !candidate.isCalendarArtifact &&
       !candidate.isDraft &&
