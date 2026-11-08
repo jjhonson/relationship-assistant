@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import {
+  gmailSelectionToCorrespondence,
   normalizeEmailAddress,
   selectPilotThreads,
   type AliasCandidate,
@@ -59,6 +60,8 @@ export type PilotConsentResult =
 
 export type PilotEvidenceSummary = {
   id: string;
+  source: string;
+  conversationId: string;
   date: string;
   from: string;
   to: string;
@@ -156,7 +159,7 @@ export async function lookupPilotThreads(
     if (confirmedAliases.length === 0 || confirmedAliases.length > MAX_PILOT_ALIASES) {
       return {
         kind: "error",
-        message: `Confirm between 1 and ${MAX_PILOT_ALIASES} email addresses.`,
+        message: \`Confirm between 1 and \${MAX_PILOT_ALIASES} email addresses.\`,
       };
     }
 
@@ -191,7 +194,7 @@ export async function preparePilotAnalysis(
     const label = normalizePilotPersonLabel(personLabel);
     const confirmedAliases = [...new Set(aliases.map(normalizeEmailAddress).filter(Boolean))];
     if (confirmedAliases.length === 0 || confirmedAliases.length > MAX_PILOT_ALIASES) {
-      return { kind: "error", message: `Confirm between 1 and ${MAX_PILOT_ALIASES} email addresses.` };
+      return { kind: "error", message: \`Confirm between 1 and \${MAX_PILOT_ALIASES} email addresses.\` };
     }
 
     const session = await activeSession();
@@ -199,18 +202,18 @@ export async function preparePilotAnalysis(
       return { kind: "error", message: "Gmail is not connected or the session expired. Reconnect Gmail and try again." };
     }
 
-    // Re-run the bounded metadata lookup on the server at approval time.
-    // The browser cannot mint consent for an arbitrary Gmail thread ID.
+    // Gmail-specific validation happens here. Everything above this point remains metadata-only.
     const found = await fetchPilotThreadMetadata(session.accessToken, confirmedAliases);
     const candidates = threadCandidatesFromMetadata(found.messages, confirmedAliases);
-    const selection = selectPilotThreads(
+    const gmailSelection = selectPilotThreads(
       { personLabel: label, confirmedAliases },
       candidates,
       selectedThreadIds,
     );
+    const selection = gmailSelectionToCorrespondence(gmailSelection);
     const prepared = prepareRealPilotConsent(selection, {
       sessionSecret: session.sessionSecret,
-      accessToken: session.accessToken,
+      connectionBinding: session.accessToken,
     });
 
     return {
@@ -223,7 +226,7 @@ export async function preparePilotAnalysis(
     if (error instanceof Error && (
       error.message.startsWith("Select ") ||
       error.message.includes("reviewed candidate list") ||
-      error.message.includes("confirmed email identity")
+      error.message.includes("confirmed identity")
     )) {
       return { kind: "error", message: error.message };
     }
@@ -244,7 +247,7 @@ export async function analyzePilotConsent(token: string): Promise<PilotAnalysisR
 
     const selection = readRealPilotConsent(token, {
       sessionSecret: session.sessionSecret,
-      accessToken: session.accessToken,
+      connectionBinding: session.accessToken,
     });
 
     const content = await fetchApprovedPilotContent(session.accessToken, selection);
@@ -255,9 +258,9 @@ export async function analyzePilotConsent(token: string): Promise<PilotAnalysisR
 
     const result = await inferRelationshipFromCorrespondence({
       id: "real-contact-pilot",
-      title: `Real-contact pilot: ${selection.personLabel}`,
+      title: \`Real-contact pilot: \${selection.personLabel}\`,
       asOfDate: new Date().toISOString().slice(0, 10),
-      threads: content.threads,
+      messages: content.messages,
     }, {
       apiKey,
       model: process.env.OPENAI_RELATIONSHIP_MODEL,
@@ -267,8 +270,10 @@ export async function analyzePilotConsent(token: string): Promise<PilotAnalysisR
       kind: "ready",
       personLabel: selection.personLabel,
       inference: result.inference,
-      evidence: content.threads.map(({ id, date, from, to, subject }) => ({
+      evidence: content.messages.map(({ id, source, conversationId, date, from, to, subject }) => ({
         id,
+        source,
+        conversationId,
         date,
         from,
         to,
@@ -288,7 +293,7 @@ export async function analyzePilotConsent(token: string): Promise<PilotAnalysisR
     }
     if (error instanceof Error && (
       error.message.startsWith("Analysis approval") ||
-      error.message.includes("different Gmail connection")
+      error.message.includes("different source connection")
     )) {
       return { kind: "error", message: error.message };
     }
