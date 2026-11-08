@@ -34,7 +34,7 @@ export class PilotContentError extends Error {}
 
 async function get<T>(path: string, token: string): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(\`\${API}\${path}\`, {
+    const res = await fetch(`${API}${path}`, {
       headers: { Authorization: ["Bearer", token].join(" ") },
       cache: "no-store",
     });
@@ -52,7 +52,7 @@ async function get<T>(path: string, token: string): Promise<T> {
     }
 
     const retryable = rateLimited || [500, 502, 503, 504].includes(res.status);
-    if (!retryable || attempt === 2) throw new PilotContentError(\`Gmail API returned \${res.status}\`);
+    if (!retryable || attempt === 2) throw new PilotContentError(`Gmail API returned ${res.status}`);
 
     const retryAfter = Number(res.headers.get("Retry-After"));
     const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -160,7 +160,7 @@ function messageDate(message: GmailMessage): string {
 }
 
 function headerAddresses(value: string): string[] {
-  const matches = value.match(/[A-Z0-9.!#$%&'*+/=?^_\`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}/gi) ?? [];
+  const matches = value.match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}/gi) ?? [];
   return [...new Set(matches.map((item) => item.toLowerCase()))];
 }
 
@@ -181,7 +181,7 @@ async function fetchFullThread(token: string, threadId: string): Promise<GmailTh
     format: "full",
     fields: "id,messages(id,threadId,internalDate,payload)",
   });
-  return get<GmailThread>(\`/threads/\${encodeURIComponent(threadId)}?\${params}\`, token);
+  return get<GmailThread>(`/threads/${encodeURIComponent(threadId)}?${params}`, token);
 }
 
 /**
@@ -238,9 +238,9 @@ export async function fetchApprovedPilotContent(
         throw new PilotContentError("The selected content is too large for this pilot. Choose fewer or shorter conversations.");
       }
 
-      const messageId = message.id || \`\${requestedId}-message-\${messageIndex + 1}\`;
+      const messageId = message.id || `${requestedId}-message-${messageIndex + 1}`;
       messages.push({
-        id: \`gmail:\${requestedId}:\${messageId}\`,
+        id: `gmail:${requestedId}:${messageId}`,
         source: "gmail",
         conversationId: requestedId,
         date: messageDate(message),
