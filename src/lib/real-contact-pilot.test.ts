@@ -23,6 +23,7 @@ const threads: ThreadCandidate[] = [
     lastDate: "2024-02-03",
     messageCount: 4,
     participantAddresses: ["you@example", "kate@oldcompany.example"],
+    isGroupOnly: false,
   },
   {
     id: "thread-2",
@@ -31,6 +32,7 @@ const threads: ThreadCandidate[] = [
     lastDate: "2025-05-12",
     messageCount: 3,
     participantAddresses: ["you@example", "kate@newcompany.example"],
+    isGroupOnly: false,
   },
   {
     id: "thread-3",
@@ -39,6 +41,7 @@ const threads: ThreadCandidate[] = [
     lastDate: "2026-03-18",
     messageCount: 2,
     participantAddresses: ["you@example", "kate@newcompany.example"],
+    isGroupOnly: false,
   },
   {
     id: "thread-4",
@@ -47,6 +50,7 @@ const threads: ThreadCandidate[] = [
     lastDate: "2026-04-01",
     messageCount: 2,
     participantAddresses: ["you@example", "other@example"],
+    isGroupOnly: false,
   },
 ];
 

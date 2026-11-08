@@ -20,6 +20,10 @@ export type ThreadCandidate = {
   lastDate: string;
   messageCount: number;
   participantAddresses: string[];
+  isAutomated?: boolean;
+  isCalendarArtifact?: boolean;
+  isDraft?: boolean;
+  isGroupOnly: boolean;
 };
 
 export type ConfirmedIdentity = {

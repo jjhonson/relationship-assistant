@@ -4,6 +4,7 @@ import {
   readRealPilotConsent,
   REAL_PILOT_CONSENT_TTL_MS,
 } from "./real-contact-consent";
+import { selectPilotThreads } from "./real-contact-pilot";
 
 const secret = "x".repeat(32);
 const connectionBinding = "source-connection-a";
@@ -130,5 +131,49 @@ describe("real-contact consent", () => {
         },
       ),
     ).toThrow("between 1 and 3");
+  });
+
+  it("binds a manually substituted conversation to the exact consent selection", () => {
+    const identity = {
+      personLabel: "Synthetic contact",
+      confirmedAliases: ["person-a@example.test"],
+    };
+    const candidates = [
+      {
+        id: "recommended-thread",
+        subject: "Synthetic recent conversation",
+        firstDate: "2026-01-01",
+        lastDate: "2026-01-02",
+        messageCount: 2,
+        participantAddresses: ["person-a@example.test", "owner@example.test"],
+        isGroupOnly: false,
+      },
+      {
+        id: "manual-replacement",
+        subject: "Synthetic alternative conversation",
+        firstDate: "2022-01-01",
+        lastDate: "2022-02-01",
+        messageCount: 3,
+        participantAddresses: ["person-a@example.test", "owner@example.test"],
+        isGroupOnly: false,
+      },
+    ];
+    const selected = selectPilotThreads(identity, candidates, ["manual-replacement"]);
+    const prepared = prepareRealPilotConsent({
+      source: "gmail",
+      personLabel: selected.personLabel,
+      confirmedIdentityKeys: selected.confirmedAliases,
+      selectedConversationIds: selected.selectedThreadIds,
+    }, {
+      sessionSecret: secret,
+      connectionBinding,
+      now: 1_000,
+    });
+
+    expect(readRealPilotConsent(prepared.token, {
+      sessionSecret: secret,
+      connectionBinding,
+      now: 2_000,
+    }).selectedConversationIds).toEqual(["manual-replacement"]);
   });
 });

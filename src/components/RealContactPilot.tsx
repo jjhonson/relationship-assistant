@@ -14,6 +14,14 @@ import {
   type AliasCandidate,
   type ThreadCandidate,
 } from "@/lib/real-contact-pilot";
+import {
+  planRepresentativeEvidence,
+  type EvidenceRecommendation,
+} from "@/lib/gmail/evidence-planner";
+import {
+  formatPilotMetadataSamplingStats,
+  type PilotMetadataSamplingStats,
+} from "@/lib/gmail/pilot-sampling";
 import { RealRelationshipBrief } from "@/components/RealRelationshipBrief";
 
 type ReadyConsent = Extract<PilotConsentResult, { kind: "ready" }>;
@@ -28,6 +36,7 @@ export function RealContactPilot() {
   const [threads, setThreads] = useState<ThreadCandidate[]>([]);
   const [selectedThreads, setSelectedThreads] = useState<string[]>([]);
   const [threadTruncated, setThreadTruncated] = useState(false);
+  const [samplingStats, setSamplingStats] = useState<PilotMetadataSamplingStats | null>(null);
   const [consent, setConsent] = useState<ReadyConsent | null>(null);
   const [analysis, setAnalysis] = useState<ReadyAnalysis | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -43,6 +52,7 @@ export function RealContactPilot() {
     setMessage(null);
     setThreads([]);
     setSelectedThreads([]);
+    setSamplingStats(null);
     setSelectedAliases([]);
     clearAnalysis();
 
@@ -67,6 +77,7 @@ export function RealContactPilot() {
     setMessage(null);
     setThreads([]);
     setSelectedThreads([]);
+    setSamplingStats(null);
     clearAnalysis();
 
     startTransition(() => {
@@ -77,6 +88,12 @@ export function RealContactPilot() {
         }
         setThreads(result.candidates);
         setThreadTruncated(result.truncated);
+        setSamplingStats(result.stats);
+        setSelectedThreads(
+          planRepresentativeEvidence(result.candidates, selectedAliases)
+            .map(({ conversationId }) => conversationId)
+            .slice(0, MAX_REAL_PILOT_CONVERSATIONS),
+        );
         if (result.candidates.length === 0) {
           setMessage("No candidate conversations were found for the confirmed addresses in this bounded search.");
         }
@@ -87,6 +104,7 @@ export function RealContactPilot() {
   const toggleAlias = (address: string) => {
     setThreads([]);
     setSelectedThreads([]);
+    setSamplingStats(null);
     setMessage(null);
     clearAnalysis();
     setSelectedAliases((current) =>
@@ -142,6 +160,54 @@ export function RealContactPilot() {
   };
 
   const selectedThreadSummaries = threads.filter((thread) => selectedThreads.includes(thread.id));
+  const recommendations = planRepresentativeEvidence(threads, selectedAliases);
+  const recommendedIds = new Set(recommendations.map(({ conversationId }) => conversationId));
+
+  const renderCandidate = (
+    thread: ThreadCandidate,
+    recommendation?: EvidenceRecommendation,
+  ) => {
+    const checked = selectedThreads.includes(thread.id);
+    const disabled = !checked && selectedThreads.length >= MAX_REAL_PILOT_CONVERSATIONS;
+    const matchedAliases = thread.participantAddresses.filter((address) =>
+      selectedAliases.includes(address),
+    );
+    return (
+      <label
+        key={thread.id}
+        className={`flex items-start gap-3 rounded-xl border border-stone-200 p-4 ${disabled ? "opacity-50" : "cursor-pointer"}`}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={() => toggleThread(thread.id)}
+          className="mt-1"
+        />
+        <span className="min-w-0">
+          {recommendation && (
+            <span className="mb-1 block text-sm font-semibold text-indigo-800">
+              {recommendation.role}
+            </span>
+          )}
+          <span className="block font-medium">{thread.subject}</span>
+          <span className="mt-1 block text-sm text-stone-600">
+            {thread.firstDate === thread.lastDate
+              ? thread.lastDate
+              : `${thread.firstDate} to ${thread.lastDate}`} · {thread.messageCount} sampled matching message{thread.messageCount === 1 ? "" : "s"}
+          </span>
+          <span className="mt-1 block break-all text-xs text-stone-500">
+            Confirmed address{matchedAliases.length === 1 ? "" : "es"}: {matchedAliases.join(", ")}
+          </span>
+          {recommendation && (
+            <span className="mt-2 block text-sm text-stone-600">
+              {recommendation.reason}
+            </span>
+          )}
+        </span>
+      </label>
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -164,7 +230,7 @@ export function RealContactPilot() {
             id="pilot-person"
             value={personLabel}
             onChange={(event) => setPersonLabel(event.target.value)}
-            placeholder="e.g. Kate Buggeln"
+            placeholder="e.g. a contact"
             autoComplete="off"
             className="min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2"
           />
@@ -229,13 +295,13 @@ export function RealContactPilot() {
         </section>
       )}
 
-      {threads.length > 0 && (
+      {(threads.length > 0 || samplingStats !== null) && (
         <section className="rounded-2xl border border-stone-200 bg-white p-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold">3. Select candidate conversations</h2>
+              <h2 className="text-xl font-semibold">3. Review evidence recommendations</h2>
               <p className="mt-1 text-sm text-stone-600">
-                Select up to {MAX_REAL_PILOT_CONVERSATIONS}. These summaries come only from headers and Gmail message metadata.
+                Recommendations use headers and Gmail message metadata only. Labels describe possible evidence roles, not relationship quality.
               </p>
             </div>
             <span className="text-sm font-medium text-stone-700">
@@ -243,44 +309,59 @@ export function RealContactPilot() {
             </span>
           </div>
 
-          <div className="mt-5 space-y-3">
-            {threads.map((thread) => {
-              const checked = selectedThreads.includes(thread.id);
-              const disabled = !checked && selectedThreads.length >= MAX_REAL_PILOT_CONVERSATIONS;
-              const matchedAliases = thread.participantAddresses.filter((address) =>
-                selectedAliases.includes(address),
-              );
-              return (
-                <label
-                  key={thread.id}
-                  className={`flex items-start gap-3 rounded-xl border border-stone-200 p-4 ${disabled ? "opacity-50" : "cursor-pointer"}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={() => toggleThread(thread.id)}
-                    className="mt-1"
-                  />
-                  <span className="min-w-0">
-                    <span className="block font-medium">{thread.subject}</span>
-                    <span className="mt-1 block text-sm text-stone-600">
-                      {thread.firstDate === thread.lastDate
-                        ? thread.lastDate
-                        : `${thread.firstDate} to ${thread.lastDate}`} · {thread.messageCount} matching message{thread.messageCount === 1 ? "" : "s"}
-                    </span>
-                    <span className="mt-1 block break-all text-xs text-stone-500">
-                      Confirmed address{matchedAliases.length === 1 ? "" : "es"}: {matchedAliases.join(", ")}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
+          {samplingStats && (
+            <p className="mt-3 text-xs text-stone-500">
+              {formatPilotMetadataSamplingStats(samplingStats)}
+            </p>
+          )}
+
+          <div className="mt-5">
+            <h3 className="font-semibold">Recommended evidence set</h3>
+            <p className="mt-1 text-sm text-stone-600">
+              These are preselected suggestions. You can remove them or choose replacements below; no message content is read to make these recommendations.
+            </p>
+            {recommendations.length > 0 ? (
+              <div className="mt-3 space-y-3">
+                {recommendations.map((recommendation) =>
+                  renderCandidate(recommendation.candidate, recommendation),
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
+                No direct, non-automated recommendation was available from this sample. Review other candidates manually if any were found.
+              </p>
+            )}
           </div>
+
+          <div className="mt-6">
+            <h3 className="font-semibold">Other candidate conversations</h3>
+            <p className="mt-1 text-sm text-stone-600">
+              These remain available for manual selection, including candidates the metadata rules did not recommend.
+            </p>
+            <div className="mt-3 space-y-3">
+              {threads.filter((thread) => !recommendedIds.has(thread.id)).map((thread) =>
+                renderCandidate(thread),
+              )}
+              {threads.length === 0 && (
+                <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
+                  No candidate conversations were found in this sample.
+                </p>
+              )}
+              {threads.length > 0 && threads.every((thread) => recommendedIds.has(thread.id)) && (
+                <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
+                  No additional candidates in this sample.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <p className="mt-4 text-xs text-stone-500">
+            The distributed metadata sample is intentionally incomplete and may still miss conversations. Dates, counts, and headers cannot establish message substance.
+          </p>
 
           {threadTruncated && (
             <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-              This bounded search hit its limit. The list is intentionally incomplete for the pilot.
+              Some sampled windows reached their per-window request cap; additional candidates may be missing.
             </p>
           )}
 

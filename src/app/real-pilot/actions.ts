@@ -9,6 +9,7 @@ import {
   type PilotAnalysisDisclosure,
   type ThreadCandidate,
 } from "@/lib/real-contact-pilot";
+import type { PilotMetadataSamplingStats } from "@/lib/gmail/pilot-sampling";
 import {
   prepareRealPilotConsent,
   readRealPilotConsent,
@@ -47,6 +48,7 @@ export type PilotThreadLookupResult =
       confirmedAliases: string[];
       candidates: ThreadCandidate[];
       truncated: boolean;
+      stats: PilotMetadataSamplingStats;
     };
 
 export type PilotConsentResult =
@@ -175,6 +177,7 @@ export async function lookupPilotThreads(
       confirmedAliases,
       candidates: threadCandidatesFromMetadata(found.messages, confirmedAliases),
       truncated: found.truncated,
+      stats: found.stats,
     };
   } catch (error) {
     return { kind: "error", message: metadataError(error) };
