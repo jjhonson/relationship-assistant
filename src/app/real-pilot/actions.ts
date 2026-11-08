@@ -159,7 +159,7 @@ export async function lookupPilotThreads(
     if (confirmedAliases.length === 0 || confirmedAliases.length > MAX_PILOT_ALIASES) {
       return {
         kind: "error",
-        message: \`Confirm between 1 and \${MAX_PILOT_ALIASES} email addresses.\`,
+        message: `Confirm between 1 and ${MAX_PILOT_ALIASES} email addresses.`,
       };
     }
 
@@ -194,7 +194,7 @@ export async function preparePilotAnalysis(
     const label = normalizePilotPersonLabel(personLabel);
     const confirmedAliases = [...new Set(aliases.map(normalizeEmailAddress).filter(Boolean))];
     if (confirmedAliases.length === 0 || confirmedAliases.length > MAX_PILOT_ALIASES) {
-      return { kind: "error", message: \`Confirm between 1 and \${MAX_PILOT_ALIASES} email addresses.\` };
+      return { kind: "error", message: `Confirm between 1 and ${MAX_PILOT_ALIASES} email addresses.` };
     }
 
     const session = await activeSession();
@@ -258,7 +258,7 @@ export async function analyzePilotConsent(token: string): Promise<PilotAnalysisR
 
     const result = await inferRelationshipFromCorrespondence({
       id: "real-contact-pilot",
-      title: \`Real-contact pilot: \${selection.personLabel}\`,
+      title: `Real-contact pilot: ${selection.personLabel}`,
       asOfDate: new Date().toISOString().slice(0, 10),
       messages: content.messages,
     }, {
