@@ -78,7 +78,7 @@ export function RealContactPilot() {
         setThreads(result.candidates);
         setThreadTruncated(result.truncated);
         if (result.candidates.length === 0) {
-          setMessage("No candidate threads were found for the confirmed addresses in this bounded search.");
+          setMessage("No candidate conversations were found for the confirmed addresses in this bounded search.");
         }
       });
     });
@@ -108,7 +108,7 @@ export function RealContactPilot() {
 
   const reviewAnalysis = () => {
     if (selectedThreads.length === 0) {
-      setMessage("Select at least one thread first.");
+      setMessage("Select at least one conversation first.");
       return;
     }
 
@@ -224,7 +224,7 @@ export function RealContactPilot() {
             disabled={isPending || selectedAliases.length === 0}
             className="mt-5 rounded-lg bg-indigo-700 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Confirm aliases and find threads
+            Confirm identities and find conversations
           </button>
         </section>
       )}
@@ -253,7 +253,7 @@ export function RealContactPilot() {
               return (
                 <label
                   key={thread.id}
-                  className={\`flex items-start gap-3 rounded-xl border border-stone-200 p-4 \${disabled ? "opacity-50" : "cursor-pointer"}\`}
+                  className={`flex items-start gap-3 rounded-xl border border-stone-200 p-4 ${disabled ? "opacity-50" : "cursor-pointer"}`}
                 >
                   <input
                     type="checkbox"
@@ -267,7 +267,7 @@ export function RealContactPilot() {
                     <span className="mt-1 block text-sm text-stone-600">
                       {thread.firstDate === thread.lastDate
                         ? thread.lastDate
-                        : \`\${thread.firstDate} to \${thread.lastDate}\`} · {thread.messageCount} matching message{thread.messageCount === 1 ? "" : "s"}
+                        : `${thread.firstDate} to ${thread.lastDate}`} · {thread.messageCount} matching message{thread.messageCount === 1 ? "" : "s"}
                     </span>
                     <span className="mt-1 block break-all text-xs text-stone-500">
                       Confirmed address{matchedAliases.length === 1 ? "" : "es"}: {matchedAliases.join(", ")}
@@ -324,7 +324,7 @@ export function RealContactPilot() {
               {selectedThreadSummaries.map((thread) => (
                 <div key={thread.id} className="rounded-lg bg-white px-3 py-2 text-sm">
                   <span className="font-medium">{thread.subject}</span>
-                  <span className="text-stone-500"> · {thread.firstDate === thread.lastDate ? thread.lastDate : \`\${thread.firstDate} to \${thread.lastDate}\`}</span>
+                  <span className="text-stone-500"> · {thread.firstDate === thread.lastDate ? thread.lastDate : `${thread.firstDate} to ${thread.lastDate}`}</span>
                 </div>
               ))}
             </div>
