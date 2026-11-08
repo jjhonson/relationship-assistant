@@ -51,7 +51,7 @@ describe("approved Gmail pilot content", () => {
             ],
           },
         }],
-      }), { status: 200 }));
+      }), { status: 200 });
     }));
 
     const result = await fetchApprovedPilotContent("token", selection);
