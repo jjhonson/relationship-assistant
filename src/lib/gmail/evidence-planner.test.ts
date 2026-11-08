@@ -67,6 +67,25 @@ describe("metadata-only representative evidence planning", () => {
     ).toEqual(recommendations);
   });
 
+  it("keeps a single-message recent conversation when stronger historical exchanges exist", () => {
+    const recommendations = planRepresentativeEvidence(
+      [
+        candidate("recent-single", "2026-06-14", "2026-06-14", 1),
+        candidate("historical", "2022-02-01", "2022-10-01", 8),
+        candidate("anchor", "2018-04-01", "2018-04-12", 2),
+      ],
+      [confirmed],
+      new Date("2026-06-15T00:00:00Z"),
+    );
+
+    expect(recommendations.map(({ conversationId }) => conversationId)).toEqual([
+      "recent-single",
+      "historical",
+      "anchor",
+    ]);
+    expect(recommendations[0].role).toBe("Recent activity");
+  });
+
   it("degrades gracefully for sparse history without inventing recent activity", () => {
     const recommendations = planRepresentativeEvidence(
       [candidate("only-old", "2017-05-01", "2017-05-01", 1)],
