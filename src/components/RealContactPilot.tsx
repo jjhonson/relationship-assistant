@@ -10,7 +10,7 @@ import {
   type PilotConsentResult,
 } from "@/app/real-pilot/actions";
 import {
-  MAX_REAL_PILOT_THREADS,
+  MAX_REAL_PILOT_CONVERSATIONS,
   type AliasCandidate,
   type ThreadCandidate,
 } from "@/lib/real-contact-pilot";
@@ -101,7 +101,7 @@ export function RealContactPilot() {
     clearAnalysis();
     setSelectedThreads((current) => {
       if (current.includes(id)) return current.filter((item) => item !== id);
-      if (current.length >= MAX_REAL_PILOT_THREADS) return current;
+      if (current.length >= MAX_REAL_PILOT_CONVERSATIONS) return current;
       return [...current, id];
     });
   };
@@ -233,20 +233,20 @@ export function RealContactPilot() {
         <section className="rounded-2xl border border-stone-200 bg-white p-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold">3. Select candidate threads</h2>
+              <h2 className="text-xl font-semibold">3. Select candidate conversations</h2>
               <p className="mt-1 text-sm text-stone-600">
-                Select up to {MAX_REAL_PILOT_THREADS}. These summaries come only from headers and Gmail message metadata.
+                Select up to {MAX_REAL_PILOT_CONVERSATIONS}. These summaries come only from headers and Gmail message metadata.
               </p>
             </div>
             <span className="text-sm font-medium text-stone-700">
-              {selectedThreads.length}/{MAX_REAL_PILOT_THREADS} selected
+              {selectedThreads.length}/{MAX_REAL_PILOT_CONVERSATIONS} selected
             </span>
           </div>
 
           <div className="mt-5 space-y-3">
             {threads.map((thread) => {
               const checked = selectedThreads.includes(thread.id);
-              const disabled = !checked && selectedThreads.length >= MAX_REAL_PILOT_THREADS;
+              const disabled = !checked && selectedThreads.length >= MAX_REAL_PILOT_CONVERSATIONS;
               const matchedAliases = thread.participantAddresses.filter((address) =>
                 selectedAliases.includes(address),
               );
@@ -293,7 +293,7 @@ export function RealContactPilot() {
             Review analysis disclosure
           </button>
           <p className="mt-2 text-xs text-stone-500">
-            This does not read message bodies. The server first revalidates the exact selected thread IDs.
+            This does not read message bodies. The server first revalidates the exact selected conversation IDs.
           </p>
         </section>
       )}
@@ -302,15 +302,15 @@ export function RealContactPilot() {
         <section className="rounded-2xl border border-amber-300 bg-amber-50 p-6">
           <h2 className="text-xl font-semibold">4. Review and approve analysis</h2>
           <p className="mt-2 text-sm text-stone-700">
-            Your approval is bound to the current Gmail connection and exactly {consent.disclosure.selectedThreadIds.length} selected
-            thread{consent.disclosure.selectedThreadIds.length === 1 ? "" : "s"}. It expires at{" "}
+            Your approval is bound to the current Gmail connection and exactly {consent.disclosure.selectedConversationIds.length} selected
+            thread{consent.disclosure.selectedConversationIds.length === 1 ? "" : "s"}. It expires at{" "}
             {new Date(consent.expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
           </p>
 
           <div className="mt-4 rounded-xl bg-white p-4 text-sm text-stone-700">
             <p className="font-medium">If you approve, the app will:</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Read sender/recipient, date, subject, and message text only from the selected threads.</li>
+              <li>Read sender/recipient, date, subject, and message text only from the selected conversations.</li>
               <li>Ignore attachments and avoid any attachment-download request.</li>
               <li>Minimize common quoted reply history and cap the amount of text processed.</li>
               <li>Send the minimized selected correspondence to OpenAI for relationship inference with API storage disabled.</li>
@@ -319,7 +319,7 @@ export function RealContactPilot() {
           </div>
 
           <div className="mt-4">
-            <p className="text-sm font-medium text-stone-800">Selected threads</p>
+            <p className="text-sm font-medium text-stone-800">Selected Gmail conversations</p>
             <div className="mt-2 space-y-2">
               {selectedThreadSummaries.map((thread) => (
                 <div key={thread.id} className="rounded-lg bg-white px-3 py-2 text-sm">
@@ -336,7 +336,7 @@ export function RealContactPilot() {
             disabled={isPending}
             className="mt-5 rounded-lg bg-indigo-700 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isPending ? "Analyzing…" : "Approve and analyze selected threads"}
+            {isPending ? "Analyzing…" : "Approve and analyze selected conversations"}
           </button>
         </section>
       )}
