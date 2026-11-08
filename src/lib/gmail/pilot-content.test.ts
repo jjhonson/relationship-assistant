@@ -11,8 +11,15 @@ function enc(value: string) {
   return Buffer.from(value, "utf8").toString("base64url");
 }
 
+const selection = {
+  source: "gmail" as const,
+  personLabel: "Kate",
+  confirmedIdentityKeys: ["kate@example.test"],
+  selectedConversationIds: ["thread-1"],
+};
+
 describe("approved Gmail pilot content", () => {
-  it("retrieves only approved full threads, ignores attachment parts, and produces evidence IDs", async () => {
+  it("adapts only approved Gmail conversations into canonical messages and ignores attachments", async () => {
     const urls: URL[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
@@ -47,14 +54,15 @@ describe("approved Gmail pilot content", () => {
       }), { status: 200 }));
     }));
 
-    const result = await fetchApprovedPilotContent("token", {
-      confirmedAliases: ["kate@example.test"],
-      selectedThreadIds: ["thread-1"],
-    });
+    const result = await fetchApprovedPilotContent("token", selection);
 
+    expect(result.source).toBe("gmail");
     expect(result.messageCount).toBe(1);
-    expect(result.threads).toEqual([{
+    expect(result.sourceConversationIds).toEqual(["thread-1"]);
+    expect(result.messages).toEqual([{
       id: "gmail:thread-1:m1",
+      source: "gmail",
+      conversationId: "thread-1",
       date: "2026-11-01",
       from: "Kate <kate@example.test>",
       to: "Owner <owner@example.test>",
@@ -68,7 +76,7 @@ describe("approved Gmail pilot content", () => {
     expect(urls.every((url) => !url.pathname.includes("/attachments/"))).toBe(true);
   });
 
-  it("rejects a thread that no longer includes a confirmed alias", async () => {
+  it("rejects a conversation that no longer includes a confirmed identity", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({
         id: "thread-1",
@@ -88,10 +96,18 @@ describe("approved Gmail pilot content", () => {
       }), { status: 200 }),
     ));
 
+    await expect(fetchApprovedPilotContent("token", selection)).rejects.toThrow("no longer includes");
+  });
+
+  it("rejects non-Gmail selections at the Gmail adapter boundary", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+
     await expect(fetchApprovedPilotContent("token", {
-      confirmedAliases: ["kate@example.test"],
-      selectedThreadIds: ["thread-1"],
-    })).rejects.toThrow("no longer includes");
+      ...selection,
+      source: "sms",
+    })).rejects.toThrow("only retrieve Gmail conversations");
+
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("falls back to inline HTML text but never follows attachment IDs", async () => {
@@ -120,13 +136,10 @@ describe("approved Gmail pilot content", () => {
       }), { status: 200 }),
     ));
 
-    const result = await fetchApprovedPilotContent("token", {
-      confirmedAliases: ["kate@example.test"],
-      selectedThreadIds: ["thread-1"],
-    });
+    const result = await fetchApprovedPilotContent("token", selection);
 
-    expect(result.threads[0].body).toContain("Hello Jason");
-    expect(result.threads[0].body).toContain("Good to reconnect.");
+    expect(result.messages[0].body).toContain("Hello Jason");
+    expect(result.messages[0].body).toContain("Good to reconnect.");
   });
 
   it("removes common quoted history and caps each message", () => {
