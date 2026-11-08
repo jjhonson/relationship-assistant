@@ -38,6 +38,7 @@ describe("metadata-only representative evidence planning", () => {
         "owner@example.test",
         "third-party@example.test",
       ], { isGroupOnly: true }),
+      candidate("self-addressed", "2025-12-01", "2025-12-01", 1, [confirmed]),
       candidate("unrelated", "2026-06-01", "2026-06-10", 7, ["other-person@example.test"]),
       candidate("isolated", "2026-06-01", "2026-06-01", 1),
     ];
@@ -121,6 +122,16 @@ describe("metadata-only representative evidence planning", () => {
       "mixed-direct-and-group",
       "two-owner-addresses",
     ]);
+  });
+
+  it("does not recommend a self-addressed or BCC-style message with no visible counterparty", () => {
+    expect(
+      planRepresentativeEvidence(
+        [candidate("self-addressed", "2026-06-14", "2026-06-14", 1, [confirmed])],
+        [confirmed],
+        new Date("2026-06-15T00:00:00Z"),
+      ),
+    ).toEqual([]);
   });
 
   it("degrades gracefully for sparse history without inventing recent activity", () => {
