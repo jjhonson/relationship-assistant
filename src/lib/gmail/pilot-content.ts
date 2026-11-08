@@ -1,4 +1,8 @@
-import type { InferenceThread } from "../inference-benchmark";
+import type {
+  CorrespondenceMessage,
+  CorrespondenceSelection,
+  RetrievedCorrespondence,
+} from "../correspondence";
 import { AuthError } from "./oauth";
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -26,18 +30,11 @@ type GmailThread = {
   messages?: GmailMessage[];
 };
 
-export type RetrievedPilotContent = {
-  threads: InferenceThread[];
-  sourceThreadIds: string[];
-  messageCount: number;
-  totalCharacters: number;
-};
-
 export class PilotContentError extends Error {}
 
 async function get<T>(path: string, token: string): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${API}${path}`, {
+    const res = await fetch(\`\${API}\${path}\`, {
       headers: { Authorization: ["Bearer", token].join(" ") },
       cache: "no-store",
     });
@@ -55,7 +52,7 @@ async function get<T>(path: string, token: string): Promise<T> {
     }
 
     const retryable = rateLimited || [500, 502, 503, 504].includes(res.status);
-    if (!retryable || attempt === 2) throw new PilotContentError(`Gmail API returned ${res.status}`);
+    if (!retryable || attempt === 2) throw new PilotContentError(\`Gmail API returned \${res.status}\`);
 
     const retryAfter = Number(res.headers.get("Retry-After"));
     const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -163,7 +160,7 @@ function messageDate(message: GmailMessage): string {
 }
 
 function headerAddresses(value: string): string[] {
-  const matches = value.match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}/gi) ?? [];
+  const matches = value.match(/[A-Z0-9.!#$%&'*+/=?^_\`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}/gi) ?? [];
   return [...new Set(matches.map((item) => item.toLowerCase()))];
 }
 
@@ -173,9 +170,9 @@ function messageAddresses(message: GmailMessage): string[] {
   )];
 }
 
-function threadIncludesAlias(thread: GmailThread, aliases: Set<string>): boolean {
+function threadIncludesIdentity(thread: GmailThread, identityKeys: Set<string>): boolean {
   return (thread.messages ?? []).some((message) =>
-    messageAddresses(message).some((address) => aliases.has(address)),
+    messageAddresses(message).some((address) => identityKeys.has(address)),
   );
 }
 
@@ -184,59 +181,68 @@ async function fetchFullThread(token: string, threadId: string): Promise<GmailTh
     format: "full",
     fields: "id,messages(id,threadId,internalDate,payload)",
   });
-  return get<GmailThread>(`/threads/${encodeURIComponent(threadId)}?${params}`, token);
+  return get<GmailThread>(\`/threads/\${encodeURIComponent(threadId)}?\${params}\`, token);
 }
 
+/**
+ * Gmail ingestion adapter for the canonical correspondence model.
+ * Gmail thread IDs become conversation IDs; Gmail message IDs become evidence IDs.
+ */
 export async function fetchApprovedPilotContent(
   token: string,
-  selection: {
-    confirmedAliases: string[];
-    selectedThreadIds: string[];
-  },
-): Promise<RetrievedPilotContent> {
-  const threadIds = [...new Set(selection.selectedThreadIds)];
-  if (threadIds.length === 0 || threadIds.length > 3) {
-    throw new PilotContentError("Select between 1 and 3 approved threads.");
+  selection: CorrespondenceSelection,
+): Promise<RetrievedCorrespondence> {
+  if (selection.source !== "gmail") {
+    throw new PilotContentError("The Gmail adapter can only retrieve Gmail conversations.");
   }
 
-  const aliases = new Set(selection.confirmedAliases.map((item) => item.trim().toLowerCase()).filter(Boolean));
-  if (aliases.size === 0) throw new PilotContentError("No confirmed email identity was approved.");
+  const conversationIds = [...new Set(selection.selectedConversationIds)];
+  if (conversationIds.length === 0 || conversationIds.length > 3) {
+    throw new PilotContentError("Select between 1 and 3 approved conversations.");
+  }
 
-  const fetched = await Promise.all(threadIds.map((id) => fetchFullThread(token, id)));
-  const inferenceThreads: InferenceThread[] = [];
+  const identityKeys = new Set(
+    selection.confirmedIdentityKeys.map((item) => item.trim().toLowerCase()).filter(Boolean),
+  );
+  if (identityKeys.size === 0) throw new PilotContentError("No confirmed identity was approved.");
+
+  const fetched = await Promise.all(conversationIds.map((id) => fetchFullThread(token, id)));
+  const messages: CorrespondenceMessage[] = [];
   let totalCharacters = 0;
   let totalMessages = 0;
 
   for (let index = 0; index < fetched.length; index++) {
-    const requestedId = threadIds[index];
+    const requestedId = conversationIds[index];
     const thread = fetched[index];
     if (thread.id && thread.id !== requestedId) {
-      throw new PilotContentError("Gmail returned a different thread than the one approved.");
+      throw new PilotContentError("Gmail returned a different conversation than the one approved.");
     }
-    if (!threadIncludesAlias(thread, aliases)) {
-      throw new PilotContentError("An approved thread no longer includes a confirmed email identity.");
+    if (!threadIncludesIdentity(thread, identityKeys)) {
+      throw new PilotContentError("An approved conversation no longer includes a confirmed identity.");
     }
 
-    const messages = thread.messages ?? [];
-    if (messages.length > MAX_REAL_PILOT_MESSAGES_PER_THREAD) {
-      throw new PilotContentError("One selected thread is too large for this pilot. Choose a smaller thread.");
+    const gmailMessages = thread.messages ?? [];
+    if (gmailMessages.length > MAX_REAL_PILOT_MESSAGES_PER_THREAD) {
+      throw new PilotContentError("One selected conversation is too large for this pilot. Choose a smaller conversation.");
     }
-    totalMessages += messages.length;
+    totalMessages += gmailMessages.length;
     if (totalMessages > MAX_REAL_PILOT_TOTAL_MESSAGES) {
-      throw new PilotContentError("The selected threads contain too many messages for this pilot.");
+      throw new PilotContentError("The selected conversations contain too many messages for this pilot.");
     }
 
-    for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
-      const message = messages[messageIndex];
+    for (let messageIndex = 0; messageIndex < gmailMessages.length; messageIndex++) {
+      const message = gmailMessages[messageIndex];
       const body = messageBody(message);
       totalCharacters += body.length;
       if (totalCharacters > MAX_REAL_PILOT_TOTAL_CHARS) {
-        throw new PilotContentError("The selected thread content is too large for this pilot. Choose fewer or shorter threads.");
+        throw new PilotContentError("The selected content is too large for this pilot. Choose fewer or shorter conversations.");
       }
 
-      const messageId = message.id || `${requestedId}-message-${messageIndex + 1}`;
-      inferenceThreads.push({
-        id: `gmail:${requestedId}:${messageId}`,
+      const messageId = message.id || \`\${requestedId}-message-\${messageIndex + 1}\`;
+      messages.push({
+        id: \`gmail:\${requestedId}:\${messageId}\`,
+        source: "gmail",
+        conversationId: requestedId,
         date: messageDate(message),
         from: header(message, "From") || "Unknown",
         to: [header(message, "To"), header(message, "Cc")].filter(Boolean).join("; ") || "Unknown",
@@ -246,11 +252,12 @@ export async function fetchApprovedPilotContent(
     }
   }
 
-  inferenceThreads.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  messages.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 
   return {
-    threads: inferenceThreads,
-    sourceThreadIds: threadIds,
+    source: "gmail",
+    messages,
+    sourceConversationIds: conversationIds,
     messageCount: totalMessages,
     totalCharacters,
   };
