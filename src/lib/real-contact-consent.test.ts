@@ -11,7 +11,7 @@ const connectionBinding = "source-connection-a";
 const selection = {
   source: "gmail" as const,
   personLabel: "Kate",
-  confirmedIdentityKeys: ["Kate@Example.test", "kate@old.example.test"],
+  confirmedIdentityKeys: ["kate@example.test", "kate@old.example.test"],
   selectedConversationIds: ["thread-1", "thread-2"],
 };
 
@@ -47,6 +47,25 @@ describe("real-contact consent", () => {
       confirmedIdentityKeys: ["kate@example.test", "kate@old.example.test"],
       selectedConversationIds: ["thread-1", "thread-2"],
     });
+  });
+
+  it("preserves source-native identity keys without imposing email normalization", () => {
+    const prepared = prepareRealPilotConsent({
+      source: "slack",
+      personLabel: "Casey",
+      confirmedIdentityKeys: ["UAbC123"],
+      selectedConversationIds: ["D456"],
+    }, {
+      sessionSecret: secret,
+      connectionBinding,
+      now: 1_000,
+    });
+
+    expect(readRealPilotConsent(prepared.token, {
+      sessionSecret: secret,
+      connectionBinding,
+      now: 2_000,
+    }).confirmedIdentityKeys).toEqual(["UAbC123"]);
   });
 
   it("rejects tampering", () => {
