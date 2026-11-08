@@ -65,7 +65,7 @@ export function prepareRealPilotConsent(
     selectedConversationIds.length > MAX_REAL_PILOT_CONVERSATIONS
   ) {
     throw new Error(
-      \`Consent requires between 1 and \${MAX_REAL_PILOT_CONVERSATIONS} selected conversations.\`,
+      `Consent requires between 1 and ${MAX_REAL_PILOT_CONVERSATIONS} selected conversations.`,
     );
   }
   if (confirmedIdentityKeys.length === 0) {
