@@ -164,7 +164,7 @@ export function invalidInferenceCitations(
   input: RelationshipInferenceInput,
   inference: RelationshipInference,
 ): string[] {
-  const allowed = new Set(input.threads.map((thread) => thread.id));
+  const allowed = new Set(input.messages.map((message) => message.id));
   return [...new Set(citedEvidenceIds(inference).filter((id) => !allowed.has(id)))];
 }
 
@@ -179,8 +179,8 @@ async function requestRelationshipInference(
   options: InferenceOptions,
 ) {
   if (!options.apiKey) throw new Error("OPENAI_API_KEY is required.");
-  if (input.threads.length === 0) throw new Error("At least one correspondence message is required.");
-  if (new Set(input.threads.map((thread) => thread.id)).size !== input.threads.length) {
+  if (input.messages.length === 0) throw new Error("At least one correspondence message is required.");
+  if (new Set(input.messages.map((message) => message.id)).size !== input.messages.length) {
     throw new Error("Correspondence evidence IDs must be unique.");
   }
 
@@ -191,7 +191,7 @@ async function requestRelationshipInference(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${options.apiKey}`,
+      Authorization: \`Bearer \${options.apiKey}\`,
     },
     body: JSON.stringify({
       model,
@@ -211,7 +211,7 @@ async function requestRelationshipInference(
   });
 
   if (!result.ok) {
-    throw new Error(`OpenAI inference request failed with status ${result.status}.`);
+    throw new Error(\`OpenAI inference request failed with status \${result.status}.\`);
   }
 
   const response = (await result.json()) as OpenAIResponse;
@@ -225,7 +225,7 @@ async function requestRelationshipInference(
 
   const validationIssues = validateRelationshipInference(inference);
   if (validationIssues.length > 0) {
-    throw new Error(`Structured inference failed local validation: ${validationIssues.join(" ")}`);
+    throw new Error(\`Structured inference failed local validation: \${validationIssues.join(" ")}\`);
   }
 
   const invalidCitations = invalidInferenceCitations(input, inference);
@@ -247,6 +247,19 @@ async function requestRelationshipInference(
   };
 }
 
+function benchmarkInput(benchmark: RelationshipBenchmarkCase): RelationshipInferenceInput {
+  return {
+    id: benchmark.id,
+    title: benchmark.title,
+    asOfDate: benchmark.asOfDate,
+    messages: benchmark.threads.map((thread) => ({
+      ...thread,
+      source: "fixture",
+      conversationId: thread.id,
+    })),
+  };
+}
+
 export async function inferRelationshipFromCorrespondence(
   input: RelationshipInferenceInput,
   options: InferenceOptions,
@@ -258,7 +271,7 @@ export async function inferRelationshipWithOpenAI(
   benchmark: RelationshipBenchmarkCase,
   options: InferenceOptions,
 ) {
-  const result = await requestRelationshipInference(benchmark, options);
+  const result = await requestRelationshipInference(benchmarkInput(benchmark), options);
   return {
     ...result,
     report: evaluateRelationshipInference(benchmark, result.inference),
