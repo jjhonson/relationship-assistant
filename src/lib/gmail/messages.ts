@@ -159,12 +159,12 @@ async function fetchDetails(token: string, summaries: Summary[]): Promise<Discov
   return results;
 }
 
-type Window = { after: number; before: number };
+export type CalendarWindow = { after: number; before: number };
 
 /** Calendar windows (UTC epoch seconds), newest first, covering the last DISCOVERY_YEARS years. */
-function calendarWindows(now: Date, perYear: number): Window[] {
+export function calendarWindows(now: Date, perYear: number): CalendarWindow[] {
   const months = 12 / perYear;
-  const windows: Window[] = [];
+  const windows: CalendarWindow[] = [];
   const current = Math.floor(now.getUTCMonth() / months);
   for (let i = 0; i < DISCOVERY_YEARS * perYear; i++) {
     const index = now.getUTCFullYear() * perYear + current - i;
@@ -176,7 +176,7 @@ function calendarWindows(now: Date, perYear: number): Window[] {
   return windows;
 }
 
-const sentQuery = ({ after, before }: Window) => `in:sent -in:drafts after:${after} before:${before}`;
+const sentQuery = ({ after, before }: CalendarWindow) => `in:sent -in:drafts after:${after} before:${before}`;
 
 /**
  * Two-stage, bounded, metadata-only sampling (still biased and incomplete):

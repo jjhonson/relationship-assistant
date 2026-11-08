@@ -4,6 +4,7 @@ import {
   fetchPilotAliasMetadata,
   fetchPilotThreadMetadata,
   PILOT_ALIAS_MESSAGE_LIMIT,
+  PILOT_THREAD_LIST_REQUEST_LIMIT,
   PILOT_THREAD_MESSAGE_LIMIT,
   threadCandidatesFromMetadata,
   type PilotMetadataMessage,
@@ -130,7 +131,7 @@ describe("real-contact Gmail metadata interpretation", () => {
       ),
     ];
 
-    expect(threadCandidatesFromMetadata(messages, ["kate@old.example.test"])).toEqual([
+    expect(threadCandidatesFromMetadata(messages, ["kate@old.example.test"])).toMatchObject([
       {
         id: "t1",
         subject: "Career update",
@@ -140,6 +141,57 @@ describe("real-contact Gmail metadata interpretation", () => {
         participantAddresses: ["kate@old.example.test", "owner@example.test"],
       },
     ]);
+  });
+
+  it("marks calendar responses and automated mail from bounded headers", () => {
+    const calendarMessages = [
+      ["Accepted: synthetic invitation", "t-calendar-accepted"],
+      ["Re: Declined: synthetic invitation", "t-calendar-declined"],
+      ["Canceled: synthetic invitation", "t-calendar-canceled"],
+      ["Tentative: synthetic invitation", "t-calendar-tentative"],
+    ].map(([subject, threadId], index) =>
+      metadataMessage(
+        `m-calendar-${index}`,
+        threadId,
+        `2026-03-0${index + 1}T12:00:00Z`,
+        "Owner <owner@example.test>",
+        "Person A <person-a@example.test>",
+        subject,
+      ),
+    );
+    const automated = metadataMessage(
+      "m-list",
+      "t-list",
+      "2026-03-02T12:00:00Z",
+      "Person A <person-a@example.test>",
+      "Owner <owner@example.test>",
+      "Synthetic list update",
+    );
+    automated.payload?.headers?.push(
+      { name: "List-Id", value: "updates.example.test" },
+      { name: "Precedence", value: "bulk" },
+      { name: "Auto-Submitted", value: "auto-generated" },
+    );
+
+    const candidates = threadCandidatesFromMetadata(
+      [...calendarMessages, automated],
+      ["person-a@example.test"],
+    );
+    expect(candidates.find(({ id }) => id === "t-list")).toMatchObject({
+      isAutomated: true,
+      isCalendarArtifact: false,
+    });
+    for (const id of [
+      "t-calendar-tentative",
+      "t-calendar-canceled",
+      "t-calendar-declined",
+      "t-calendar-accepted",
+    ]) {
+      expect(candidates.find((candidate) => candidate.id === id)).toMatchObject({
+        isAutomated: false,
+        isCalendarArtifact: true,
+      });
+    }
   });
 });
 
@@ -199,7 +251,7 @@ describe("bounded Gmail metadata network calls", () => {
     expect(details.every((url) => !url.searchParams.getAll("metadataHeaders").includes("Subject"))).toBe(true);
   });
 
-  it("uses confirmed aliases for one bounded metadata-only thread search", async () => {
+  it("uses confirmed aliases for bounded metadata-only thread sampling", async () => {
     const urls: URL[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
@@ -223,18 +275,124 @@ describe("bounded Gmail metadata network calls", () => {
       "kate@new.example.test",
     ]);
 
-    const list = urls.find((url) => url.pathname.endsWith("/messages"))!;
-    expect(list.searchParams.get("maxResults")).toBe(String(PILOT_THREAD_MESSAGE_LIMIT));
-    const query = list.searchParams.get("q") ?? "";
-    expect(query).toContain("from:kate@old.example.test");
-    expect(query).toContain("to:kate@new.example.test");
-    expect(query).toContain("-in:drafts");
+    const lists = urls.filter((url) => url.pathname.endsWith("/messages"));
+    expect(lists).toHaveLength(PILOT_THREAD_LIST_REQUEST_LIMIT);
+    expect(lists.every((list) => Number(list.searchParams.get("maxResults")) <= 3)).toBe(true);
+    expect(lists.every((list) => {
+      const query = list.searchParams.get("q") ?? "";
+      return query.includes("from:kate@old.example.test") &&
+        query.includes("to:kate@new.example.test") &&
+        query.includes("-in:drafts") &&
+        query.includes("after:") &&
+        query.includes("before:");
+    })).toBe(true);
 
     const detail = urls.find((url) => /\/messages\/[^/]+$/.test(url.pathname))!;
     expect(detail.searchParams.get("format")).toBe("metadata");
     expect(detail.searchParams.getAll("metadataHeaders")).toContain("Subject");
+    expect(detail.searchParams.getAll("metadataHeaders")).toContain("Auto-Submitted");
     expect(detail.searchParams.get("fields")).not.toContain("snippet");
     expect(detail.searchParams.get("fields")).not.toContain("body");
+  });
+
+  it("samples bounded monthly and quarterly windows for confirmed aliases using metadata only", async () => {
+    const urls: URL[] = [];
+    let activeDetails = 0;
+    let maximumDetails = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      urls.push(url);
+      if (url.pathname.endsWith("/messages")) {
+        const query = url.searchParams.get("q") ?? "";
+        const after = query.match(/after:(\d+)/)?.[1];
+        const requestLimit = url.searchParams.get("maxResults");
+        return new Response(JSON.stringify({
+          messages: Array.from({ length: 5 }, (_, index) => ({
+            id: `m-${requestLimit}-${after}-${index}`,
+            threadId: `t-${after}-${index}`,
+          })),
+          nextPageToken: "more-in-window",
+        }), { status: 200 });
+      }
+
+      activeDetails++;
+      maximumDetails = Math.max(maximumDetails, activeDetails);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      activeDetails--;
+      return new Response(JSON.stringify({
+        id: url.pathname.split("/").pop(),
+        internalDate: String(Date.parse("2026-01-01T12:00:00Z")),
+        payload: {
+          headers: [
+            { name: "From", value: "Person A <person-a@example.test>" },
+            { name: "To", value: "Owner <owner@example.test>" },
+          ],
+        },
+      }), { status: 200 });
+    }));
+
+    const result = await fetchPilotThreadMetadata(
+      "fake-token",
+      ["person-a@example.test", "person-a@archive.example.test"],
+      new Date("2026-06-15T00:00:00Z"),
+    );
+
+    const listUrls = urls.filter((url) => url.pathname.endsWith("/messages"));
+    const detailUrls = urls.filter((url) => /\/messages\/[^/]+$/.test(url.pathname));
+    expect(listUrls).toHaveLength(PILOT_THREAD_LIST_REQUEST_LIMIT);
+    expect(detailUrls).toHaveLength(PILOT_THREAD_MESSAGE_LIMIT);
+    expect(result.messages).toHaveLength(PILOT_THREAD_MESSAGE_LIMIT);
+    expect(result.stats).toEqual({
+      listRequests: PILOT_THREAD_LIST_REQUEST_LIMIT,
+      listRecordsReturned: 120,
+      detailRequests: PILOT_THREAD_MESSAGE_LIMIT,
+      windowsQueried: PILOT_THREAD_LIST_REQUEST_LIMIT,
+      monthWindowsQueried: 30,
+      quarterWindowsQueried: 30,
+      recordsReturned: PILOT_THREAD_MESSAGE_LIMIT,
+    });
+    expect(result.truncated).toBe(true);
+    expect(maximumDetails).toBeLessThanOrEqual(5);
+
+    const queries = listUrls.map((url) => url.searchParams.get("q") ?? "");
+    expect(queries.every((query) =>
+      query.includes("from:person-a@example.test") &&
+      query.includes("to:person-a@example.test") &&
+      query.includes("cc:person-a@example.test") &&
+      query.includes("from:person-a@archive.example.test") &&
+      query.includes("to:person-a@archive.example.test") &&
+      query.includes("cc:person-a@archive.example.test") &&
+      query.includes("-in:drafts"),
+    )).toBe(true);
+    const sampleYears = queries.flatMap((query) => {
+      const after = Number(query.match(/after:(\d+)/)?.[1]);
+      return Number.isFinite(after) ? [new Date(after * 1000).getUTCFullYear()] : [];
+    });
+    expect(Math.max(...sampleYears) - Math.min(...sampleYears)).toBeGreaterThanOrEqual(9);
+    expect(Math.max(...sampleYears) - Math.min(...sampleYears)).toBeLessThanOrEqual(10);
+    const detailIds = new Set(detailUrls.map((url) => url.pathname.split("/").pop()));
+    const monthlyAfterValues = listUrls
+      .filter((url) => url.searchParams.get("maxResults") === "1")
+      .map((url) => url.searchParams.get("q")?.match(/after:(\d+)/)?.[1]);
+    expect(monthlyAfterValues).toHaveLength(30);
+    expect(monthlyAfterValues.every((after) => detailIds.has(`m-1-${after}-0`))).toBe(true);
+    const quarterlyAfterValues = listUrls
+      .filter((url) => url.searchParams.get("maxResults") === "3")
+      .map((url) => url.searchParams.get("q")?.match(/after:(\d+)/)?.[1]);
+    expect(quarterlyAfterValues).toHaveLength(30);
+    expect(quarterlyAfterValues.every((after) => detailIds.has(`m-3-${after}-0`))).toBe(true);
+
+    expect(detailUrls.every((url) => url.searchParams.get("format") === "metadata")).toBe(true);
+    expect(detailUrls.every((url) =>
+      url.searchParams.get("fields") === "id,threadId,internalDate,labelIds,payload(headers)",
+    )).toBe(true);
+    expect(detailUrls.every((url) =>
+      ["List-Id", "Precedence", "Auto-Submitted", "X-Auto-Response-Suppress"].every((name) =>
+        url.searchParams.getAll("metadataHeaders").includes(name),
+      ),
+    )).toBe(true);
+    expect(JSON.stringify(result.stats)).not.toContain("example.test");
+    expect(JSON.stringify(result.stats)).not.toContain("subject");
   });
 
   it("rejects query-shaped person labels and malformed aliases before calling Gmail", async () => {

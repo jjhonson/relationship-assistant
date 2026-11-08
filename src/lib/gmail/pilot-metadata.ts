@@ -4,7 +4,7 @@ import {
   type AliasCandidate,
   type ThreadCandidate,
 } from "../real-contact-pilot";
-import { isLookupAddress } from "./messages";
+import { calendarWindows, isLookupAddress, type CalendarWindow } from "./messages";
 import { AuthError } from "./oauth";
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -12,6 +12,27 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const PILOT_ALIAS_MESSAGE_LIMIT = 24;
 export const PILOT_THREAD_MESSAGE_LIMIT = 60;
 export const MAX_PILOT_ALIASES = 5;
+export const PILOT_THREAD_LIST_REQUEST_LIMIT = 60;
+
+const MONTH_WINDOWS_PER_SAMPLE = 30;
+const QUARTER_WINDOWS_PER_SAMPLE = 30;
+const QUARTER_RESULTS_PER_WINDOW = 3;
+const PILOT_THREAD_LIST_RECORD_LIMIT =
+  MONTH_WINDOWS_PER_SAMPLE + QUARTER_WINDOWS_PER_SAMPLE * QUARTER_RESULTS_PER_WINDOW;
+const DETAIL_CONCURRENCY = 5;
+const MAX_REQUEST_ATTEMPTS = 3;
+const THREAD_METADATA_HEADERS = [
+  "From",
+  "To",
+  "Cc",
+  "Date",
+  "Subject",
+  "List-Id",
+  "List-Unsubscribe",
+  "Precedence",
+  "Auto-Submitted",
+  "X-Auto-Response-Suppress",
+];
 
 const PERSON_LABEL = /^[\p{L}\p{N} .,'’()_-]+$/u;
 const BARE_ADDRESS = /^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}$/i;
@@ -27,12 +48,23 @@ export type PilotMetadataMessage = {
 export type BoundedMetadataResult = {
   messages: PilotMetadataMessage[];
   truncated: boolean;
+  stats?: PilotMetadataSamplingStats;
+};
+
+export type PilotMetadataSamplingStats = {
+  listRequests: number;
+  listRecordsReturned: number;
+  detailRequests: number;
+  windowsQueried: number;
+  monthWindowsQueried: number;
+  quarterWindowsQueried: number;
+  recordsReturned: number;
 };
 
 export class PilotMetadataError extends Error {}
 
 async function get<T>(path: string, token: string): Promise<T> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt++) {
     const res = await fetch(`${API}${path}`, {
       headers: { Authorization: ["Bearer", token].join(" ") },
       cache: "no-store",
@@ -51,7 +83,9 @@ async function get<T>(path: string, token: string): Promise<T> {
     }
 
     const retryable = rateLimited || [500, 502, 503, 504].includes(res.status);
-    if (!retryable || attempt === 2) throw new PilotMetadataError(`Gmail API returned ${res.status}`);
+    if (!retryable || attempt === MAX_REQUEST_ATTEMPTS - 1) {
+      throw new PilotMetadataError(`Gmail API returned ${res.status}`);
+    }
 
     const retryAfter = Number(res.headers.get("Retry-After"));
     const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -66,6 +100,11 @@ function header(message: PilotMetadataMessage, name: string): string {
   return message.payload?.headers?.find(
     (item) => item.name.toLowerCase() === name.toLowerCase(),
   )?.value ?? "";
+}
+
+function isCalendarArtifactSubject(subject: string): boolean {
+  const normalized = subject.replace(/^(?:(?:re|fwd?)\s*:\s*)+/i, "");
+  return /^(?:(?:accepted|declined|canceled|cancelled|tentative)\s*:|(?:updated\s+)?invitation\s*:|event\s+(?:updated|cancelled|canceled)\s*:)/i.test(normalized);
 }
 
 function splitMailboxes(value: string): string[] {
@@ -161,9 +200,9 @@ async function fetchDetails(
   headers: string[],
 ): Promise<PilotMetadataMessage[]> {
   const result: PilotMetadataMessage[] = [];
-  for (let start = 0; start < summaries.length; start += 5) {
+  for (let start = 0; start < summaries.length; start += DETAIL_CONCURRENCY) {
     const batch = await Promise.all(
-      summaries.slice(start, start + 5).map(({ id, threadId }) => {
+      summaries.slice(start, start + DETAIL_CONCURRENCY).map(({ id, threadId }) => {
         const params = new URLSearchParams({
           format: "metadata",
           fields: "id,threadId,internalDate,labelIds,payload(headers)",
@@ -251,6 +290,7 @@ export function aliasCandidatesFromMetadata(
 export async function fetchPilotThreadMetadata(
   token: string,
   aliases: string[],
+  now = new Date(),
 ): Promise<BoundedMetadataResult> {
   const normalized = [...new Set(aliases.map(normalizeEmailAddress).filter(Boolean))];
   if (normalized.length === 0 || normalized.length > MAX_PILOT_ALIASES) {
@@ -260,17 +300,85 @@ export async function fetchPilotThreadMetadata(
     throw new PilotMetadataError("One of the confirmed email addresses is invalid.");
   }
 
-  const clauses = normalized.flatMap((address) => [
-    `from:${address}`,
-    `to:${address}`,
-    `cc:${address}`,
-  ]);
-  return boundedMetadataSearch(
-    token,
-    `{${clauses.join(" ")}} -in:drafts`,
-    PILOT_THREAD_MESSAGE_LIMIT,
-    ["From", "To", "Cc", "Date", "Subject"],
-  );
+  const clauses = normalized.flatMap((address) => [`from:${address}`, `to:${address}`, `cc:${address}`]);
+  const monthlyWindows = sampleWindows(calendarWindows(now, 12), MONTH_WINDOWS_PER_SAMPLE);
+  const quarterWindows = sampleWindows(calendarWindows(now, 4), QUARTER_WINDOWS_PER_SAMPLE);
+  const monthlySummaries: { id: string; threadId?: string }[] = [];
+  const quarterlySummaries: { id: string; threadId?: string }[][] = [];
+  let listRequests = 0;
+  let listRecordsReturned = 0;
+  let truncated = false;
+  const queryWindow = async (
+    window: CalendarWindow,
+    limit: number,
+    destination: { id: string; threadId?: string }[],
+  ) => {
+    if (
+      listRequests >= PILOT_THREAD_LIST_REQUEST_LIMIT ||
+      listRecordsReturned >= PILOT_THREAD_LIST_RECORD_LIMIT
+    ) return;
+    const requestLimit = Math.min(limit, PILOT_THREAD_LIST_RECORD_LIMIT - listRecordsReturned);
+    const params = new URLSearchParams({
+      maxResults: String(requestLimit),
+      q: `{${clauses.join(" ")}} -in:drafts after:${window.after} before:${window.before}`,
+    });
+    const page = await get<{
+      messages?: { id: string; threadId?: string }[];
+      nextPageToken?: string;
+    }>(`/messages?${params}`, token);
+    listRequests++;
+    const found = (page.messages ?? []).slice(0, requestLimit);
+    listRecordsReturned += found.length;
+    if (page.nextPageToken || found.length === requestLimit) truncated = true;
+    destination.push(...found);
+  };
+
+  for (const window of monthlyWindows) {
+    await queryWindow(window, 1, monthlySummaries);
+  }
+  for (const window of quarterWindows) {
+    const summaries: { id: string; threadId?: string }[] = [];
+    await queryWindow(window, QUARTER_RESULTS_PER_WINDOW, summaries);
+    quarterlySummaries.push(summaries);
+  }
+
+  const selected: { id: string; threadId?: string }[] = [];
+  const selectedIds = new Set<string>();
+  const addSummary = (summary: { id: string; threadId?: string }) => {
+    if (selected.length >= PILOT_THREAD_MESSAGE_LIMIT || selectedIds.has(summary.id)) return;
+    selectedIds.add(summary.id);
+    selected.push(summary);
+  };
+  monthlySummaries.forEach(addSummary);
+  for (let rank = 0; selected.length < PILOT_THREAD_MESSAGE_LIMIT; rank++) {
+    let added = false;
+    for (const windowSummaries of quarterlySummaries) {
+      const summary = windowSummaries[rank];
+      if (summary && !selectedIds.has(summary.id)) {
+        addSummary(summary);
+        added = true;
+      }
+    }
+    if (!added) break;
+  }
+
+  const messages = await fetchDetails(token, selected, THREAD_METADATA_HEADERS);
+  const stats: PilotMetadataSamplingStats = {
+    listRequests,
+    listRecordsReturned,
+    detailRequests: messages.length,
+    windowsQueried: listRequests,
+    monthWindowsQueried: monthlyWindows.length,
+    quarterWindowsQueried: quarterWindows.length,
+    recordsReturned: messages.length,
+  };
+  return { messages, truncated, stats };
+}
+
+function sampleWindows<T>(windows: T[], limit: number): T[] {
+  if (windows.length <= limit) return windows;
+  const step = (windows.length - 1) / (limit - 1);
+  return Array.from({ length: limit }, (_, index) => windows[Math.round(index * step)]);
 }
 
 function messageTimestamp(message: PilotMetadataMessage): number | null {
@@ -295,6 +403,9 @@ export function threadCandidatesFromMetadata(
       last: number;
       messageCount: number;
       participantAddresses: Set<string>;
+      isAutomated: boolean;
+      isCalendarArtifact: boolean;
+      isDraft: boolean;
     }
   >();
 
@@ -306,17 +417,34 @@ export function threadCandidatesFromMetadata(
     if (when === null) continue;
     const id = message.threadId || message.id;
     const subject = header(message, "Subject").trim() || "(no subject)";
+    const headerNames = new Set((message.payload?.headers ?? []).map((item) => item.name.toLowerCase()));
+    const precedence = header(message, "Precedence").toLowerCase();
+    const autoSubmitted = header(message, "Auto-Submitted").toLowerCase();
+    const autoResponseSuppress = header(message, "X-Auto-Response-Suppress").trim();
+    const calendarArtifact = isCalendarArtifactSubject(subject);
+    const automated =
+      headerNames.has("list-id") ||
+      headerNames.has("list-unsubscribe") ||
+      /\b(?:bulk|list|junk)\b/.test(precedence) ||
+      (autoSubmitted !== "" && autoSubmitted !== "no") ||
+      autoResponseSuppress !== "";
     const current = threads.get(id) ?? {
       subject,
       first: when,
       last: when,
       messageCount: 0,
       participantAddresses: new Set<string>(),
+      isAutomated: false,
+      isCalendarArtifact: false,
+      isDraft: false,
     };
 
     current.first = Math.min(current.first, when);
     current.last = Math.max(current.last, when);
     current.messageCount++;
+    current.isAutomated ||= automated;
+    current.isCalendarArtifact ||= calendarArtifact;
+    current.isDraft ||= message.labelIds?.includes("DRAFT") ?? false;
     if (current.subject === "(no subject)" && subject !== "(no subject)") current.subject = subject;
     for (const mailbox of mailboxes) current.participantAddresses.add(mailbox.address);
     threads.set(id, current);
@@ -330,6 +458,9 @@ export function threadCandidatesFromMetadata(
       lastDate: new Date(value.last).toISOString().slice(0, 10),
       messageCount: value.messageCount,
       participantAddresses: [...value.participantAddresses].sort(),
+      isAutomated: value.isAutomated,
+      isCalendarArtifact: value.isCalendarArtifact,
+      isDraft: value.isDraft,
     }))
     .sort(
       (a, b) =>
