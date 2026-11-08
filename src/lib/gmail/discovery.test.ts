@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchAddressLookup, fetchDiscoverySample, fetchHistoricalMessages, fetchOwnerAddress, type DiscoveryMessage } from "./messages";
+import { calendarWindows, fetchAddressLookup, fetchDiscoverySample, fetchHistoricalMessages, fetchOwnerAddress, type DiscoveryMessage } from "./messages";
 import { analyzeDiscovery, diagnoseAddress, rankCandidates } from "./discovery";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -169,6 +169,17 @@ describe("relationship discovery ranking", () => {
     expect(diagnostics.excludedOneWayHighVolume).toBe(1);
     expect(diagnostics.sentExamined).toBe(1);
     expect(diagnostics.receivedExamined).toBe(30);
+  });
+});
+
+describe("calendar metadata windows", () => {
+  it("uses whole Unix seconds for the current clipped window", () => {
+    const now = new Date("2026-11-08T20:55:34.567Z");
+    const [current] = calendarWindows(now, 12);
+
+    expect(Number.isInteger(current.after)).toBe(true);
+    expect(Number.isInteger(current.before)).toBe(true);
+    expect(current.before).toBe(Math.floor((now.getTime() + 1000) / 1000));
   });
 });
 
