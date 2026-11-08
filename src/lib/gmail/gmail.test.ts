@@ -47,6 +47,7 @@ describe("crypto/session", () => {
     const tampered = Buffer.from(s, "base64url");
     tampered[12] ^= 1;
     expect(unseal(tampered.toString("base64url"), secret)).toBeNull();
+    expect(unseal(`${s}x`, secret)).toBeNull();
   });
   it("reads sealed credentials", () => {
     const c = { accessToken: "a", refreshToken: "r", expiresAt: 1 };
