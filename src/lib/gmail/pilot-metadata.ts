@@ -324,7 +324,7 @@ export async function fetchPilotThreadMetadata(
     listRequests++;
     const found = (page.messages ?? []).slice(0, requestLimit);
     listRecordsReturned += found.length;
-    if (page.nextPageToken || found.length === requestLimit) truncated = true;
+    if (page.nextPageToken) truncated = true;
     destination.push(...found);
   };
 

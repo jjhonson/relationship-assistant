@@ -339,10 +339,11 @@ describe("bounded Gmail metadata network calls", () => {
       );
     }));
 
-    await fetchPilotThreadMetadata("fake-token", [
+    const result = await fetchPilotThreadMetadata("fake-token", [
       "kate@old.example.test",
       "kate@new.example.test",
     ]);
+    expect(result.truncated).toBe(false);
 
     const lists = urls.filter((url) => url.pathname.endsWith("/messages"));
     expect(lists).toHaveLength(PILOT_THREAD_LIST_REQUEST_LIMIT);
