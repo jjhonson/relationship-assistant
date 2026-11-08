@@ -1,6 +1,13 @@
-import type { RelationshipBenchmarkCase } from "./inference-benchmark";
+import type { InferenceThread } from "./inference-benchmark";
 
-export const RELATIONSHIP_INFERENCE_SYSTEM_PROMPT = `You infer relationship context from a small, bounded set of fictional correspondence.
+export type RelationshipInferenceInput = {
+  id: string;
+  title: string;
+  asOfDate: string;
+  threads: InferenceThread[];
+};
+
+export const RELATIONSHIP_INFERENCE_SYSTEM_PROMPT = `You infer relationship context from a small, bounded set of correspondence.
 
 Rules:
 - Use only the supplied messages and as-of date.
@@ -70,8 +77,8 @@ Required JSON shape:
   "confidence": "Low | Moderate | High"
 }`;
 
-export function buildRelationshipInferenceUserPrompt(benchmark: RelationshipBenchmarkCase) {
-  const threadText = benchmark.threads
+export function buildRelationshipInferenceUserPrompt(input: RelationshipInferenceInput) {
+  const threadText = input.threads
     .map(
       (thread) =>
         `THREAD ${thread.id}
@@ -83,8 +90,8 @@ Body: ${thread.body}`,
     )
     .join("\n\n");
 
-  return `Case: ${benchmark.title}
-As-of date: ${benchmark.asOfDate}
+  return `Case: ${input.title}
+As-of date: ${input.asOfDate}
 
 Infer the relationship using only the correspondence below. The as-of date matters when deciding whether a dated commitment is open, overdue, clearly past, or unclear.
 
