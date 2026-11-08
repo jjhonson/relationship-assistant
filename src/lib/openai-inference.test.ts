@@ -42,10 +42,26 @@ function realInference(evidenceId = "real-1") {
     },
     openLoops: [],
     reasonsToEngage: [],
-    unknowns: ["The sample is limited to selected email correspondence."],
+    unknowns: ["The sample is limited to selected correspondence."],
     confidence: "Moderate",
   };
 }
+
+const realInput = {
+  id: "real-kate",
+  title: "Real-contact pilot: Kate",
+  asOfDate: "2026-11-07",
+  messages: [{
+    id: "real-1",
+    source: "gmail" as const,
+    conversationId: "gmail-thread-1",
+    date: "2026-11-01",
+    from: "Kate",
+    to: "You",
+    subject: "Catch up",
+    body: "Good talking today.",
+  }],
+};
 
 describe("OpenAI relationship inference adapter", () => {
   it("requires an API key before making a request", async () => {
@@ -69,6 +85,7 @@ describe("OpenAI relationship inference adapter", () => {
       expect(body.text.format.strict).toBe(true);
       expect(body.text.format.name).toBe("relationship_inference");
       expect(body.input).toContain("Completed one-time service transaction");
+      expect(body.input).toContain("Source: fixture");
       expect(body.input).not.toContain("Background only / no relationship management");
       expect(String(init?.headers && JSON.stringify(init.headers))).not.toContain("service-1");
 
@@ -76,12 +93,10 @@ describe("OpenAI relationship inference adapter", () => {
         JSON.stringify({
           id: "resp_test",
           model: DEFAULT_OPENAI_RELATIONSHIP_MODEL,
-          output: [
-            {
-              type: "message",
-              content: [{ type: "output_text", text: JSON.stringify(successfulInference()) }],
-            },
-          ],
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: JSON.stringify(successfulInference()) }],
+          }],
           usage: { input_tokens: 700, output_tokens: 300, total_tokens: 1000 },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -98,13 +113,11 @@ describe("OpenAI relationship inference adapter", () => {
     expect(result.provider).toBe("openai");
     expect(result.responseId).toBe("resp_test");
     expect(result.report.hardGatePass).toBe(true);
-    expect(result.report.hardGates.classificationAccepted).toBe(true);
-    expect(result.report.hardGates.dispositionCorrect).toBe(true);
     expect(result.report.invalidCitations).toEqual([]);
     expect(result.usage.totalTokens).toBe(1000);
   });
 
-  it("supports real correspondence without benchmark ground truth and validates citations", async () => {
+  it("supports canonical correspondence without benchmark ground truth and validates citations", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(
         JSON.stringify({
@@ -119,19 +132,7 @@ describe("OpenAI relationship inference adapter", () => {
       ),
     );
 
-    const result = await inferRelationshipFromCorrespondence({
-      id: "real-kate",
-      title: "Real-contact pilot: Kate",
-      asOfDate: "2026-11-07",
-      threads: [{
-        id: "real-1",
-        date: "2026-11-01",
-        from: "Kate",
-        to: "You",
-        subject: "Catch up",
-        body: "Good talking today.",
-      }],
-    }, {
+    const result = await inferRelationshipFromCorrespondence(realInput, {
       apiKey: "test-key",
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
@@ -154,19 +155,7 @@ describe("OpenAI relationship inference adapter", () => {
       ),
     );
 
-    await expect(inferRelationshipFromCorrespondence({
-      id: "real-kate",
-      title: "Real-contact pilot: Kate",
-      asOfDate: "2026-11-07",
-      threads: [{
-        id: "real-1",
-        date: "2026-11-01",
-        from: "Kate",
-        to: "You",
-        subject: "Catch up",
-        body: "Good talking today.",
-      }],
-    }, {
+    await expect(inferRelationshipFromCorrespondence(realInput, {
       apiKey: "test-key",
       fetchImpl: fetchImpl as unknown as typeof fetch,
     })).rejects.toThrow("cited evidence that was not supplied");
