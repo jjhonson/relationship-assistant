@@ -1,4 +1,11 @@
-export const MAX_REAL_PILOT_THREADS = 3;
+import type {
+  CorrespondenceSelection,
+  CorrespondenceSource,
+} from "./correspondence";
+
+export const MAX_REAL_PILOT_CONVERSATIONS = 3;
+/** Gmail UI compatibility while Gmail remains the only ingestion adapter. */
+export const MAX_REAL_PILOT_THREADS = MAX_REAL_PILOT_CONVERSATIONS;
 
 export type AliasCandidate = {
   address: string;
@@ -25,10 +32,11 @@ export type PilotThreadSelection = ConfirmedIdentity & {
 };
 
 export type PilotAnalysisDisclosure = {
+  source: CorrespondenceSource;
   personLabel: string;
-  confirmedAliases: string[];
-  selectedThreadIds: string[];
-  fieldsToRead: readonly ["sender/recipient", "date", "subject", "plain-text message content"];
+  confirmedIdentityKeys: string[];
+  selectedConversationIds: string[];
+  fieldsToRead: readonly ["sender/recipient", "date", "subject/context", "message content"];
   attachmentsIncluded: false;
   provider: "OpenAI";
   providerStorageRequested: false;
@@ -93,10 +101,10 @@ export function selectPilotThreads(
   const selectedIds = [...new Set(selectedThreadIds)];
 
   if (selectedIds.length === 0) {
-    throw new Error("Select at least one thread.");
+    throw new Error("Select at least one conversation.");
   }
-  if (selectedIds.length > MAX_REAL_PILOT_THREADS) {
-    throw new Error(`Select no more than ${MAX_REAL_PILOT_THREADS} threads.`);
+  if (selectedIds.length > MAX_REAL_PILOT_CONVERSATIONS) {
+    throw new Error(\`Select no more than \${MAX_REAL_PILOT_CONVERSATIONS} conversations.\`);
   }
 
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
@@ -104,14 +112,14 @@ export function selectPilotThreads(
 
   for (const id of selectedIds) {
     const candidate = byId.get(id);
-    if (!candidate) throw new Error("A selected thread was not present in the reviewed candidate list.");
+    if (!candidate) throw new Error("A selected conversation was not present in the reviewed candidate list.");
 
     const belongsToConfirmedIdentity = candidate.participantAddresses
       .map(normalizeEmailAddress)
       .some((address) => aliases.has(address));
 
     if (!belongsToConfirmedIdentity) {
-      throw new Error("A selected thread does not include a confirmed email identity for this person.");
+      throw new Error("A selected conversation does not include a confirmed identity for this person.");
     }
   }
 
@@ -121,12 +129,26 @@ export function selectPilotThreads(
   };
 }
 
-export function buildPilotAnalysisDisclosure(selection: PilotThreadSelection): PilotAnalysisDisclosure {
+export function gmailSelectionToCorrespondence(
+  selection: PilotThreadSelection,
+): CorrespondenceSelection {
   return {
+    source: "gmail",
     personLabel: selection.personLabel,
-    confirmedAliases: selection.confirmedAliases,
-    selectedThreadIds: selection.selectedThreadIds,
-    fieldsToRead: ["sender/recipient", "date", "subject", "plain-text message content"],
+    confirmedIdentityKeys: selection.confirmedAliases,
+    selectedConversationIds: selection.selectedThreadIds,
+  };
+}
+
+export function buildPilotAnalysisDisclosure(
+  selection: CorrespondenceSelection,
+): PilotAnalysisDisclosure {
+  return {
+    source: selection.source,
+    personLabel: selection.personLabel,
+    confirmedIdentityKeys: selection.confirmedIdentityKeys,
+    selectedConversationIds: selection.selectedConversationIds,
+    fieldsToRead: ["sender/recipient", "date", "subject/context", "message content"],
     attachmentsIncluded: false,
     provider: "OpenAI",
     providerStorageRequested: false,
