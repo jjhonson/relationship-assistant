@@ -171,7 +171,10 @@ export function calendarWindows(now: Date, perYear: number): CalendarWindow[] {
     const year = Math.floor(index / perYear);
     const start = Date.UTC(year, (index % perYear) * months, 1);
     const end = Date.UTC(year, (index % perYear) * months + months, 1);
-    windows.push({ after: start / 1000, before: Math.min(end, now.getTime() + 1000) / 1000 });
+    windows.push({
+      after: start / 1000,
+      before: Math.floor(Math.min(end, now.getTime() + 1000) / 1000),
+    });
   }
   return windows;
 }
