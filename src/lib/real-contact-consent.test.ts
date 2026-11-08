@@ -6,27 +6,29 @@ import {
 } from "./real-contact-consent";
 
 const secret = "x".repeat(32);
-const accessToken = "gmail-access-token-a";
+const connectionBinding = "source-connection-a";
 
 const selection = {
+  source: "gmail" as const,
   personLabel: "Kate",
-  confirmedAliases: ["Kate@Example.test", "kate@old.example.test"],
-  selectedThreadIds: ["thread-1", "thread-2"],
+  confirmedIdentityKeys: ["Kate@Example.test", "kate@old.example.test"],
+  selectedConversationIds: ["thread-1", "thread-2"],
 };
 
 describe("real-contact consent", () => {
-  it("binds approval to person, aliases, threads, expiry, and Gmail connection", () => {
+  it("binds approval to source, identities, conversations, expiry, and source connection", () => {
     const prepared = prepareRealPilotConsent(selection, {
       sessionSecret: secret,
-      accessToken,
+      connectionBinding,
       now: 1_000,
     });
 
     expect(prepared.disclosure).toEqual({
+      source: "gmail",
       personLabel: "Kate",
-      confirmedAliases: ["kate@example.test", "kate@old.example.test"],
-      selectedThreadIds: ["thread-1", "thread-2"],
-      fieldsToRead: ["sender/recipient", "date", "subject", "plain-text message content"],
+      confirmedIdentityKeys: ["kate@example.test", "kate@old.example.test"],
+      selectedConversationIds: ["thread-1", "thread-2"],
+      fieldsToRead: ["sender/recipient", "date", "subject/context", "message content"],
       attachmentsIncluded: false,
       provider: "OpenAI",
       providerStorageRequested: false,
@@ -36,27 +38,28 @@ describe("real-contact consent", () => {
     expect(
       readRealPilotConsent(prepared.token, {
         sessionSecret: secret,
-        accessToken,
+        connectionBinding,
         now: 2_000,
       }),
     ).toEqual({
+      source: "gmail",
       personLabel: "Kate",
-      confirmedAliases: ["kate@example.test", "kate@old.example.test"],
-      selectedThreadIds: ["thread-1", "thread-2"],
+      confirmedIdentityKeys: ["kate@example.test", "kate@old.example.test"],
+      selectedConversationIds: ["thread-1", "thread-2"],
     });
   });
 
   it("rejects tampering", () => {
     const prepared = prepareRealPilotConsent(selection, {
       sessionSecret: secret,
-      accessToken,
+      connectionBinding,
       now: 1_000,
     });
 
     expect(() =>
       readRealPilotConsent(prepared.token + "x", {
         sessionSecret: secret,
-        accessToken,
+        connectionBinding,
         now: 2_000,
       }),
     ).toThrow("invalid or was altered");
@@ -65,45 +68,45 @@ describe("real-contact consent", () => {
   it("rejects expiry", () => {
     const prepared = prepareRealPilotConsent(selection, {
       sessionSecret: secret,
-      accessToken,
+      connectionBinding,
       now: 1_000,
     });
 
     expect(() =>
       readRealPilotConsent(prepared.token, {
         sessionSecret: secret,
-        accessToken,
+        connectionBinding,
         now: 1_000 + REAL_PILOT_CONSENT_TTL_MS,
       }),
     ).toThrow("expired");
   });
 
-  it("rejects a different Gmail connection", () => {
+  it("rejects a different source connection", () => {
     const prepared = prepareRealPilotConsent(selection, {
       sessionSecret: secret,
-      accessToken,
+      connectionBinding,
       now: 1_000,
     });
 
     expect(() =>
       readRealPilotConsent(prepared.token, {
         sessionSecret: secret,
-        accessToken: "gmail-access-token-b",
+        connectionBinding: "source-connection-b",
         now: 2_000,
       }),
-    ).toThrow("different Gmail connection");
+    ).toThrow("different source connection");
   });
 
-  it("rejects more than three selected threads", () => {
+  it("rejects more than three selected conversations", () => {
     expect(() =>
       prepareRealPilotConsent(
         {
           ...selection,
-          selectedThreadIds: ["a", "b", "c", "d"],
+          selectedConversationIds: ["a", "b", "c", "d"],
         },
         {
           sessionSecret: secret,
-          accessToken,
+          connectionBinding,
           now: 1_000,
         },
       ),
