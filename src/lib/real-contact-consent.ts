@@ -57,7 +57,7 @@ export function prepareRealPilotConsent(
   const now = options.now ?? Date.now();
   const selectedConversationIds = [...new Set(selection.selectedConversationIds)];
   const confirmedIdentityKeys = [
-    ...new Set(selection.confirmedIdentityKeys.map((item) => item.trim().toLowerCase())),
+    ...new Set(selection.confirmedIdentityKeys.map((item) => item.trim()).filter(Boolean)),
   ];
 
   if (
@@ -142,7 +142,7 @@ export function readRealPilotConsent(
     source: value.source,
     personLabel: value.personLabel,
     confirmedIdentityKeys: [
-      ...new Set(value.confirmedIdentityKeys.map((item) => item.trim().toLowerCase())),
+      ...new Set(value.confirmedIdentityKeys.map((item) => item.trim()).filter(Boolean)),
     ],
     selectedConversationIds: [...new Set(value.selectedConversationIds)],
   };
