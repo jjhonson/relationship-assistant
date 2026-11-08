@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { relationshipBenchmarkCases } from "./inference-benchmark";
 import {
   DEFAULT_OPENAI_RELATIONSHIP_MODEL,
+  inferRelationshipFromCorrespondence,
   inferRelationshipWithOpenAI,
 } from "./openai-inference";
 
@@ -27,7 +28,42 @@ function successfulInference() {
   };
 }
 
-describe("OpenAI fictional relationship inference adapter", () => {
+function realInference(evidenceId = "real-1") {
+  return {
+    classification: { value: "Professional contact", evidenceIds: [evidenceId] },
+    disposition: { value: "Relationship worth managing", evidenceIds: [evidenceId] },
+    currentState: { value: "Active", evidenceIds: [evidenceId] },
+    tags: [{ label: "career", evidenceIds: [evidenceId] }],
+    history: {
+      earliestObservedMeaningfulInteraction: "2026-11-01",
+      latestObservedMeaningfulInteraction: "2026-11-01",
+      pattern: "A recent professional catch-up.",
+      evidenceIds: [evidenceId],
+    },
+    openLoops: [],
+    reasonsToEngage: [],
+    unknowns: ["The sample is limited to selected correspondence."],
+    confidence: "Moderate",
+  };
+}
+
+const realInput = {
+  id: "real-kate",
+  title: "Real-contact pilot: Kate",
+  asOfDate: "2026-11-07",
+  messages: [{
+    id: "real-1",
+    source: "gmail" as const,
+    conversationId: "gmail-thread-1",
+    date: "2026-11-01",
+    from: "Kate",
+    to: "You",
+    subject: "Catch up",
+    body: "Good talking today.",
+  }],
+};
+
+describe("OpenAI relationship inference adapter", () => {
   it("requires an API key before making a request", async () => {
     const fetchImpl = vi.fn();
     await expect(
@@ -49,6 +85,7 @@ describe("OpenAI fictional relationship inference adapter", () => {
       expect(body.text.format.strict).toBe(true);
       expect(body.text.format.name).toBe("relationship_inference");
       expect(body.input).toContain("Completed one-time service transaction");
+      expect(body.input).toContain("Source: fixture");
       expect(body.input).not.toContain("Background only / no relationship management");
       expect(String(init?.headers && JSON.stringify(init.headers))).not.toContain("service-1");
 
@@ -56,12 +93,10 @@ describe("OpenAI fictional relationship inference adapter", () => {
         JSON.stringify({
           id: "resp_test",
           model: DEFAULT_OPENAI_RELATIONSHIP_MODEL,
-          output: [
-            {
-              type: "message",
-              content: [{ type: "output_text", text: JSON.stringify(successfulInference()) }],
-            },
-          ],
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: JSON.stringify(successfulInference()) }],
+          }],
           usage: { input_tokens: 700, output_tokens: 300, total_tokens: 1000 },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -78,10 +113,52 @@ describe("OpenAI fictional relationship inference adapter", () => {
     expect(result.provider).toBe("openai");
     expect(result.responseId).toBe("resp_test");
     expect(result.report.hardGatePass).toBe(true);
-    expect(result.report.hardGates.classificationAccepted).toBe(true);
-    expect(result.report.hardGates.dispositionCorrect).toBe(true);
     expect(result.report.invalidCitations).toEqual([]);
     expect(result.usage.totalTokens).toBe(1000);
+  });
+
+  it("supports canonical correspondence without benchmark ground truth and validates citations", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "resp_real",
+          model: DEFAULT_OPENAI_RELATIONSHIP_MODEL,
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: JSON.stringify(realInference()) }],
+          }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await inferRelationshipFromCorrespondence(realInput, {
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result.inference.classification.value).toBe("Professional contact");
+    expect(result.invalidCitations).toEqual([]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a real inference that cites evidence it was not given", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: JSON.stringify(realInference("invented-id")) }],
+          }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(inferRelationshipFromCorrespondence(realInput, {
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })).rejects.toThrow("cited evidence that was not supplied");
   });
 
   it("does not echo provider response bodies when the API fails", async () => {
@@ -122,7 +199,7 @@ describe("OpenAI fictional relationship inference adapter", () => {
     ).rejects.toThrow("Structured inference failed local validation");
   });
 
-  it("treats a refusal as a controlled benchmark failure", async () => {
+  it("treats a refusal as a controlled inference failure", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(
         JSON.stringify({
@@ -137,6 +214,6 @@ describe("OpenAI fictional relationship inference adapter", () => {
         apiKey: "test-key",
         fetchImpl: fetchImpl as unknown as typeof fetch,
       }),
-    ).rejects.toThrow("Model refused the fictional inference request.");
+    ).rejects.toThrow("Model refused the relationship inference request.");
   });
 });

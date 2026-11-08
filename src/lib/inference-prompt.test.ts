@@ -5,6 +5,20 @@ import {
   buildRelationshipInferenceUserPrompt,
 } from "./inference-prompt";
 
+function fixtureInput(caseId: string) {
+  const benchmark = relationshipBenchmarkCases.find((item) => item.id === caseId)!;
+  return {
+    id: benchmark.id,
+    title: benchmark.title,
+    asOfDate: benchmark.asOfDate,
+    messages: benchmark.threads.map((message) => ({
+      ...message,
+      source: "fixture" as const,
+      conversationId: message.id,
+    })),
+  };
+}
+
 describe("relationship inference prompt", () => {
   it("contains the core uncertainty and safety rules", () => {
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Use Unknown or Unclear");
@@ -17,20 +31,20 @@ describe("relationship inference prompt", () => {
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Return JSON only");
   });
 
-  it("sends only the selected fictional case and its as-of date", () => {
-    const benchmark = relationshipBenchmarkCases.find((item) => item.id === "recruiter-ambiguous")!;
-    const prompt = buildRelationshipInferenceUserPrompt(benchmark);
+  it("sends only the selected canonical correspondence and its as-of date", () => {
+    const prompt = buildRelationshipInferenceUserPrompt(fixtureInput("recruiter-ambiguous"));
 
     expect(prompt).toContain("As-of date: 2026-10-25");
-    expect(prompt).toContain("THREAD recruiter-b1");
-    expect(prompt).toContain("THREAD recruiter-b3");
+    expect(prompt).toContain("MESSAGE recruiter-b1");
+    expect(prompt).toContain("MESSAGE recruiter-b3");
+    expect(prompt).toContain("Source: fixture");
     expect(prompt).not.toContain("personal-1");
     expect(prompt).not.toContain("dormant-b1");
   });
 
   it("does not leak ground-truth labels or must-not-infer instructions from the fixture", () => {
     for (const benchmark of relationshipBenchmarkCases) {
-      const prompt = buildRelationshipInferenceUserPrompt(benchmark);
+      const prompt = buildRelationshipInferenceUserPrompt(fixtureInput(benchmark.id));
       for (const warning of benchmark.groundTruth.mustNotInfer) {
         expect(prompt).not.toContain(warning);
       }
@@ -40,10 +54,12 @@ describe("relationship inference prompt", () => {
     }
   });
 
-  it("includes every supplied thread id so citations can be validated", () => {
+  it("includes every supplied message id so citations can be validated", () => {
     for (const benchmark of relationshipBenchmarkCases) {
-      const prompt = buildRelationshipInferenceUserPrompt(benchmark);
-      for (const thread of benchmark.threads) expect(prompt).toContain(`THREAD ${thread.id}`);
+      const prompt = buildRelationshipInferenceUserPrompt(fixtureInput(benchmark.id));
+      for (const message of benchmark.threads) {
+        expect(prompt).toContain("MESSAGE " + message.id);
+      }
     }
   });
 });

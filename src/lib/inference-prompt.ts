@@ -1,15 +1,22 @@
-import type { RelationshipBenchmarkCase } from "./inference-benchmark";
+import type { CorrespondenceMessage } from "./correspondence";
 
-export const RELATIONSHIP_INFERENCE_SYSTEM_PROMPT = `You infer relationship context from a small, bounded set of fictional correspondence.
+export type RelationshipInferenceInput = {
+  id: string;
+  title: string;
+  asOfDate: string;
+  messages: CorrespondenceMessage[];
+};
+
+export const RELATIONSHIP_INFERENCE_SYSTEM_PROMPT = `You infer relationship context from a small, bounded set of correspondence.
 
 Rules:
 - Use only the supplied messages and as-of date.
 - Distinguish observed evidence from inference.
-- Cite only supplied thread IDs.
+- Cite only supplied message evidence IDs.
 - Use Unknown or Unclear when evidence is insufficient.
 - Do not infer interpersonal importance from message count alone.
 - Do not convert vague social language into a firm commitment.
-- Do not keep clearly past dated plans open merely because no completion email is shown.
+- Do not keep clearly past dated plans open merely because no completion message is shown.
 - Do not invent external developments, employers, titles, events, or facts.
 - Do not infer whether the user wants more or less contact. The user's relationship goal is explicitly outside this inference task.
 - "Background only" is appropriate for completed transactional contacts that do not appear to need relationship management.
@@ -46,47 +53,49 @@ Allowed open-loop status values:
 
 Required JSON shape:
 {
-  "classification": { "value": "...", "evidenceIds": ["thread-id"] },
-  "disposition": { "value": "...", "evidenceIds": ["thread-id"] },
-  "currentState": { "value": "...", "evidenceIds": ["thread-id"] },
-  "tags": [{ "label": "...", "evidenceIds": ["thread-id"] }],
+  "classification": { "value": "...", "evidenceIds": ["message-id"] },
+  "disposition": { "value": "...", "evidenceIds": ["message-id"] },
+  "currentState": { "value": "...", "evidenceIds": ["message-id"] },
+  "tags": [{ "label": "...", "evidenceIds": ["message-id"] }],
   "history": {
     "earliestObservedMeaningfulInteraction": "YYYY-MM-DD",
     "latestObservedMeaningfulInteraction": "YYYY-MM-DD",
     "pattern": "...",
-    "evidenceIds": ["thread-id"]
+    "evidenceIds": ["message-id"]
   },
   "openLoops": [{
     "commitment": "...",
     "owner": "...",
     "status": "Open | Overdue | Unclear",
-    "evidenceIds": ["thread-id"]
+    "evidenceIds": ["message-id"]
   }],
   "reasonsToEngage": [{
     "reason": "...",
-    "evidenceIds": ["thread-id"]
+    "evidenceIds": ["message-id"]
   }],
   "unknowns": ["..."],
   "confidence": "Low | Moderate | High"
 }`;
 
-export function buildRelationshipInferenceUserPrompt(benchmark: RelationshipBenchmarkCase) {
-  const threadText = benchmark.threads
+export function buildRelationshipInferenceUserPrompt(input: RelationshipInferenceInput) {
+  const messageText = input.messages
     .map(
-      (thread) =>
-        `THREAD ${thread.id}
-Date: ${thread.date}
-From: ${thread.from}
-To: ${thread.to}
-Subject: ${thread.subject}
-Body: ${thread.body}`,
+      (message) =>
+        `MESSAGE ${message.id}
+Source: ${message.source}
+Conversation: ${message.conversationId}
+Date: ${message.date}
+From: ${message.from}
+To: ${message.to}
+Subject/context: ${message.subject}
+Body: ${message.body}`,
     )
-    .join("\n\n");
+    .join("\\n\\n");
 
-  return `Case: ${benchmark.title}
-As-of date: ${benchmark.asOfDate}
+  return `Case: ${input.title}
+As-of date: ${input.asOfDate}
 
 Infer the relationship using only the correspondence below. The as-of date matters when deciding whether a dated commitment is open, overdue, clearly past, or unclear.
 
-${threadText}`;
+${messageText}`;
 }

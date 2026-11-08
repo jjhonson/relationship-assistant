@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_REAL_PILOT_THREADS,
   buildPilotAnalysisDisclosure,
   confirmContactAliases,
+  gmailSelectionToCorrespondence,
   prepareAliasCandidates,
   selectPilotThreads,
   type AliasCandidate,
@@ -107,7 +107,7 @@ describe("real-contact pilot identity foundation", () => {
     );
   });
 
-  it("limits the real pilot to three selected threads", () => {
+  it("limits the real pilot to three selected conversations", () => {
     const identity = confirmContactAliases("Kate", aliases, [
       "kate@oldcompany.example",
       "kate@newcompany.example",
@@ -115,30 +115,38 @@ describe("real-contact pilot identity foundation", () => {
 
     expect(() =>
       selectPilotThreads(identity, threads, ["thread-1", "thread-2", "thread-3", "thread-4"]),
-    ).toThrow(`Select no more than ${MAX_REAL_PILOT_THREADS} threads`);
+    ).toThrow("Select no more than 3 conversations");
   });
 
-  it("rejects a selected thread that does not include a confirmed alias", () => {
+  it("rejects a selected conversation that does not include a confirmed identity", () => {
     const identity = confirmContactAliases("Kate", aliases, ["kate@oldcompany.example"]);
 
     expect(() => selectPilotThreads(identity, threads, ["thread-4"])).toThrow(
-      "does not include a confirmed email identity",
+      "does not include a confirmed identity",
     );
   });
 
-  it("builds an exact disclosure scope without attachments or provider storage", () => {
+  it("translates Gmail-specific selection into a source-agnostic disclosure", () => {
     const identity = confirmContactAliases("Kate", aliases, [
       "kate@oldcompany.example",
       "kate@newcompany.example",
     ]);
-    const selection = selectPilotThreads(identity, threads, ["thread-1", "thread-2"]);
+    const gmailSelection = selectPilotThreads(identity, threads, ["thread-1", "thread-2"]);
+    const selection = gmailSelectionToCorrespondence(gmailSelection);
     const disclosure = buildPilotAnalysisDisclosure(selection);
 
-    expect(disclosure).toEqual({
+    expect(selection).toEqual({
+      source: "gmail",
       personLabel: "Kate",
-      confirmedAliases: ["kate@oldcompany.example", "kate@newcompany.example"],
-      selectedThreadIds: ["thread-1", "thread-2"],
-      fieldsToRead: ["sender/recipient", "date", "subject", "plain-text message content"],
+      confirmedIdentityKeys: ["kate@oldcompany.example", "kate@newcompany.example"],
+      selectedConversationIds: ["thread-1", "thread-2"],
+    });
+    expect(disclosure).toEqual({
+      source: "gmail",
+      personLabel: "Kate",
+      confirmedIdentityKeys: ["kate@oldcompany.example", "kate@newcompany.example"],
+      selectedConversationIds: ["thread-1", "thread-2"],
+      fieldsToRead: ["sender/recipient", "date", "subject/context", "message content"],
       attachmentsIncluded: false,
       provider: "OpenAI",
       providerStorageRequested: false,

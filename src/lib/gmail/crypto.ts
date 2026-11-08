@@ -12,7 +12,9 @@ export function seal(value: string, secret: string): string {
 /** Returns null if tampered with or wrong secret. */
 export function unseal(sealed: string, secret: string): string | null {
   try {
+    if (!/^[A-Za-z0-9_-]+$/.test(sealed)) return null;
     const buf = Buffer.from(sealed, "base64url");
+    if (buf.toString("base64url") !== sealed) return null;
     if (buf.length < 29) return null;
     const decipher = createDecipheriv("aes-256-gcm", key(secret), buf.subarray(0, 12));
     decipher.setAuthTag(buf.subarray(12, 28));
