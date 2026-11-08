@@ -58,7 +58,7 @@ export function planRepresentativeEvidence(
       !isGroupOnly(candidate, aliases),
   );
   const hasStrongerExchange = direct.some(matchesStrongerDirectExchange);
-  const eligible = direct.filter(
+  const historicalEligible = direct.filter(
     (candidate) => !hasStrongerExchange || matchesStrongerDirectExchange(candidate),
   );
   const cutoff = new Date(now.getTime() - RECENT_DAYS * DAY_MS).toISOString().slice(0, 10);
@@ -70,7 +70,10 @@ export function planRepresentativeEvidence(
     recommendations.push({ conversationId: candidate.id, role, reason, candidate });
   };
 
-  const recent = eligible
+  // A single direct recent message can still be the best current-state evidence.
+  // The stronger-exchange filter applies only to historical/depth slots so an older
+  // multi-message thread cannot erase evidence that the relationship is active now.
+  const recent = direct
     .filter((candidate) => candidate.lastDate >= cutoff)
     .sort((a, b) => b.lastDate.localeCompare(a.lastDate) || b.messageCount - a.messageCount || a.id.localeCompare(b.id))[0];
   if (recent) {
@@ -81,7 +84,7 @@ export function planRepresentativeEvidence(
     );
   }
 
-  const historical = eligible
+  const historical = historicalEligible
     .filter(
       (candidate) =>
         !selected.has(candidate.id) &&
@@ -106,7 +109,7 @@ export function planRepresentativeEvidence(
     );
   }
 
-  const anchor = eligible
+  const anchor = historicalEligible
     .filter(
       (candidate) =>
         !selected.has(candidate.id) &&
