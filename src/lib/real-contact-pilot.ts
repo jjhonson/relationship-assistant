@@ -104,7 +104,7 @@ export function selectPilotThreads(
     throw new Error("Select at least one conversation.");
   }
   if (selectedIds.length > MAX_REAL_PILOT_CONVERSATIONS) {
-    throw new Error(\`Select no more than \${MAX_REAL_PILOT_CONVERSATIONS} conversations.\`);
+    throw new Error(`Select no more than ${MAX_REAL_PILOT_CONVERSATIONS} conversations.`);
   }
 
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
