@@ -14,10 +14,10 @@ export function RealRelationshipBrief({ result }: { result: ReadyAnalysis }) {
         return (
           <span
             key={id}
-            title={item ? \`\${item.from} → \${item.to}\` : id}
+            title={item ? `${item.from} → ${item.to}` : id}
             className="rounded-full bg-stone-100 px-2 py-1 text-xs text-stone-600"
           >
-            {item ? \`\${item.date} · \${item.subject}\` : id}
+            {item ? `${item.date} · ${item.subject}` : id}
           </span>
         );
       })}
@@ -62,7 +62,7 @@ export function RealRelationshipBrief({ result }: { result: ReadyAnalysis }) {
         <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">Tags</h3>
         <div className="mt-2 flex flex-wrap gap-2">
           {inference.tags.length > 0 ? inference.tags.map((tag) => (
-            <span key={\`\${tag.label}-\${tag.evidenceIds.join("-")}\`} className="rounded-full bg-indigo-50 px-3 py-1 text-sm text-indigo-800">
+            <span key={`${tag.label}-${tag.evidenceIds.join("-")}`} className="rounded-full bg-indigo-50 px-3 py-1 text-sm text-indigo-800">
               {tag.label}
             </span>
           )) : <span className="text-sm text-stone-500">None inferred.</span>}
@@ -82,9 +82,9 @@ export function RealRelationshipBrief({ result }: { result: ReadyAnalysis }) {
         title="Open loops"
         empty="No open commitments inferred."
         items={inference.openLoops.map((item) => ({
-          key: \`\${item.commitment}-\${item.owner}\`,
+          key: `${item.commitment}-${item.owner}`,
           primary: item.commitment,
-          secondary: \`\${item.owner} · \${item.status}\`,
+          secondary: `${item.owner} · ${item.status}`,
           evidence: evidence(item.evidenceIds),
         }))}
       />
@@ -111,9 +111,9 @@ export function RealRelationshipBrief({ result }: { result: ReadyAnalysis }) {
       </div>
 
       <div className="mt-6 border-t border-stone-200 pt-4 text-xs text-stone-500">
-        Analyzed {result.messageCount} message{result.messageCount === 1 ? "" : "s"} from the approved threads
+        Analyzed {result.messageCount} message{result.messageCount === 1 ? "" : "s"} from the approved conversations
         using {result.model}. Message bodies were processed ephemerally and are not shown or persisted here.
-        {result.usage.totalTokens !== null ? \` \${result.usage.totalTokens.toLocaleString()} API tokens used.\` : ""}
+        {result.usage.totalTokens !== null ? ` ${result.usage.totalTokens.toLocaleString()} API tokens used.` : ""}
       </div>
     </section>
   );
