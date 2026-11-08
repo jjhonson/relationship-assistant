@@ -7,7 +7,7 @@ export type RelationshipInferenceInput = {
   messages: CorrespondenceMessage[];
 };
 
-export const RELATIONSHIP_INFERENCE_SYSTEM_PROMPT = \`You infer relationship context from a small, bounded set of correspondence.
+export const RELATIONSHIP_INFERENCE_SYSTEM_PROMPT = `You infer relationship context from a small, bounded set of correspondence.
 
 Rules:
 - Use only the supplied messages and as-of date.
@@ -75,27 +75,27 @@ Required JSON shape:
   }],
   "unknowns": ["..."],
   "confidence": "Low | Moderate | High"
-}\`;
+}`;
 
 export function buildRelationshipInferenceUserPrompt(input: RelationshipInferenceInput) {
   const messageText = input.messages
     .map(
       (message) =>
-        \`MESSAGE \${message.id}
-Source: \${message.source}
-Conversation: \${message.conversationId}
-Date: \${message.date}
-From: \${message.from}
-To: \${message.to}
-Subject/context: \${message.subject}
-Body: \${message.body}\`,
+        `MESSAGE ${message.id}
+Source: ${message.source}
+Conversation: ${message.conversationId}
+Date: ${message.date}
+From: ${message.from}
+To: ${message.to}
+Subject/context: ${message.subject}
+Body: ${message.body}`,
     )
     .join("\\n\\n");
 
-  return \`Case: \${input.title}
-As-of date: \${input.asOfDate}
+  return `Case: ${input.title}
+As-of date: ${input.asOfDate}
 
 Infer the relationship using only the correspondence below. The as-of date matters when deciding whether a dated commitment is open, overdue, clearly past, or unclear.
 
-\${messageText}\`;
+${messageText}`;
 }
