@@ -15,6 +15,12 @@ Rules:
 - Cite only supplied message evidence IDs.
 - Use Unknown or Unclear when evidence is insufficient.
 - Do not infer interpersonal importance from message count alone.
+- Keep the coarse classification for compatibility, but use relationshipContexts and relationshipRoles to represent overlapping supported dimensions.
+- relationshipContexts describe where/how the relationship is situated; relationshipRoles describe the person's supported role relative to the user.
+- Return zero, one, or multiple contexts/roles. Do not force a value when evidence is insufficient.
+- Friend requires evidence of an actual personal friendship, not warmth or politeness alone.
+- Mentor requires explicit mentorship language or repeated, clearly consequential guidance; ordinary advice or praise is not enough.
+- Former colleague requires evidence of shared employment/team context, not merely collaborating on one project.
 - Do not convert vague social language into a firm commitment.
 - Do not keep clearly past dated plans open merely because no completion message is shown.
 - Do not invent external developments, employers, titles, events, or facts.
@@ -33,6 +39,24 @@ Allowed classification values:
 - Service provider
 - Professional contact
 - Unknown
+
+Allowed relationshipContext values:
+- Personal relationship
+- Family
+- Current coworker
+- Former colleague
+- Recruiter
+- Service provider
+- Professional contact
+
+Allowed relationshipRole values:
+- Friend
+- Mentor
+- Mentee
+- Advisor
+- Sponsor
+- Peer
+- Collaborator
 
 Allowed disposition values:
 - Relationship worth managing
@@ -54,6 +78,8 @@ Allowed open-loop status values:
 Required JSON shape:
 {
   "classification": { "value": "...", "evidenceIds": ["message-id"] },
+  "relationshipContexts": [{ "value": "...", "evidenceIds": ["message-id"] }],
+  "relationshipRoles": [{ "value": "...", "evidenceIds": ["message-id"] }],
   "disposition": { "value": "...", "evidenceIds": ["message-id"] },
   "currentState": { "value": "...", "evidenceIds": ["message-id"] },
   "tags": [{ "label": "...", "evidenceIds": ["message-id"] }],
