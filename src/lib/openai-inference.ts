@@ -17,6 +17,8 @@ export const relationshipInferenceJsonSchema = {
   additionalProperties: false,
   required: [
     "classification",
+    "relationshipContexts",
+    "relationshipRoles",
     "disposition",
     "currentState",
     "tags",
@@ -34,6 +36,24 @@ export const relationshipInferenceJsonSchema = {
       "Service provider",
       "Professional contact",
       "Unknown",
+    ]),
+    relationshipContexts: evidenceArray([
+      "Personal relationship",
+      "Family",
+      "Current coworker",
+      "Former colleague",
+      "Recruiter",
+      "Service provider",
+      "Professional contact",
+    ]),
+    relationshipRoles: evidenceArray([
+      "Friend",
+      "Mentor",
+      "Mentee",
+      "Advisor",
+      "Sponsor",
+      "Peer",
+      "Collaborator",
     ]),
     disposition: evidenceEnum(["Relationship worth managing", "Background only", "Unclear"]),
     currentState: evidenceEnum(["Active", "Occasional", "Dormant", "Recently revived", "Unclear"]),
@@ -112,6 +132,13 @@ function evidenceEnum(values: readonly string[]) {
   } as const;
 }
 
+function evidenceArray(values: readonly string[]) {
+  return {
+    type: "array",
+    items: evidenceEnum(values),
+  } as const;
+}
+
 type OpenAIResponse = {
   id?: string;
   status?: string;
@@ -151,6 +178,8 @@ function extractOutputText(response: OpenAIResponse) {
 function citedEvidenceIds(inference: RelationshipInference): string[] {
   return [
     ...inference.classification.evidenceIds,
+    ...inference.relationshipContexts.flatMap((item) => item.evidenceIds),
+    ...inference.relationshipRoles.flatMap((item) => item.evidenceIds),
     ...inference.disposition.evidenceIds,
     ...inference.currentState.evidenceIds,
     ...inference.history.evidenceIds,
