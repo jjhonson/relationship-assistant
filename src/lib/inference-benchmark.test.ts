@@ -8,9 +8,9 @@ import {
 } from "./inference-benchmark";
 
 describe("fictional relationship inference benchmark", () => {
-  it("contains six distinct fictional cases with only fictional labels", () => {
-    expect(relationshipBenchmarkCases).toHaveLength(6);
-    expect(new Set(relationshipBenchmarkCases.map((item) => item.id)).size).toBe(6);
+  it("contains seven distinct fictional cases with only fictional labels", () => {
+    expect(relationshipBenchmarkCases).toHaveLength(7);
+    expect(new Set(relationshipBenchmarkCases.map((item) => item.id)).size).toBe(7);
 
     for (const benchmark of relationshipBenchmarkCases) {
       expect(benchmark.threads.length).toBeGreaterThan(0);
@@ -41,6 +41,19 @@ describe("fictional relationship inference benchmark", () => {
     expect(benchmark?.groundTruth.disposition).toBe("Unclear");
     expect(benchmark?.groundTruth.currentState).toBe("Unclear");
     expect(benchmark?.groundTruth.unknowns.length).toBeGreaterThan(1);
+  });
+
+  it("represents an explicitly multi-role relationship without flattening it", () => {
+    const benchmark = relationshipBenchmarkCases.find((item) => item.id === "multi-role-history")!;
+    const inference = groundTruthAsInference(benchmark);
+    expect(inference.relationshipContexts.map((item) => item.value)).toEqual([
+      "Former colleague",
+      "Personal relationship",
+    ]);
+    expect(inference.relationshipRoles.map((item) => item.value)).toEqual([
+      "Friend",
+      "Mentor",
+    ]);
   });
 
   it("uses the as-of date to keep a real recruiter promise overdue without inventing the call outcome", () => {
@@ -96,6 +109,10 @@ describe("fictional relationship inference benchmark", () => {
       expect(report.hardGates.uncertaintyPresent).toBe(true);
       expect(report.softReview.tags.precision).toBe(1);
       expect(report.softReview.tags.recall).toBe(1);
+      expect(report.softReview.relationshipContexts.precision).toBe(1);
+      expect(report.softReview.relationshipContexts.recall).toBe(1);
+      expect(report.softReview.relationshipRoles.precision).toBe(1);
+      expect(report.softReview.relationshipRoles.recall).toBe(1);
       expect(report.invalidCitations).toEqual([]);
     }
   });
