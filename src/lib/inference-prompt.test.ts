@@ -24,6 +24,10 @@ describe("relationship inference prompt", () => {
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Use Unknown or Unclear");
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Do not infer whether the user wants more or less contact");
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Do not convert vague social language into a firm commitment");
+    expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("relationshipContexts");
+    expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("relationshipRoles");
+    expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Mentor requires explicit mentorship language");
+    expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Former colleague requires evidence of shared employment/team context");
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Tags must be short, stable, reusable categories");
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("Do not use tags to summarize a one-time event");
     expect(RELATIONSHIP_INFERENCE_SYSTEM_PROMPT).toContain("A reason to engage must be a concrete, grounded trigger");
