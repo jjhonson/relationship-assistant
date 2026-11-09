@@ -36,8 +36,28 @@ export type InferredReason = {
   evidenceIds: string[];
 };
 
+export type RelationshipContextValue =
+  | "Personal relationship"
+  | "Family"
+  | "Current coworker"
+  | "Former colleague"
+  | "Recruiter"
+  | "Service provider"
+  | "Professional contact";
+
+export type RelationshipRoleValue =
+  | "Friend"
+  | "Mentor"
+  | "Mentee"
+  | "Advisor"
+  | "Sponsor"
+  | "Peer"
+  | "Collaborator";
+
 export type RelationshipInference = {
   classification: EvidenceValue<PilotClassification>;
+  relationshipContexts: EvidenceValue<RelationshipContextValue>[];
+  relationshipRoles: EvidenceValue<RelationshipRoleValue>[];
   disposition: EvidenceValue<PilotRelationshipDisposition>;
   currentState: EvidenceValue<PilotRelationshipState>;
   tags: InferredTag[];
@@ -56,6 +76,8 @@ export type RelationshipInference = {
 export type BenchmarkGroundTruth = {
   classification: PilotClassification;
   acceptableClassifications?: PilotClassification[];
+  relationshipContexts: RelationshipContextValue[];
+  relationshipRoles: RelationshipRoleValue[];
   disposition: PilotRelationshipDisposition;
   currentState: PilotRelationshipState;
   tags: string[];
@@ -114,6 +136,8 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
     ],
     groundTruth: {
       classification: "Friend or family",
+      relationshipContexts: ["Personal relationship"],
+      relationshipRoles: ["Friend"],
       disposition: "Relationship worth managing",
       currentState: "Active",
       tags: ["hiking", "emotional support", "relocation"],
@@ -167,6 +191,8 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
     ],
     groundTruth: {
       classification: "Service provider",
+      relationshipContexts: ["Service provider"],
+      relationshipRoles: [],
       disposition: "Background only",
       currentState: "Dormant",
       tags: ["travel", "airport transportation"],
@@ -218,6 +244,8 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
     ],
     groundTruth: {
       classification: "Recruiter",
+      relationshipContexts: ["Recruiter"],
+      relationshipRoles: [],
       disposition: "Relationship worth managing",
       currentState: "Unclear",
       tags: ["job search", "growth leadership"],
@@ -276,6 +304,8 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
     ],
     groundTruth: {
       classification: "Coworker",
+      relationshipContexts: ["Current coworker"],
+      relationshipRoles: ["Collaborator"],
       disposition: "Relationship worth managing",
       currentState: "Active",
       tags: ["workplace", "forecasting", "onboarding"],
@@ -334,6 +364,8 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
     ],
     groundTruth: {
       classification: "Professional contact",
+      relationshipContexts: ["Professional contact"],
+      relationshipRoles: ["Advisor"],
       disposition: "Relationship worth managing",
       currentState: "Dormant",
       tags: ["former colleague", "career guidance", "past project"],
@@ -352,6 +384,61 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
         "Do not infer that Elena is formally a mentor.",
         "Do not infer that the relationship is inactive outside email.",
         "Do not infer urgency solely because the last email is old.",
+      ],
+    },
+  },
+  {
+    id: "multi-role-history",
+    title: "Former colleague who became a mentor and friend",
+    asOfDate: "2026-10-25",
+    threads: [
+      {
+        id: "multi-role-1",
+        date: "2019-06-12",
+        from: "Morgan Hale",
+        to: "You",
+        subject: "Northstar launch",
+        body: "I loved being on the Northstar team with you. We survived a difficult launch and I learned a lot from how you handled the commercial side.",
+      },
+      {
+        id: "multi-role-2",
+        date: "2023-04-10",
+        from: "You",
+        to: "Morgan Hale",
+        subject: "Thank you",
+        body: "I still lean on the advice you gave me when I took my first VP role. You were a real mentor at a moment when I needed one.",
+      },
+      {
+        id: "multi-role-3",
+        date: "2026-09-20",
+        from: "Morgan Hale",
+        to: "You",
+        subject: "Good catching up",
+        body: "Hard to believe we went from colleagues at Northstar to close friends. I am glad we have stayed in each other's lives all these years.",
+      },
+    ],
+    groundTruth: {
+      classification: "Friend or family",
+      acceptableClassifications: ["Friend or family", "Professional contact"],
+      relationshipContexts: ["Former colleague", "Personal relationship"],
+      relationshipRoles: ["Friend", "Mentor"],
+      disposition: "Relationship worth managing",
+      currentState: "Active",
+      tags: ["leadership", "former workplace", "career guidance"],
+      tagAliases: {
+        "former workplace": ["Northstar", "past workplace"],
+        "career guidance": ["career advice", "professional guidance"],
+      },
+      earliestObservedMeaningfulInteraction: "2019-06-12",
+      latestObservedMeaningfulInteraction: "2026-09-20",
+      openLoops: [],
+      openLoopExpectation: "none",
+      reasonsToEngage: [],
+      unknowns: ["The sample does not establish how often they communicate outside these messages."],
+      mustNotInfer: [
+        "Do not infer a family relationship.",
+        "Do not infer that they are current coworkers.",
+        "Do not infer a formal reporting relationship from mentorship.",
       ],
     },
   },
@@ -380,6 +467,8 @@ export const relationshipBenchmarkCases: RelationshipBenchmarkCase[] = [
     groundTruth: {
       classification: "Unknown",
       acceptableClassifications: ["Unknown", "Professional contact"],
+      relationshipContexts: [],
+      relationshipRoles: [],
       disposition: "Unclear",
       currentState: "Unclear",
       tags: ["conference", "scaling teams", "Seattle"],
@@ -414,6 +503,26 @@ const validClassifications = new Set<PilotClassification>([
   "Unknown",
 ]);
 
+const validRelationshipContexts = new Set<RelationshipContextValue>([
+  "Personal relationship",
+  "Family",
+  "Current coworker",
+  "Former colleague",
+  "Recruiter",
+  "Service provider",
+  "Professional contact",
+]);
+
+const validRelationshipRoles = new Set<RelationshipRoleValue>([
+  "Friend",
+  "Mentor",
+  "Mentee",
+  "Advisor",
+  "Sponsor",
+  "Peer",
+  "Collaborator",
+]);
+
 const validDispositions = new Set<PilotRelationshipDisposition>([
   "Relationship worth managing",
   "Background only",
@@ -440,12 +549,18 @@ function isEvidenceValue<T extends string>(value: unknown, allowed: Set<T>): val
   return typeof record.value === "string" && allowed.has(record.value as T) && isStringArray(record.evidenceIds);
 }
 
+function isEvidenceArray<T extends string>(value: unknown, allowed: Set<T>): value is EvidenceValue<T>[] {
+  return Array.isArray(value) && value.every((item) => isEvidenceValue(item, allowed));
+}
+
 export function validateRelationshipInference(value: unknown): string[] {
   const issues: string[] = [];
   if (!value || typeof value !== "object") return ["Inference must be an object."];
   const record = value as Record<string, unknown>;
 
   if (!isEvidenceValue(record.classification, validClassifications)) issues.push("classification is invalid.");
+  if (!isEvidenceArray(record.relationshipContexts, validRelationshipContexts)) issues.push("relationshipContexts are invalid.");
+  if (!isEvidenceArray(record.relationshipRoles, validRelationshipRoles)) issues.push("relationshipRoles are invalid.");
   if (!isEvidenceValue(record.disposition, validDispositions)) issues.push("disposition is invalid.");
   if (!isEvidenceValue(record.currentState, validStates)) issues.push("currentState is invalid.");
 
@@ -544,6 +659,8 @@ export function evaluateRelationshipInference(
   const threadIds = new Set(benchmark.threads.map((thread) => thread.id));
   const citedIds = [
     ...inference.classification.evidenceIds,
+    ...inference.relationshipContexts.flatMap((item) => item.evidenceIds),
+    ...inference.relationshipRoles.flatMap((item) => item.evidenceIds),
     ...inference.disposition.evidenceIds,
     ...inference.currentState.evidenceIds,
     ...inference.history.evidenceIds,
@@ -557,6 +674,14 @@ export function evaluateRelationshipInference(
     benchmark.groundTruth.tags,
     inference.tags.map((tag) => tag.label),
     benchmark.groundTruth.tagAliases,
+  );
+  const relationshipContexts = tagMetrics(
+    benchmark.groundTruth.relationshipContexts,
+    inference.relationshipContexts.map((item) => item.value),
+  );
+  const relationshipRoles = tagMetrics(
+    benchmark.groundTruth.relationshipRoles,
+    inference.relationshipRoles.map((item) => item.value),
   );
 
   const acceptableClassifications = new Set(
@@ -596,6 +721,12 @@ export function evaluateRelationshipInference(
     hardGatePass: Object.values(hardGates).every(Boolean),
     softReview: {
       tags,
+      relationshipContexts,
+      relationshipRoles,
+      expectedRelationshipContexts: benchmark.groundTruth.relationshipContexts,
+      actualRelationshipContexts: inference.relationshipContexts.map((item) => item.value),
+      expectedRelationshipRoles: benchmark.groundTruth.relationshipRoles,
+      actualRelationshipRoles: inference.relationshipRoles.map((item) => item.value),
       expectedTags: benchmark.groundTruth.tags,
       actualTags: inference.tags.map((tag) => tag.label),
       expectedReasonsToEngage: benchmark.groundTruth.reasonsToEngage,
@@ -616,6 +747,8 @@ export function groundTruthAsInference(benchmark: RelationshipBenchmarkCase): Re
   const allIds = benchmark.threads.map((thread) => thread.id);
   return {
     classification: { value: benchmark.groundTruth.classification, evidenceIds: allIds },
+    relationshipContexts: benchmark.groundTruth.relationshipContexts.map((value) => ({ value, evidenceIds: allIds })),
+    relationshipRoles: benchmark.groundTruth.relationshipRoles.map((value) => ({ value, evidenceIds: allIds })),
     disposition: { value: benchmark.groundTruth.disposition, evidenceIds: allIds },
     currentState: { value: benchmark.groundTruth.currentState, evidenceIds: allIds },
     tags: benchmark.groundTruth.tags.map((label) => ({ label, evidenceIds: allIds })),
