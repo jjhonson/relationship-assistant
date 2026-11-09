@@ -9,6 +9,8 @@ import {
 function successfulInference() {
   return {
     classification: { value: "Service provider", evidenceIds: ["service-1", "service-2", "service-3"] },
+    relationshipContexts: [{ value: "Service provider", evidenceIds: ["service-1", "service-2", "service-3"] }],
+    relationshipRoles: [],
     disposition: { value: "Background only", evidenceIds: ["service-1", "service-2", "service-3"] },
     currentState: { value: "Dormant", evidenceIds: ["service-3"] },
     tags: [
@@ -31,6 +33,8 @@ function successfulInference() {
 function realInference(evidenceId = "real-1") {
   return {
     classification: { value: "Professional contact", evidenceIds: [evidenceId] },
+    relationshipContexts: [{ value: "Professional contact", evidenceIds: [evidenceId] }],
+    relationshipRoles: [],
     disposition: { value: "Relationship worth managing", evidenceIds: [evidenceId] },
     currentState: { value: "Active", evidenceIds: [evidenceId] },
     tags: [{ label: "career", evidenceIds: [evidenceId] }],
@@ -84,6 +88,8 @@ describe("OpenAI relationship inference adapter", () => {
       expect(body.text.format.type).toBe("json_schema");
       expect(body.text.format.strict).toBe(true);
       expect(body.text.format.name).toBe("relationship_inference");
+      expect(body.text.format.schema.required).toContain("relationshipContexts");
+      expect(body.text.format.schema.required).toContain("relationshipRoles");
       expect(body.input).toContain("Completed one-time service transaction");
       expect(body.input).toContain("Source: fixture");
       expect(body.input).not.toContain("Background only / no relationship management");
@@ -138,6 +144,8 @@ describe("OpenAI relationship inference adapter", () => {
     });
 
     expect(result.inference.classification.value).toBe("Professional contact");
+    expect(result.inference.relationshipContexts.map((item) => item.value)).toEqual(["Professional contact"]);
+    expect(result.inference.relationshipRoles).toEqual([]);
     expect(result.invalidCitations).toEqual([]);
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
