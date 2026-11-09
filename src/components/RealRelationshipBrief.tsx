@@ -58,6 +58,25 @@ export function RealRelationshipBrief({ result }: { result: ReadyAnalysis }) {
         />
       </div>
 
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        <BriefDimensions
+          label="Relationship contexts"
+          empty="No relationship context confidently inferred."
+          items={inference.relationshipContexts.map((item) => ({
+            value: item.value,
+            evidence: evidence(item.evidenceIds),
+          }))}
+        />
+        <BriefDimensions
+          label="Relationship roles"
+          empty="No relationship role confidently inferred."
+          items={inference.relationshipRoles.map((item) => ({
+            value: item.value,
+            evidence: evidence(item.evidenceIds),
+          }))}
+        />
+      </div>
+
       <div className="mt-6">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">Tags</h3>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -133,6 +152,34 @@ function BriefValue({
       <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</p>
       <p className="mt-1 font-semibold text-stone-900">{value}</p>
       <div className="mt-3">{evidence}</div>
+    </div>
+  );
+}
+
+function BriefDimensions({
+  label,
+  empty,
+  items,
+}: {
+  label: string;
+  empty: string;
+  items: Array<{ value: string; evidence: React.ReactNode }>;
+}) {
+  return (
+    <div className="rounded-xl border border-stone-200 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</p>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-stone-500">{empty}</p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {items.map((item) => (
+            <div key={item.value}>
+              <p className="font-semibold text-stone-900">{item.value}</p>
+              <div className="mt-2">{item.evidence}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
