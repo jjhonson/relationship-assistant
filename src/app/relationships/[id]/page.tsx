@@ -203,7 +203,7 @@ export default async function RelationshipDetailPage({
       <section className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-6">
         <h2 className="text-lg font-semibold">Add a new conversation</h2>
         <p className="mt-1 max-w-3xl text-sm text-stone-600">
-          Paste a transcript from a call or meeting. The transcript and this relationship's existing structured
+          Paste a transcript from a call or meeting. The transcript and this relationship&apos;s existing structured
           memory are sent to the configured inference model with provider storage disabled. Prior transcript text
           is not resent. Only the updated structured relationship memory is saved locally.
         </p>
