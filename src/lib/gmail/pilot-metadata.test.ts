@@ -414,11 +414,11 @@ describe("bounded Gmail metadata network calls", () => {
     expect(result.messages).toHaveLength(PILOT_THREAD_MESSAGE_LIMIT);
     expect(result.stats).toEqual({
       listRequests: PILOT_THREAD_LIST_REQUEST_LIMIT,
-      listRecordsReturned: 120,
+      listRecordsReturned: 140,
       detailRequests: PILOT_THREAD_MESSAGE_LIMIT,
       windowsQueried: PILOT_THREAD_LIST_REQUEST_LIMIT,
-      monthWindowsQueried: 30,
-      quarterWindowsQueried: 30,
+      monthWindowsQueried: 20,
+      quarterWindowsQueried: 40,
       recordsReturned: PILOT_THREAD_MESSAGE_LIMIT,
     });
     expect(result.truncated).toBe(true);
@@ -444,12 +444,12 @@ describe("bounded Gmail metadata network calls", () => {
     const monthlyAfterValues = listUrls
       .filter((url) => url.searchParams.get("maxResults") === "1")
       .map((url) => url.searchParams.get("q")?.match(/after:(\d+)/)?.[1]);
-    expect(monthlyAfterValues).toHaveLength(30);
+    expect(monthlyAfterValues).toHaveLength(20);
     expect(monthlyAfterValues.every((after) => detailIds.has(`m-1-${after}-0`))).toBe(true);
     const quarterlyAfterValues = listUrls
       .filter((url) => url.searchParams.get("maxResults") === "3")
       .map((url) => url.searchParams.get("q")?.match(/after:(\d+)/)?.[1]);
-    expect(quarterlyAfterValues).toHaveLength(30);
+    expect(quarterlyAfterValues).toHaveLength(40);
     expect(quarterlyAfterValues.every((after) => detailIds.has(`m-3-${after}-0`))).toBe(true);
 
     expect(detailUrls.every((url) => url.searchParams.get("format") === "metadata")).toBe(true);
