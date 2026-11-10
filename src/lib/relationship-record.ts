@@ -238,7 +238,11 @@ function mergeFacts(
       (item) => normalize(item.label) + "|" + normalize(item.value) === key,
     );
     const index = existingIndex >= 0 ? existingIndex : fallbackIndex;
-    const { existingFactId: _existingFactId, ...factValue } = fact;
+    const factValue = {
+      category: fact.category,
+      label: fact.label,
+      value: fact.value,
+    };
     if (index >= 0) {
       const current = result[index];
       result[index] = {
@@ -273,7 +277,12 @@ function mergeThreads(
     const key = normalize(thread.topic);
     const fallbackIndex = result.findIndex((item) => normalize(item.topic) === key);
     const index = existingIndex >= 0 ? existingIndex : fallbackIndex;
-    const { existingThreadId: _existingThreadId, ...threadValue } = thread;
+    const threadValue = {
+      topic: thread.topic,
+      state: thread.state,
+      whyItMatters: thread.whyItMatters,
+      nextChangeSignal: thread.nextChangeSignal,
+    };
     if (index >= 0) {
       const current = result[index];
       result[index] = {
