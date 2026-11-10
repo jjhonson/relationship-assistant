@@ -4,7 +4,13 @@ import {
   INTERACTION_INFERENCE_SYSTEM_PROMPT,
 } from "./interaction-inference";
 
-describe("interaction inference", () => {\n  it("requires durable relationship anchors even when they are not immediately actionable", () => {\n    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("Always capture explicit relationship anchors");\n    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("birthdays and anniversaries");\n    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("employer/job/role");\n  });\n
+describe("interaction inference", () => {
+  it("requires durable relationship anchors even when they are not immediately actionable", () => {
+    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("Always capture explicit relationship anchors");
+    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("birthdays and anniversaries");
+    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("employer/job/role");
+  });
+
   it("uses structured output with provider storage disabled and returns only structured relationship intelligence", async () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
