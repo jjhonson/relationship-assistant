@@ -9,10 +9,10 @@ type StoreFile = {
 };
 
 function storePath() {
-  const root = process.env.RELATIONSHIP_DATA_DIR || path.join(process.cwd(), ".data");
+  const root = path.join(process.cwd(), ".data");
   return {
     root,
-    file: path.join(root, "relationships.json"),
+    file: path.join(process.cwd(), ".data", "relationships.json"),
   };
 }
 
