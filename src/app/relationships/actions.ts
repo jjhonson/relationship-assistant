@@ -99,6 +99,19 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
     personLabel: record.personLabel,
     interactionDate,
     transcript,
+    currentMemory: {
+      durableFacts: record.durableFacts.map(({ id, category, label, value }) => ({
+        id,
+        category,
+        label,
+        value,
+      })),
+      activeThreads: record.activeThreads.map(({ id, topic, state }) => ({
+        id,
+        topic,
+        state,
+      })),
+    },
   }, {
     apiKey,
     model: process.env.OPENAI_RELATIONSHIP_MODEL,
