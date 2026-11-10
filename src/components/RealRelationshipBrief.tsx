@@ -1,6 +1,7 @@
 "use client";
 
 import type { PilotAnalysisResult } from "@/app/real-pilot/actions";
+import { SaveRelationshipButton } from "@/components/SaveRelationshipButton";
 
 type ReadyAnalysis = Extract<PilotAnalysisResult, { kind: "ready" }>;
 
@@ -35,9 +36,12 @@ export function RealRelationshipBrief({ result }: { result: ReadyAnalysis }) {
           </p>
           <h2 className="mt-1 text-2xl font-semibold">{result.personLabel}</h2>
         </div>
-        <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-800">
-          {inference.confidence} confidence
-        </span>
+        <div className="flex items-center gap-2">
+          <SaveRelationshipButton result={result} />
+          <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-800">
+            {inference.confidence} confidence
+          </span>
+        </div>
       </div>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
