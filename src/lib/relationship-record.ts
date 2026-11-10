@@ -77,11 +77,13 @@ export type InteractionExtraction = {
   relationshipRoles: RelationshipRoleValue[];
   tags: string[];
   durableFacts: Array<{
+    existingFactId: string;
     category: DurableRelationshipFact["category"];
     label: string;
     value: string;
   }>;
   activeThreads: Array<{
+    existingThreadId: string;
     topic: string;
     state: string;
     whyItMatters: string;
@@ -211,16 +213,12 @@ export function mergeInteractionIntoRelationship(
     unknowns: unique([...record.unknowns, ...extraction.unknowns]),
     durableFacts: mergeFacts(record.durableFacts, extraction.durableFacts, source),
     activeThreads: mergeThreads(record.activeThreads, extraction.activeThreads, source),
-    stewardshipOpportunities: mergeByKey(
-      record.stewardshipOpportunities,
-      extraction.stewardshipOpportunities.map((item) => ({
-        id: randomUUID(),
-        ...item,
-        sourceIds: [source.id],
-        observedAt: source.observedAt,
-      })),
-      (item) => normalize(item.reason) + "|" + normalize(item.trigger),
-    ),
+    stewardshipOpportunities: extraction.stewardshipOpportunities.map((item) => ({
+      id: randomUUID(),
+      ...item,
+      sourceIds: [source.id],
+      observedAt: source.observedAt,
+    })),
     sources: mergeByKey(record.sources, [source], (item) => item.id),
   };
 }
@@ -232,21 +230,27 @@ function mergeFacts(
 ) {
   const result = [...existing];
   for (const fact of incoming) {
+    const existingIndex = fact.existingFactId
+      ? result.findIndex((item) => item.id === fact.existingFactId)
+      : -1;
     const key = normalize(fact.label) + "|" + normalize(fact.value);
-    const index = result.findIndex(
+    const fallbackIndex = result.findIndex(
       (item) => normalize(item.label) + "|" + normalize(item.value) === key,
     );
+    const index = existingIndex >= 0 ? existingIndex : fallbackIndex;
+    const { existingFactId: _existingFactId, ...factValue } = fact;
     if (index >= 0) {
       const current = result[index];
       result[index] = {
         ...current,
+        ...factValue,
         sourceIds: unique([...current.sourceIds, source.id]),
         lastObservedAt: source.observedAt,
       };
     } else {
       result.push({
         id: randomUUID(),
-        ...fact,
+        ...factValue,
         sourceIds: [source.id],
         firstObservedAt: source.observedAt,
         lastObservedAt: source.observedAt,
@@ -263,20 +267,25 @@ function mergeThreads(
 ) {
   const result = [...existing];
   for (const thread of incoming) {
+    const existingIndex = thread.existingThreadId
+      ? result.findIndex((item) => item.id === thread.existingThreadId)
+      : -1;
     const key = normalize(thread.topic);
-    const index = result.findIndex((item) => normalize(item.topic) === key);
+    const fallbackIndex = result.findIndex((item) => normalize(item.topic) === key);
+    const index = existingIndex >= 0 ? existingIndex : fallbackIndex;
+    const { existingThreadId: _existingThreadId, ...threadValue } = thread;
     if (index >= 0) {
       const current = result[index];
       result[index] = {
         ...current,
-        ...thread,
+        ...threadValue,
         sourceIds: unique([...current.sourceIds, source.id]),
         lastObservedAt: source.observedAt,
       };
     } else {
       result.push({
         id: randomUUID(),
-        ...thread,
+        ...threadValue,
         sourceIds: [source.id],
         lastObservedAt: source.observedAt,
       });
