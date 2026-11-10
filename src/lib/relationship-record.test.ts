@@ -11,19 +11,21 @@ const extraction: InteractionExtraction = {
   relationshipRoles: [],
   tags: ["guitar", "Pinecrest", "real estate"],
   durableFacts: [
-    { category: "Family", label: "Wife", value: "Allison" },
-    { category: "Family", label: "Son", value: "Austin" },
-    { category: "Location", label: "Home area", value: "Pinecrest" },
-    { category: "Interest", label: "Interest", value: "Guitar" },
+    { existingFactId: "", category: "Family", label: "Wife", value: "Allison" },
+    { existingFactId: "", category: "Family", label: "Son", value: "Austin" },
+    { existingFactId: "", category: "Location", label: "Home area", value: "Pinecrest" },
+    { existingFactId: "", category: "Interest", label: "Interest", value: "Guitar" },
   ],
   activeThreads: [
     {
+      existingThreadId: "",
       topic: "Pinecrest house renovation",
       state: "Permit received and renovation work is moving into execution.",
       whyItMatters: "The project followed a difficult contractor dispute and remains a major focus.",
       nextChangeSignal: "Meaningful construction progress or another project milestone.",
     },
     {
+      existingThreadId: "",
       topic: "Allison's store relocation",
       state: "Evaluating a consequential relocation and build-out.",
       whyItMatters: "Brand support could make the move highly successful or create material business risk.",
@@ -96,12 +98,16 @@ describe("relationship record interaction merge", () => {
       ...extraction,
       durableFacts: [],
       activeThreads: [{
-        topic: "Pinecrest house renovation",
+        existingThreadId: first.activeThreads[0].id,
+        topic: "House construction progress",
         state: "Demolition is complete and construction is underway.",
         whyItMatters: "The project has moved into a new phase.",
         nextChangeSignal: "Major construction milestone.",
       }],
-      stewardshipOpportunities: [],
+      stewardshipOpportunities: [{
+        reason: "The house has moved into construction.",
+        trigger: "A later construction milestone.",
+      }],
     };
     const second = mergeInteractionIntoRelationship(
       first,
@@ -114,11 +120,11 @@ describe("relationship record interaction merge", () => {
       },
     );
 
-    const houseThreads = second.activeThreads.filter(
-      (thread) => thread.topic === "Pinecrest house renovation",
-    );
-    expect(houseThreads).toHaveLength(1);
-    expect(houseThreads[0].state).toContain("construction is underway");
-    expect(houseThreads[0].sourceIds).toEqual(["transcript:first", "transcript:second"]);
+    expect(second.activeThreads).toHaveLength(first.activeThreads.length);
+    expect(second.activeThreads[0].topic).toBe("House construction progress");
+    expect(second.activeThreads[0].state).toContain("construction is underway");
+    expect(second.activeThreads[0].sourceIds).toEqual(["transcript:first", "transcript:second"]);
+    expect(second.stewardshipOpportunities).toHaveLength(1);
+    expect(second.stewardshipOpportunities[0].reason).toContain("moved into construction");
   });
 });
