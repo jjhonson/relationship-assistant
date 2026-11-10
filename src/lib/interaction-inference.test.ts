@@ -17,6 +17,7 @@ describe("interaction inference", () => {
       expect(body.store).toBe(false);
       expect(body.instructions).toBe(INTERACTION_INFERENCE_SYSTEM_PROMPT);
       expect(body.input).toContain("Austin has been learning guitar");
+      expect(body.input).toContain("thread-house");
       expect(body.text.format.type).toBe("json_schema");
 
       return new Response(JSON.stringify({
@@ -30,10 +31,11 @@ describe("interaction inference", () => {
               relationshipRoles: [],
               tags: ["guitar", "renovation"],
               durableFacts: [
-                { category: "Family", label: "Son", value: "Austin" },
-                { category: "Interest", label: "Interest", value: "Guitar" },
+                { existingFactId: "fact-austin", category: "Family", label: "Son", value: "Austin" },
+                { existingFactId: "", category: "Interest", label: "Interest", value: "Guitar" },
               ],
               activeThreads: [{
+                existingThreadId: "thread-house",
                 topic: "House renovation",
                 state: "Permit received.",
                 whyItMatters: "It is a major ongoing project.",
@@ -56,6 +58,14 @@ describe("interaction inference", () => {
       personLabel: "Matthew",
       interactionDate: "2026-11-06",
       transcript: "Austin has been learning guitar. The renovation permit finally came through.",
+      currentMemory: {
+        durableFacts: [
+          { id: "fact-austin", category: "Family", label: "Son", value: "Austin" },
+        ],
+        activeThreads: [
+          { id: "thread-house", topic: "Pinecrest house renovation", state: "Permit received." },
+        ],
+      },
     }, {
       apiKey: "test-key",
       model: "test-model",
@@ -63,6 +73,7 @@ describe("interaction inference", () => {
     });
 
     expect(result.extraction.durableFacts[0]).toEqual({
+      existingFactId: "fact-austin",
       category: "Family",
       label: "Son",
       value: "Austin",
