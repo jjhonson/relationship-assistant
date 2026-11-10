@@ -17,6 +17,7 @@ export const INTERACTION_INFERENCE_SYSTEM_PROMPT = [
   "- Keep each durable fact concise: usually one short sentence. Do not bundle several unrelated facts into one value.",
   "- Always capture explicit relationship anchors even when they are not immediately actionable: names and relationships of family or other important people, birthdays and anniversaries, employer/job/role, school, home/location, and durable interests.",
   "- Active threads are situations currently unfolding and likely to change: a move, renovation, job search, business decision, project, school transition, health/fitness goal, or other ongoing arc.",
+  "- You will also receive the current structured relationship memory. When a durable fact or active thread clearly updates an existing item, copy its exact existing ID into existingFactId or existingThreadId. Use an empty string only for genuinely new items.",
   "- Order active threads by future relationship value: consequential unresolved situations first; routine background developments later.",
   "- Keep active-thread state and next-change signals concise. The record should be scannable without rereading the transcript.",
   "- Open loops require a genuine commitment or unresolved promise. Vague social language is not a commitment.",
@@ -77,8 +78,9 @@ export const interactionExtractionJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "label", "value"],
+        required: ["existingFactId", "category", "label", "value"],
         properties: {
+          existingFactId: { type: "string" },
           category: {
             type: "string",
             enum: ["Family", "Location", "Interest", "Work", "Personal", "Other"],
@@ -93,8 +95,9 @@ export const interactionExtractionJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["topic", "state", "whyItMatters", "nextChangeSignal"],
+        required: ["existingThreadId", "topic", "state", "whyItMatters", "nextChangeSignal"],
         properties: {
+          existingThreadId: { type: "string" },
           topic: { type: "string" },
           state: { type: "string" },
           whyItMatters: { type: "string" },
@@ -152,6 +155,10 @@ export async function inferInteractionWithOpenAI(
     personLabel: string;
     interactionDate: string;
     transcript: string;
+    currentMemory?: {
+      durableFacts: Array<{ id: string; category: string; label: string; value: string }>;
+      activeThreads: Array<{ id: string; topic: string; state: string }>;
+    };
   },
   options: {
     apiKey: string;
