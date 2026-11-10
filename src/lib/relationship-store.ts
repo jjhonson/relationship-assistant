@@ -19,7 +19,7 @@ function storePath() {
 async function readStore(): Promise<StoreFile> {
   const target = storePath();
   try {
-    const raw = await readFile(target.file, "utf8");
+    const raw = await readFile(/* turbopackIgnore: true */ target.file, "utf8");
     const parsed = JSON.parse(raw) as StoreFile;
     if (parsed.version !== 1 || !Array.isArray(parsed.relationships)) {
       throw new Error("Unsupported relationship store format.");
