@@ -18,6 +18,12 @@ export default async function RelationshipDetailPage({
   if (!relationship) notFound();
 
   const action = addTranscriptInteraction.bind(null, relationship.id);
+  const primaryFacts = relationship.durableFacts.slice(0, 4);
+  const additionalFacts = relationship.durableFacts.slice(4);
+  const primaryThreads = relationship.activeThreads.slice(0, 3);
+  const additionalThreads = relationship.activeThreads.slice(3);
+  const primaryOpportunities = relationship.stewardshipOpportunities.slice(0, 3);
+  const additionalOpportunities = relationship.stewardshipOpportunities.slice(3);
 
   return (
     <div className="space-y-6">
@@ -66,21 +72,40 @@ export default async function RelationshipDetailPage({
           {relationship.durableFacts.length === 0 ? (
             <p className="mt-4 text-sm text-stone-500">No durable facts captured yet.</p>
           ) : (
-            <ul className="mt-4 space-y-3">
-              {relationship.durableFacts.map((fact) => (
-                <li key={fact.id} className="rounded-xl bg-stone-50 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-                        {fact.category} · {fact.label}
-                      </p>
-                      <p className="mt-1 text-sm font-medium text-stone-900">{fact.value}</p>
+            <>
+              <ul className="mt-4 space-y-3">
+                {primaryFacts.map((fact) => (
+                  <li key={fact.id} className="rounded-xl bg-stone-50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+                          {fact.category} · {fact.label}
+                        </p>
+                        <p className="mt-1 text-sm font-medium text-stone-900">{fact.value}</p>
+                      </div>
+                      <span className="text-xs text-stone-500">{fact.lastObservedAt}</span>
                     </div>
-                    <span className="text-xs text-stone-500">{fact.lastObservedAt}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+              {additionalFacts.length > 0 && (
+                <details className="mt-3 text-sm">
+                  <summary className="cursor-pointer font-medium text-indigo-700">
+                    {additionalFacts.length} more things remembered
+                  </summary>
+                  <ul className="mt-3 space-y-3">
+                    {additionalFacts.map((fact) => (
+                      <li key={fact.id} className="rounded-xl bg-stone-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+                          {fact.category} · {fact.label}
+                        </p>
+                        <p className="mt-1 text-sm text-stone-800">{fact.value}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
           )}
         </div>
 
@@ -92,18 +117,34 @@ export default async function RelationshipDetailPage({
           {relationship.activeThreads.length === 0 ? (
             <p className="mt-4 text-sm text-stone-500">No active threads captured yet.</p>
           ) : (
-            <ul className="mt-4 space-y-4">
-              {relationship.activeThreads.map((thread) => (
-                <li key={thread.id} className="rounded-xl border border-stone-200 p-4">
-                  <h3 className="font-semibold text-stone-900">{thread.topic}</h3>
-                  <p className="mt-1 text-sm text-stone-700">{thread.state}</p>
-                  <p className="mt-2 text-sm text-stone-600">{thread.whyItMatters}</p>
-                  <p className="mt-3 text-xs font-medium text-indigo-700">
-                    Watch for: {thread.nextChangeSignal}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="mt-4 space-y-4">
+                {primaryThreads.map((thread) => (
+                  <li key={thread.id} className="rounded-xl border border-stone-200 p-4">
+                    <h3 className="font-semibold text-stone-900">{thread.topic}</h3>
+                    <p className="mt-1 text-sm text-stone-700">{thread.state}</p>
+                    <p className="mt-3 text-xs font-medium text-indigo-700">
+                      Watch for: {thread.nextChangeSignal}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              {additionalThreads.length > 0 && (
+                <details className="mt-3 text-sm">
+                  <summary className="cursor-pointer font-medium text-indigo-700">
+                    {additionalThreads.length} more active threads
+                  </summary>
+                  <ul className="mt-3 space-y-3">
+                    {additionalThreads.map((thread) => (
+                      <li key={thread.id} className="rounded-xl border border-stone-200 p-3">
+                        <p className="font-medium text-stone-900">{thread.topic}</p>
+                        <p className="mt-1 text-sm text-stone-600">{thread.state}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
           )}
         </div>
       </section>
@@ -116,16 +157,32 @@ export default async function RelationshipDetailPage({
         {relationship.stewardshipOpportunities.length === 0 ? (
           <p className="mt-4 text-sm text-stone-500">No new stewardship opportunity captured yet.</p>
         ) : (
-          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-            {relationship.stewardshipOpportunities.map((opportunity) => (
-              <li key={opportunity.id} className="rounded-xl bg-indigo-50 p-4">
-                <p className="font-medium text-indigo-950">{opportunity.reason}</p>
-                <p className="mt-2 text-sm text-indigo-800">
-                  Trigger: {opportunity.trigger}
-                </p>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+              {primaryOpportunities.map((opportunity) => (
+                <li key={opportunity.id} className="rounded-xl bg-indigo-50 p-4">
+                  <p className="font-medium text-indigo-950">{opportunity.reason}</p>
+                  <p className="mt-2 text-sm text-indigo-800">
+                    Trigger: {opportunity.trigger}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            {additionalOpportunities.length > 0 && (
+              <details className="mt-3 text-sm">
+                <summary className="cursor-pointer font-medium text-indigo-700">
+                  {additionalOpportunities.length} more possible reasons
+                </summary>
+                <ul className="mt-3 space-y-2">
+                  {additionalOpportunities.map((opportunity) => (
+                    <li key={opportunity.id} className="rounded-xl bg-indigo-50 p-3 text-indigo-950">
+                      {opportunity.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
         )}
       </section>
 
