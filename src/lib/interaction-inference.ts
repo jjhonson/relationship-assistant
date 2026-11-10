@@ -26,7 +26,7 @@ export const INTERACTION_INFERENCE_SYSTEM_PROMPT = [
   "- Relationship contexts and roles must be directly supported. Do not infer Former colleague merely because two people discuss work.",
   "- Preserve uncertainty in unknowns.",
   "- Do not draft outreach.",
-].join("\\n");
+].join("\n");
 
 const contextValues: RelationshipContextValue[] = [
   "Personal relationship",
@@ -194,7 +194,7 @@ export async function inferInteractionWithOpenAI(
         "",
         "Transcript:",
         input.transcript,
-      ].join("\\n"),
+      ].join("\n"),
       text: {
         format: {
           type: "json_schema",
@@ -244,7 +244,7 @@ function extractOutputText(response: OpenAIResponse) {
     throw new Error("Model refused the interaction inference request.");
   }
 
-  const text = texts.join("\\n").trim();
+  const text = texts.join("\n").trim();
   if (!text) throw new Error("Model returned no structured interaction output.");
   return text;
 }
