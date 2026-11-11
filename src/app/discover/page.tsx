@@ -63,6 +63,7 @@ export default async function DiscoverPage({
       { force: forceFresh },
     );
     result = { kind: "ready", sample };
+    if (forceFresh) redirect("/discover");
   } catch (error) {
     result = {
       kind: "error",
