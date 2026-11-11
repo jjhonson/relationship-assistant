@@ -37,6 +37,8 @@ export type DiscoveryAnalysis = {
 export type AnalysisOptions = {
   /** Account-owner addresses known from the Gmail profile; suppressed as candidates. */
   ownerAddresses?: string[];
+  /** User-confirmed identities that should stay out of onboarding results. */
+  excludedAddresses?: string[];
 };
 
 export type ProbeOutcome = "counted" | "self" | "otherRole" | "bulk" | "group" | "automated" | "unparseable" | "draft";
@@ -353,7 +355,11 @@ function analyze(
   }
   diagnostics.distinctMonths = months.size;
 
+  const excluded = new Set(
+    (options.excludedAddresses ?? []).map((address) => address.trim().toLowerCase()).filter(Boolean),
+  );
   const viable = [...candidates.values()].filter((candidate) => {
+    if (excluded.has(candidate.address)) return false;
     if (candidate.sent > 0) return true;
     if (candidate.received > ONE_WAY_INBOUND_LIMIT) {
       diagnostics.excludedOneWayHighVolume++;
