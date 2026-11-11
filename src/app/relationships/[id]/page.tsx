@@ -239,7 +239,20 @@ export default async function RelationshipDetailPage({
 
       <details className="rounded-2xl border border-stone-200 bg-white p-6">
         <summary className="cursor-pointer font-semibold">Sources and limits</summary>
-        <ul className="mt-4 space-y-2 text-sm text-stone-600">
+        {(relationship.identities?.length ?? 0) > 0 && (
+          <>
+            <h3 className="mt-4 font-semibold text-stone-900">Confirmed identities</h3>
+            <ul className="mt-2 space-y-2 text-sm text-stone-600">
+              {relationship.identities.map((identity) => (
+                <li key={identity.id}>
+                  {identity.source} · {identity.kind} · {identity.value}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <h3 className="mt-4 font-semibold text-stone-900">Sources</h3>
+        <ul className="mt-2 space-y-2 text-sm text-stone-600">
           {relationship.sources.map((source) => (
             <li key={source.id}>
               {source.observedAt} · {source.label} · {source.source}
