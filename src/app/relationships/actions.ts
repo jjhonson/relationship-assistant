@@ -10,6 +10,11 @@ import type {
 } from "@/lib/inference-benchmark";
 import type { DiscoveryCandidate } from "@/lib/gmail/discovery";
 import { isLookupAddress } from "@/lib/gmail/messages";
+import {
+  removeDiscoveryExclusion,
+  saveDiscoveryExclusion,
+  type DiscoveryExclusionReason,
+} from "@/lib/discovery-preferences";
 import { inferInteractionWithOpenAI } from "@/lib/interaction-inference";
 import {
   createDiscoveredRelationshipRecord,
@@ -65,6 +70,36 @@ export async function savePilotRelationship(result: ReadyPilotAnalysis) {
   await saveRelationship(record);
   revalidatePath("/relationships");
   return { ok: true as const, id: record.id };
+}
+
+const exclusionReasons = new Set<DiscoveryExclusionReason>([
+  "self",
+  "close-family",
+  "not-person",
+  "out-of-scope",
+]);
+
+export async function excludeDiscoveredIdentity(
+  address: string,
+  reason: DiscoveryExclusionReason,
+) {
+  ensureDevelopment();
+  const normalized = String(address ?? "").trim().toLowerCase();
+  if (!isLookupAddress(normalized) || !exclusionReasons.has(reason)) {
+    throw new Error("Discovery exclusion is invalid.");
+  }
+  await saveDiscoveryExclusion(normalized, reason);
+  revalidatePath("/discover");
+  return { ok: true as const };
+}
+
+export async function restoreDiscoveredIdentity(address: string) {
+  ensureDevelopment();
+  const normalized = String(address ?? "").trim().toLowerCase();
+  if (!isLookupAddress(normalized)) throw new Error("Discovery identity is invalid.");
+  await removeDiscoveryExclusion(normalized);
+  revalidatePath("/discover");
+  return { ok: true as const };
 }
 
 export async function saveDiscoveredRelationship(
