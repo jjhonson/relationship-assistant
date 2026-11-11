@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { saveDiscoveredRelationship } from "@/app/relationships/actions";
+import {
+  excludeDiscoveredIdentity,
+  restoreDiscoveredIdentity,
+  saveDiscoveredRelationship,
+} from "@/app/relationships/actions";
 import type {
   RelationshipContextValue,
   RelationshipRoleValue,
@@ -32,6 +36,7 @@ const roleOptions: RelationshipRoleValue[] = [
 
 export function DiscoveryResults({
   candidates,
+  hiddenCount,
   diagnostics,
   sampling,
   examined,
@@ -39,6 +44,7 @@ export function DiscoveryResults({
   newest,
 }: {
   candidates: DiscoveryCandidate[];
+  hiddenCount: number;
   diagnostics: DiscoveryDiagnostics;
   sampling: SamplingStats;
   examined: number;
@@ -104,6 +110,7 @@ export function DiscoveryResults({
           </div>
           <div>
             Viable candidates: {diagnostics.candidatesSurviving}; displayed: {candidates.length}
+            {hiddenCount > 0 ? `; ${hiddenCount} hidden by prior onboarding choices` : ""}
           </div>
           <div>Sent budget: {sampling.sentBudget}</div>
           <div>Reply-lookup budget: {sampling.enrichmentBudget}</div>
@@ -117,6 +124,15 @@ export function DiscoveryResults({
   );
 }
 
+type ExclusionReason = "self" | "close-family" | "not-person" | "out-of-scope";
+
+const exclusionChoices: Array<{ reason: ExclusionReason; label: string; detail: string }> = [
+  { reason: "self", label: "This is me", detail: "Treat this address as one of my own identities." },
+  { reason: "close-family", label: "Close family / closest friend", detail: "Important, but outside this product's relationship-management scope." },
+  { reason: "not-person", label: "Not a person", detail: "A team, service, shared mailbox, or automated identity." },
+  { reason: "out-of-scope", label: "Not for this network", detail: "A real person, but not someone I want Relationship Agent to manage." },
+];
+
 function CandidateCard({ candidate }: { candidate: DiscoveryCandidate }) {
   const [choice, setChoice] = useState<"undecided" | "keep" | "skip">("undecided");
   const [contexts, setContexts] = useState<RelationshipContextValue[]>([]);
@@ -125,6 +141,12 @@ function CandidateCard({ candidate }: { candidate: DiscoveryCandidate }) {
     | { kind: "idle" }
     | { kind: "saving" }
     | { kind: "saved"; id: string; existing: boolean }
+    | { kind: "error" }
+  >({ kind: "idle" });
+  const [exclusionState, setExclusionState] = useState<
+    | { kind: "idle" }
+    | { kind: "saving" }
+    | { kind: "excluded"; reason: ExclusionReason }
     | { kind: "error" }
   >({ kind: "idle" });
 
@@ -150,17 +172,40 @@ function CandidateCard({ candidate }: { candidate: DiscoveryCandidate }) {
     }
   }
 
-  if (choice === "skip") {
+  async function exclude(reason: ExclusionReason) {
+    setExclusionState({ kind: "saving" });
+    try {
+      await excludeDiscoveredIdentity(candidate.address, reason);
+      setExclusionState({ kind: "excluded", reason });
+    } catch {
+      setExclusionState({ kind: "error" });
+    }
+  }
+
+  async function undoExclusion() {
+    setExclusionState({ kind: "saving" });
+    try {
+      await restoreDiscoveredIdentity(candidate.address);
+      setExclusionState({ kind: "idle" });
+      setChoice("undecided");
+    } catch {
+      setExclusionState({ kind: "error" });
+    }
+  }
+
+  if (choice === "skip" && exclusionState.kind === "excluded") {
+    const label = exclusionChoices.find((item) => item.reason === exclusionState.reason)?.label ?? "Hidden";
     return (
       <li className="rounded-2xl border border-stone-200 bg-stone-50 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="font-semibold text-stone-700">{candidate.name}</p>
-            <p className="text-sm text-stone-500">Skipped for now.</p>
+            <p className="text-sm text-stone-500">{label}. Hidden from future onboarding runs.</p>
           </div>
           <button
             type="button"
-            onClick={() => setChoice("undecided")}
+            onClick={undoExclusion}
+            disabled={exclusionState.kind === "saving"}
             className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm"
           >
             Undo
@@ -208,6 +253,46 @@ function CandidateCard({ candidate }: { candidate: DiscoveryCandidate }) {
           >
             Skip
           </button>
+        </div>
+      )}
+
+      {choice === "skip" && exclusionState.kind !== "excluded" && (
+        <div className="mt-5 border-t border-stone-200 pt-5">
+          <p className="font-medium text-stone-900">Why should this stay out of Relationship Agent?</p>
+          <p className="mt-1 text-sm text-stone-600">
+            This choice is remembered so the same address does not keep coming back in onboarding.
+          </p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {exclusionChoices.map((item) => (
+              <button
+                key={item.reason}
+                type="button"
+                onClick={() => exclude(item.reason)}
+                disabled={exclusionState.kind === "saving"}
+                className="rounded-xl border border-stone-300 p-3 text-left hover:border-stone-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="block text-sm font-medium text-stone-900">{item.label}</span>
+                <span className="mt-1 block text-xs text-stone-600">{item.detail}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setChoice("undecided");
+                setExclusionState({ kind: "idle" });
+              }}
+              disabled={exclusionState.kind === "saving"}
+              className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+            >
+              Cancel
+            </button>
+            {exclusionState.kind === "saving" && <span className="text-sm text-stone-500">Saving…</span>}
+            {exclusionState.kind === "error" && (
+              <span className="text-sm text-red-700">Could not save this choice. Try again.</span>
+            )}
+          </div>
         </div>
       )}
 
