@@ -5,13 +5,23 @@ import { DiscoveryResults } from "@/components/DiscoveryResults";
 import { loadConfig } from "@/lib/gmail/config";
 import { listDiscoveryExclusions } from "@/lib/discovery-preferences";
 import { analyzeDiscovery } from "@/lib/gmail/discovery";
-import { fetchDiscoverySample, fetchOwnerAddress } from "@/lib/gmail/messages";
+import {
+  ApiError,
+  fetchDiscoverySampleCached,
+  fetchOwnerAddress,
+} from "@/lib/gmail/messages";
 import { AuthError } from "@/lib/gmail/oauth";
 import { CRED_COOKIE, credentialPageAction, readCreds } from "@/lib/gmail/session";
 
 export const dynamic = "force-dynamic";
 
-export default async function DiscoverPage() {
+export default async function DiscoverPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ fresh?: string }>;
+}) {
+  const { fresh } = await searchParams;
+  const forceFresh = fresh === "1";
   const cfg = loadConfig();
   const store = await cookies();
   const creds = cfg.ok ? readCreds(store.get(CRED_COOKIE)?.value, cfg.config.sessionSecret) : null;
@@ -39,20 +49,28 @@ export default async function DiscoverPage() {
   }
 
   let result:
-    | { kind: "ready"; sample: Awaited<ReturnType<typeof fetchDiscoverySample>> }
+    | { kind: "ready"; sample: Awaited<ReturnType<typeof fetchDiscoverySampleCached>> }
     | { kind: "error"; message: string; href: string; action: string };
   let ownerAddresses: string[] = [];
   try {
     const owner = await fetchOwnerAddress(creds.accessToken);
     ownerAddresses = owner ? [owner] : [];
-    const sample = await fetchDiscoverySample(creds.accessToken, cfg.config.discoverySampleSize, new Date(), ownerAddresses);
+    const sample = await fetchDiscoverySampleCached(
+      creds.accessToken,
+      cfg.config.discoverySampleSize,
+      new Date(),
+      ownerAddresses,
+      { force: forceFresh },
+    );
     result = { kind: "ready", sample };
   } catch (error) {
     result = {
       kind: "error",
       message: error instanceof AuthError
         ? "Your Gmail session expired or was revoked. Reconnect to continue."
-        : "Gmail could not be reached right now. Please try again later.",
+        : error instanceof ApiError && error.rateLimited
+          ? "Gmail temporarily rate-limited this discovery scan. Once a scan succeeds, ordinary page refreshes will reuse it for 10 minutes instead of rescanning Gmail."
+          : "Gmail could not complete the discovery scan.",
       href: error instanceof AuthError ? "/api/gmail/connect" : "/discover",
       action: error instanceof AuthError ? "Reconnect Gmail" : "Retry",
     };
@@ -91,10 +109,25 @@ export default async function DiscoverPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight">Find people worth carrying forward</h1>
-        <p className="mt-2 max-w-3xl text-stone-600">
-          Start with a bounded Gmail metadata sample, then confirm the people you actually want to remember. Message bodies are not read here.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Find people worth carrying forward</h1>
+            <p className="mt-2 max-w-3xl text-stone-600">
+              Start with a bounded Gmail metadata sample, then confirm the people you actually want to remember. Message bodies are not read here.
+            </p>
+            <p className="mt-2 text-xs text-stone-500">
+              {result.sample.cache === "live" && "Fresh Gmail metadata scan."}
+              {result.sample.cache === "hit" && "Reusing the current Gmail metadata scan to avoid unnecessary API traffic."}
+              {result.sample.cache === "stale" && "Showing the last successful Gmail metadata scan because the refresh could not complete."}
+            </p>
+          </div>
+          <a
+            href="/discover?fresh=1"
+            className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:border-stone-400"
+          >
+            Scan Gmail again
+          </a>
+        </div>
       </header>
       <DiscoveryResults
         candidates={visibleCandidates}
