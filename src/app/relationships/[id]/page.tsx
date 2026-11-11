@@ -58,7 +58,7 @@ export default async function RelationshipDetailPage({
           )}
         </div>
         <p className="mt-4 text-sm text-stone-600">
-          Last interaction: {relationship.lastInteractionAt ?? "Unknown"} · {relationship.sources.length} source
+          Last observed interaction: {relationship.lastInteractionAt ?? "Unknown"} · {relationship.sources.length} source
           {relationship.sources.length === 1 ? "" : "s"} represented
         </p>
       </header>
