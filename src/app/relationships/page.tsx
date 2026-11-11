@@ -104,8 +104,8 @@ export default async function RelationshipsPage() {
                 : relationships.length + " relationship" + (relationships.length === 1 ? "" : "s") + " saved."}
             </p>
           </div>
-          <Link href="/real-pilot" className="text-sm font-medium text-indigo-700 hover:underline">
-            Analyze someone from Gmail →
+          <Link href="/discover" className="text-sm font-medium text-indigo-700 hover:underline">
+            Find people from Gmail →
           </Link>
         </div>
 
