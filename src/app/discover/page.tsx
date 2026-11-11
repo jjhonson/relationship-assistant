@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { DiagnosticPanel } from "@/components/DiagnosticPanel";
 import { DiscoveryResults } from "@/components/DiscoveryResults";
 import { loadConfig } from "@/lib/gmail/config";
+import { listDiscoveryExclusions } from "@/lib/discovery-preferences";
 import { analyzeDiscovery } from "@/lib/gmail/discovery";
 import { fetchDiscoverySample, fetchOwnerAddress } from "@/lib/gmail/messages";
 import { AuthError } from "@/lib/gmail/oauth";
@@ -70,6 +71,17 @@ export default async function DiscoverPage() {
   }
 
   const { candidates, diagnostics } = analyzeDiscovery(result.sample.messages, 10, { ownerAddresses });
+  const exclusions = process.env.NODE_ENV === "development"
+    ? await listDiscoveryExclusions()
+    : [];
+  const excludedAddresses = new Set(
+    exclusions
+      .filter((item) => item.source === "gmail" && item.kind === "email")
+      .map((item) => item.value),
+  );
+  const visibleCandidates = candidates.filter(
+    (candidate) => !excludedAddresses.has(candidate.address.trim().toLowerCase()),
+  );
   const dates = result.sample.messages
     .map((message) => message.internalDate ? new Date(Number(message.internalDate)) : null)
     .filter((date): date is Date => date !== null && !Number.isNaN(date.getTime()))
@@ -85,7 +97,8 @@ export default async function DiscoverPage() {
         </p>
       </header>
       <DiscoveryResults
-        candidates={candidates}
+        candidates={visibleCandidates}
+        hiddenCount={candidates.length - visibleCandidates.length}
         diagnostics={diagnostics}
         sampling={result.sample.stats}
         examined={result.sample.messages.length}
