@@ -25,6 +25,7 @@ export type DiscoveryDiagnostics = {
   excludedUnparseable: number;
   excludedOneWayHighVolume: number;
   excludedSingleInbound: number;
+  excludedUserConfirmed: number;
   distinctMonths: number;
   candidatesSurviving: number;
 };
@@ -185,6 +186,7 @@ const emptyDiagnostics = (): DiscoveryDiagnostics => ({
   excludedUnparseable: 0,
   excludedOneWayHighVolume: 0,
   excludedSingleInbound: 0,
+  excludedUserConfirmed: 0,
   distinctMonths: 0,
   candidatesSurviving: 0,
 });
@@ -359,7 +361,10 @@ function analyze(
     (options.excludedAddresses ?? []).map((address) => address.trim().toLowerCase()).filter(Boolean),
   );
   const viable = [...candidates.values()].filter((candidate) => {
-    if (excluded.has(candidate.address)) return false;
+    if (excluded.has(candidate.address)) {
+      diagnostics.excludedUserConfirmed++;
+      return false;
+    }
     if (candidate.sent > 0) return true;
     if (candidate.received > ONE_WAY_INBOUND_LIMIT) {
       diagnostics.excludedOneWayHighVolume++;
