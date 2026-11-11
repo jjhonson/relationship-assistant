@@ -131,7 +131,7 @@ export default async function DiscoverPage({
       </header>
       <DiscoveryResults
         candidates={candidates}
-        hiddenCount={excludedAddresses.length}
+        hiddenCount={diagnostics.excludedUserConfirmed}
         diagnostics={diagnostics}
         sampling={result.sample.stats}
         examined={result.sample.messages.length}
