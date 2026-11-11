@@ -89,17 +89,16 @@ export default async function DiscoverPage({
     );
   }
 
-  const { candidates, diagnostics } = analyzeDiscovery(result.sample.messages, 10, { ownerAddresses });
   const exclusions = process.env.NODE_ENV === "development"
     ? await listDiscoveryExclusions()
     : [];
-  const excludedAddresses = new Set(
-    exclusions
-      .filter((item) => item.source === "gmail" && item.kind === "email")
-      .map((item) => item.value),
-  );
-  const visibleCandidates = candidates.filter(
-    (candidate) => !excludedAddresses.has(candidate.address.trim().toLowerCase()),
+  const excludedAddresses = exclusions
+    .filter((item) => item.source === "gmail" && item.kind === "email")
+    .map((item) => item.value);
+  const { candidates, diagnostics } = analyzeDiscovery(
+    result.sample.messages,
+    10,
+    { ownerAddresses, excludedAddresses },
   );
   const dates = result.sample.messages
     .map((message) => message.internalDate ? new Date(Number(message.internalDate)) : null)
@@ -131,8 +130,8 @@ export default async function DiscoverPage({
         </div>
       </header>
       <DiscoveryResults
-        candidates={visibleCandidates}
-        hiddenCount={candidates.length - visibleCandidates.length}
+        candidates={candidates}
+        hiddenCount={excludedAddresses.length}
         diagnostics={diagnostics}
         sampling={result.sample.stats}
         examined={result.sample.messages.length}
