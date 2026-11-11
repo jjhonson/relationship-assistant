@@ -21,8 +21,10 @@ export default async function DiscoverPage() {
   if (!cfg.ok || !creds) {
     return (
       <div className="max-w-2xl">
-        <h1 className="text-3xl font-bold tracking-tight">Discover relationships</h1>
-        <p className="mt-2 text-stone-600">Review a small, historical sample of Gmail metadata for possible direct contacts.</p>
+        <h1 className="text-3xl font-bold tracking-tight">Find people worth carrying forward</h1>
+        <p className="mt-2 text-stone-600">
+          Use a small, metadata-only Gmail sample to find plausible relationships, then choose who belongs in Relationship Memory.
+        </p>
         <p role="status" className="mt-5 rounded-xl bg-amber-100 p-4 text-amber-950">
           {cfg.ok ? "Connect Gmail to run this on-demand experiment." : "Gmail is not configured. See the README for setup details."}
         </p>
@@ -58,7 +60,7 @@ export default async function DiscoverPage() {
   if (result.kind === "error") {
     return (
       <div className="max-w-2xl">
-        <h1 className="text-3xl font-bold tracking-tight">Discover relationships</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Find people worth carrying forward</h1>
         <p role="alert" className="mt-5 rounded-xl bg-amber-100 p-4 text-amber-950">{result.message}</p>
         <a href={result.href} className="mt-4 inline-block rounded-lg bg-indigo-700 px-4 py-2 font-medium text-white">
           {result.action}
@@ -77,9 +79,9 @@ export default async function DiscoverPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight">Discover relationships</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Find people worth carrying forward</h1>
         <p className="mt-2 max-w-3xl text-stone-600">
-          A bounded, metadata-only experiment to surface possible professional contacts. Nothing here confirms a relationship.
+          Start with a bounded Gmail metadata sample, then confirm the people you actually want to remember. Message bodies are not read here.
         </p>
       </header>
       <DiscoveryResults
