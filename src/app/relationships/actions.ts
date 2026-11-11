@@ -8,14 +8,26 @@ import type {
   RelationshipContextValue,
   RelationshipRoleValue,
 } from "@/lib/inference-benchmark";
+import type { DiscoveryCandidate } from "@/lib/gmail/discovery";
+import { isLookupAddress } from "@/lib/gmail/messages";
+import {
+  removeDiscoveryExclusion,
+  saveDiscoveryExclusion,
+  type DiscoveryExclusionReason,
+} from "@/lib/discovery-preferences";
 import { inferInteractionWithOpenAI } from "@/lib/interaction-inference";
 import {
+  createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
   createRelationshipRecord,
   mergeInteractionIntoRelationship,
   type RelationshipSource,
 } from "@/lib/relationship-record";
-import { getRelationship, saveRelationship } from "@/lib/relationship-store";
+import {
+  findRelationshipByIdentity,
+  getRelationship,
+  saveRelationship,
+} from "@/lib/relationship-store";
 
 type ReadyPilotAnalysis = Extract<PilotAnalysisResult, { kind: "ready" }>;
 
@@ -58,6 +70,96 @@ export async function savePilotRelationship(result: ReadyPilotAnalysis) {
   await saveRelationship(record);
   revalidatePath("/relationships");
   return { ok: true as const, id: record.id };
+}
+
+const exclusionReasons = new Set<DiscoveryExclusionReason>([
+  "self",
+  "close-family",
+  "not-person",
+  "out-of-scope",
+]);
+
+export async function excludeDiscoveredIdentity(
+  address: string,
+  reason: DiscoveryExclusionReason,
+) {
+  ensureDevelopment();
+  const normalized = String(address ?? "").trim().toLowerCase();
+  if (!isLookupAddress(normalized) || !exclusionReasons.has(reason)) {
+    throw new Error("Discovery exclusion is invalid.");
+  }
+  await saveDiscoveryExclusion(normalized, reason);
+  revalidatePath("/discover");
+  return { ok: true as const };
+}
+
+export async function restoreDiscoveredIdentity(address: string) {
+  ensureDevelopment();
+  const normalized = String(address ?? "").trim().toLowerCase();
+  if (!isLookupAddress(normalized)) throw new Error("Discovery identity is invalid.");
+  await removeDiscoveryExclusion(normalized);
+  revalidatePath("/discover");
+  return { ok: true as const };
+}
+
+export async function saveDiscoveredRelationship(
+  candidate: DiscoveryCandidate,
+  selectedContexts: string[],
+  selectedRoles: string[],
+) {
+  ensureDevelopment();
+
+  const personLabel = String(candidate.name ?? "").trim();
+  const address = String(candidate.address ?? "").trim().toLowerCase();
+  if (!personLabel || !isLookupAddress(address)) {
+    throw new Error("Discovery candidate is invalid.");
+  }
+
+  const contextValues = selectedContexts
+    .filter((value): value is RelationshipContextValue =>
+      contexts.has(value as RelationshipContextValue),
+    );
+  const roleValues = selectedRoles
+    .filter((value): value is RelationshipRoleValue =>
+      roles.has(value as RelationshipRoleValue),
+    );
+
+  const existing = await findRelationshipByIdentity("gmail", "email", address);
+  if (existing) {
+    return { ok: true as const, id: existing.id, existing: true as const };
+  }
+
+  const record = createDiscoveredRelationshipRecord(
+    {
+      personLabel,
+      identity: {
+        kind: "email",
+        value: address,
+        source: "gmail",
+        label: personLabel,
+      },
+      lastObservedAt: /^\d{4}-\d{2}-\d{2}$/.test(candidate.lastExchange ?? "")
+        ? candidate.lastExchange
+        : null,
+      uncertainty: [
+        "Possible",
+        "Two-way exchange observed",
+        "Repeated correspondence observed",
+      ].includes(candidate.uncertainty)
+        ? candidate.uncertainty
+        : "Possible",
+      evidenceSummary: Array.isArray(candidate.reasons)
+        ? candidate.reasons.slice(0, 4).map((reason) => String(reason).slice(0, 500))
+        : [],
+    },
+    contextValues,
+    roleValues,
+  );
+
+  await saveRelationship(record);
+  revalidatePath("/relationships");
+  revalidatePath("/discover");
+  return { ok: true as const, id: record.id, existing: false as const };
 }
 
 export async function createManualRelationship(formData: FormData) {

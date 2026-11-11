@@ -12,6 +12,29 @@ export type RelationshipSource = {
   label: string;
 };
 
+export type RelationshipIdentity = {
+  id: string;
+  kind: "email";
+  value: string;
+  source: "gmail";
+  label: string;
+  confirmed: boolean;
+  sourceIds: string[];
+};
+
+export type DiscoveredRelationshipSeed = {
+  personLabel: string;
+  identity: {
+    kind: "email";
+    value: string;
+    source: "gmail";
+    label: string;
+  };
+  lastObservedAt: string | null;
+  uncertainty: string;
+  evidenceSummary: string[];
+};
+
 export type DurableRelationshipFact = {
   id: string;
   category: "Family" | "Location" | "Interest" | "Work" | "Personal" | "Other";
@@ -65,6 +88,7 @@ export type RelationshipRecord = {
   }>;
   unknowns: string[];
   confidence: RelationshipInference["confidence"];
+  identities: RelationshipIdentity[];
   durableFacts: DurableRelationshipFact[];
   activeThreads: ActiveRelationshipThread[];
   stewardshipOpportunities: StewardshipOpportunity[];
@@ -133,6 +157,7 @@ export function createRelationshipRecord(
     })),
     unknowns: inference.unknowns,
     confidence: inference.confidence,
+    identities: [],
     durableFacts: [],
     activeThreads: [],
     stewardshipOpportunities: [],
@@ -142,30 +167,26 @@ export function createRelationshipRecord(
 
 export function createManualRelationshipRecord(
   personLabel: string,
-  context?: RelationshipContextValue,
-  role?: RelationshipRoleValue,
+  context?: RelationshipContextValue | RelationshipContextValue[],
+  role?: RelationshipRoleValue | RelationshipRoleValue[],
   now = new Date(),
 ): RelationshipRecord {
   const timestamp = now.toISOString();
+  const relationshipContexts = unique(
+    (Array.isArray(context) ? context : context ? [context] : []),
+  );
+  const relationshipRoles = unique(
+    (Array.isArray(role) ? role : role ? [role] : []),
+  );
   return {
     id: randomUUID(),
     personLabel: personLabel.trim(),
     createdAt: timestamp,
     updatedAt: timestamp,
     lastInteractionAt: null,
-    classification: context === "Family" || context === "Personal relationship"
-      ? "Friend or family"
-      : context === "Recruiter"
-        ? "Recruiter"
-        : context === "Current coworker"
-          ? "Coworker"
-          : context === "Service provider"
-            ? "Service provider"
-            : context
-              ? "Professional contact"
-              : "Unknown",
-    relationshipContexts: context ? [context] : [],
-    relationshipRoles: role ? [role] : [],
+    classification: classificationForContexts(relationshipContexts),
+    relationshipContexts,
+    relationshipRoles,
     disposition: "Relationship worth managing",
     currentState: "Unclear",
     tags: [],
@@ -179,6 +200,7 @@ export function createManualRelationshipRecord(
     reasonsToEngage: [],
     unknowns: ["Historical relationship evidence has not been reconstructed yet."],
     confidence: "Low",
+    identities: [],
     durableFacts: [],
     activeThreads: [],
     stewardshipOpportunities: [],
@@ -188,6 +210,69 @@ export function createManualRelationshipRecord(
       observedAt: timestamp.slice(0, 10),
       label: "User-confirmed relationship",
     }],
+  };
+}
+
+export function createDiscoveredRelationshipRecord(
+  seed: DiscoveredRelationshipSeed,
+  contexts: RelationshipContextValue[] = [],
+  roles: RelationshipRoleValue[] = [],
+  now = new Date(),
+): RelationshipRecord {
+  const timestamp = now.toISOString();
+  const observedAt = seed.lastObservedAt ?? timestamp.slice(0, 10);
+  const source: RelationshipSource = {
+    id: "gmail-metadata:" + randomUUID(),
+    source: "gmail",
+    observedAt,
+    label: "Gmail metadata discovery",
+  };
+  const relationshipContexts = unique(contexts);
+  const relationshipRoles = unique(roles);
+  const evidence = seed.evidenceSummary.map((item) => item.trim()).filter(Boolean).join(" ");
+
+  return {
+    id: randomUUID(),
+    personLabel: seed.personLabel.trim(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastInteractionAt: seed.lastObservedAt,
+    classification: classificationForContexts(relationshipContexts),
+    relationshipContexts,
+    relationshipRoles,
+    disposition: "Relationship worth managing",
+    currentState: "Unclear",
+    tags: [],
+    history: {
+      earliestObservedMeaningfulInteraction: "",
+      latestObservedMeaningfulInteraction: seed.lastObservedAt ?? "",
+      pattern: [
+        "Surfaced by bounded, metadata-only Gmail discovery.",
+        seed.uncertainty ? "Discovery signal: " + seed.uncertainty + "." : "",
+        evidence,
+      ].filter(Boolean).join(" "),
+      evidenceIds: [source.id],
+    },
+    openLoops: [],
+    reasonsToEngage: [],
+    unknowns: [
+      "Message content and full relationship history have not been reconstructed.",
+      "Gmail discovery is bounded and incomplete; other channels may contain important context.",
+    ],
+    confidence: "Low",
+    identities: [{
+      id: randomUUID(),
+      kind: seed.identity.kind,
+      value: seed.identity.value.trim().toLowerCase(),
+      source: seed.identity.source,
+      label: seed.identity.label.trim(),
+      confirmed: true,
+      sourceIds: [source.id],
+    }],
+    durableFacts: [],
+    activeThreads: [],
+    stewardshipOpportunities: [],
+    sources: [source],
   };
 }
 
@@ -317,6 +402,17 @@ function mergeByKey<T>(existing: T[], incoming: T[], key: (item: T) => string) {
     }
   }
   return result;
+}
+
+function classificationForContexts(
+  contexts: RelationshipContextValue[],
+): RelationshipInference["classification"]["value"] {
+  if (contexts.includes("Family") || contexts.includes("Personal relationship")) return "Friend or family";
+  if (contexts.includes("Recruiter")) return "Recruiter";
+  if (contexts.includes("Current coworker")) return "Coworker";
+  if (contexts.includes("Service provider")) return "Service provider";
+  if (contexts.length > 0) return "Professional contact";
+  return "Unknown";
 }
 
 function unique<T extends string>(items: T[]): T[] {

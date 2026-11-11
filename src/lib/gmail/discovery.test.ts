@@ -159,6 +159,21 @@ describe("relationship discovery ranking", () => {
     expect(diagnostics.candidatesSurviving).toBe(12);
   });
 
+  it("applies user-confirmed exclusions before the ten-candidate display cap so the shortlist backfills", () => {
+    const messages = Array.from({ length: 12 }, (_, i) =>
+      out(`contact-${i}`, `Person ${i} <person${i}@example.test>`),
+    );
+    const { candidates, diagnostics } = analyzeDiscovery(messages, 10, {
+      excludedAddresses: ["person0@example.test", "PERSON1@example.test"],
+    });
+
+    expect(candidates).toHaveLength(10);
+    expect(candidates.map((candidate) => candidate.address)).not.toContain("person0@example.test");
+    expect(candidates.map((candidate) => candidate.address)).not.toContain("person1@example.test");
+    expect(diagnostics.excludedUserConfirmed).toBe(2);
+    expect(diagnostics.candidatesSurviving).toBe(10);
+  });
+
   it("does not let a high-volume marketing sender outrank a modest real correspondent", () => {
     const spam = Array.from({ length: 30 }, (_, i) =>
       message(`m${i}`, "Gadgets Weekly <gadgets@shopco.example.test>", "Owner <owner@example.test>", `Mon, ${String((i % 28) + 1).padStart(2, "0")} Jan 2024 10:00:00 +0000`),

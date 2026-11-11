@@ -21,7 +21,15 @@ export type DiscoveryMessage = {
   payload?: { headers?: { name: string; value: string }[] };
 };
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly rateLimited = false,
+  ) {
+    super(message);
+  }
+}
 
 async function get<T>(path: string, token: string): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -44,7 +52,9 @@ async function get<T>(path: string, token: string): Promise<T> {
       } catch {}
     }
     const retryable = rateLimited || [500, 502, 503, 504].includes(res.status);
-    if (!retryable || attempt === 2) throw new ApiError(`Gmail API returned ${res.status}`);
+    if (!retryable || attempt === 2) {
+      throw new ApiError(`Gmail API returned ${res.status}`, res.status, rateLimited);
+    }
 
     const retryAfter = Number(res.headers.get("Retry-After"));
     const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -191,12 +201,74 @@ const sentQuery = ({ after, before }: CalendarWindow) => `in:sent -in:drafts aft
  *     incoming messages to look for evidence of replies.
  * Total message detail fetches never exceed `limit` (max 200).
  */
+const DISCOVERY_CACHE_TTL_MS = 10 * 60 * 1000;
+
+type DiscoverySample = { messages: DiscoveryMessage[]; stats: SamplingStats };
+
+type DiscoveryCacheEntry = {
+  key: string;
+  sample: DiscoverySample;
+  cachedAt: number;
+};
+
+let discoveryCache: DiscoveryCacheEntry | null = null;
+
+function discoveryCacheKey(limit: number, ownerAddresses: string[]) {
+  return JSON.stringify({
+    limit: Math.max(1, Math.min(Math.floor(limit), 200)),
+    owners: [...ownerAddresses].map((value) => value.trim().toLowerCase()).sort(),
+  });
+}
+
+export async function fetchDiscoverySampleCached(
+  token: string,
+  limit: number,
+  now = new Date(),
+  ownerAddresses: string[] = [],
+  options: { force?: boolean } = {},
+): Promise<DiscoverySample & { cache: "live" | "hit" | "stale"; cachedAt: string }> {
+  const key = discoveryCacheKey(limit, ownerAddresses);
+  const current = Date.now();
+
+  if (
+    !options.force &&
+    discoveryCache &&
+    discoveryCache.key === key &&
+    current - discoveryCache.cachedAt < DISCOVERY_CACHE_TTL_MS
+  ) {
+    return {
+      ...discoveryCache.sample,
+      cache: "hit",
+      cachedAt: new Date(discoveryCache.cachedAt).toISOString(),
+    };
+  }
+
+  try {
+    const sample = await fetchDiscoverySample(token, limit, now, ownerAddresses);
+    discoveryCache = { key, sample, cachedAt: current };
+    return {
+      ...sample,
+      cache: "live",
+      cachedAt: new Date(current).toISOString(),
+    };
+  } catch (error) {
+    if (discoveryCache && discoveryCache.key === key) {
+      return {
+        ...discoveryCache.sample,
+        cache: "stale",
+        cachedAt: new Date(discoveryCache.cachedAt).toISOString(),
+      };
+    }
+    throw error;
+  }
+}
+
 export async function fetchDiscoverySample(
   token: string,
   limit: number,
   now = new Date(),
   ownerAddresses: string[] = [],
-): Promise<{ messages: DiscoveryMessage[]; stats: SamplingStats }> {
+): Promise<DiscoverySample> {
   const cap = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 200)) : 200;
   const sentBudget = cap >= 2 ? Math.max(1, Math.ceil(cap * SENT_SHARE)) : cap;
   let months = calendarWindows(now, 12);

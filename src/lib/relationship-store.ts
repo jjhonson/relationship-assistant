@@ -1,7 +1,7 @@
 import "server-only";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { RelationshipRecord } from "./relationship-record";
+import type { RelationshipIdentity, RelationshipRecord } from "./relationship-record";
 
 type StoreFile = {
   version: 1;
@@ -24,7 +24,13 @@ async function readStore(): Promise<StoreFile> {
     if (parsed.version !== 1 || !Array.isArray(parsed.relationships)) {
       throw new Error("Unsupported relationship store format.");
     }
-    return parsed;
+    return {
+      ...parsed,
+      relationships: parsed.relationships.map((relationship) => ({
+        ...relationship,
+        identities: Array.isArray(relationship.identities) ? relationship.identities : [],
+      })),
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { version: 1, relationships: [] };
@@ -52,6 +58,22 @@ export async function listRelationships() {
 export async function getRelationship(id: string) {
   const store = await readStore();
   return store.relationships.find((relationship) => relationship.id === id) ?? null;
+}
+
+export async function findRelationshipByIdentity(
+  source: RelationshipIdentity["source"],
+  kind: RelationshipIdentity["kind"],
+  value: string,
+) {
+  const normalized = value.trim().toLowerCase();
+  const store = await readStore();
+  return store.relationships.find((relationship) =>
+    relationship.identities.some((identity) =>
+      identity.source === source &&
+      identity.kind === kind &&
+      identity.value.trim().toLowerCase() === normalized,
+    ),
+  ) ?? null;
 }
 
 export async function saveRelationship(record: RelationshipRecord) {

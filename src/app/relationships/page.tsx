@@ -33,7 +33,7 @@ export default async function RelationshipsPage() {
     <div className="space-y-8">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
-          Stage 5 prototype
+          Relationship memory
         </p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">Relationship memory</h1>
         <p className="mt-2 max-w-3xl text-stone-600">
@@ -45,7 +45,7 @@ export default async function RelationshipsPage() {
       <section className="rounded-2xl border border-stone-200 bg-white p-6">
         <h2 className="text-lg font-semibold">Add a relationship manually</h2>
         <p className="mt-1 text-sm text-stone-600">
-          This is a shortcut for testing the ongoing experience before Gmail onboarding is fully productized.
+          Use this when someone is not available through Gmail onboarding yet.
         </p>
         <form action={createManualRelationship} className="mt-4 grid gap-4 sm:grid-cols-3">
           <label className="text-sm font-medium text-stone-700">
@@ -104,8 +104,8 @@ export default async function RelationshipsPage() {
                 : relationships.length + " relationship" + (relationships.length === 1 ? "" : "s") + " saved."}
             </p>
           </div>
-          <Link href="/real-pilot" className="text-sm font-medium text-indigo-700 hover:underline">
-            Analyze someone from Gmail →
+          <Link href="/discover" className="text-sm font-medium text-indigo-700 hover:underline">
+            Find people from Gmail →
           </Link>
         </div>
 
