@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
   mergeInteractionIntoRelationship,
   type InteractionExtraction,
@@ -41,6 +42,59 @@ const extraction: InteractionExtraction = {
   ],
   unknowns: ["No exact follow-up date was agreed."],
 };
+
+describe("relationship discovery onboarding", () => {
+  it("creates a low-confidence relationship from confirmed Gmail metadata without inventing history", () => {
+    const record = createDiscoveredRelationshipRecord(
+      {
+        personLabel: "Mike Curtis",
+        identity: {
+          kind: "email",
+          value: "MIKE@example.com ",
+          source: "gmail",
+          label: "Mike Curtis",
+        },
+        lastObservedAt: "2026-11-04",
+        uncertainty: "Repeated correspondence observed",
+        evidenceSummary: [
+          "Messages were observed both sent and received.",
+          "They span 5 dates and 4 threads.",
+        ],
+      },
+      ["Former colleague", "Personal relationship"],
+      ["Peer"],
+      new Date("2026-11-11T12:00:00Z"),
+    );
+
+    expect(record.relationshipContexts).toEqual(["Former colleague", "Personal relationship"]);
+    expect(record.relationshipRoles).toEqual(["Peer"]);
+    expect(record.classification).toBe("Friend or family");
+    expect(record.lastInteractionAt).toBe("2026-11-04");
+    expect(record.identities).toHaveLength(1);
+    expect(record.identities[0]).toMatchObject({
+      kind: "email",
+      value: "mike@example.com",
+      source: "gmail",
+      confirmed: true,
+    });
+    expect(record.history.pattern).toContain("metadata-only Gmail discovery");
+    expect(record.history.pattern).toContain("Repeated correspondence observed");
+    expect(record.unknowns.join(" ")).toContain("have not been reconstructed");
+    expect(record.durableFacts).toEqual([]);
+    expect(record.activeThreads).toEqual([]);
+  });
+
+  it("supports multiple relationship contexts during lightweight confirmation", () => {
+    const record = createManualRelationshipRecord(
+      "Person B",
+      ["Former colleague", "Personal relationship"],
+      ["Peer", "Collaborator"],
+    );
+
+    expect(record.relationshipContexts).toEqual(["Former colleague", "Personal relationship"]);
+    expect(record.relationshipRoles).toEqual(["Peer", "Collaborator"]);
+  });
+});
 
 describe("relationship record interaction merge", () => {
   it("adds durable context, active threads, and stewardship opportunities without replacing user-confirmed relationship identity", () => {
