@@ -3,6 +3,7 @@ import {
   createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
   mergeInteractionIntoRelationship,
+  replaceRelationshipLabels,
   type InteractionExtraction,
 } from "./relationship-record";
 
@@ -93,6 +94,42 @@ describe("relationship discovery onboarding", () => {
 
     expect(record.relationshipContexts).toEqual(["Former colleague", "Personal relationship"]);
     expect(record.relationshipRoles).toEqual(["Peer", "Collaborator"]);
+  });
+});
+
+describe("relationship label correction", () => {
+  it("replaces confirmed contexts and roles without disturbing accumulated memory", () => {
+    const seeded = createManualRelationshipRecord(
+      "Mike Curtis",
+      ["Former colleague", "Professional contact"],
+      ["Collaborator", "Peer"],
+      new Date("2026-11-12T12:00:00Z"),
+    );
+    const withMemory = mergeInteractionIntoRelationship(
+      seeded,
+      extraction,
+      {
+        id: "transcript:mike",
+        source: "transcript",
+        observedAt: "2026-11-04",
+        label: "Call transcript",
+      },
+      new Date("2026-11-12T13:00:00Z"),
+    );
+
+    const corrected = replaceRelationshipLabels(
+      withMemory,
+      ["Former colleague", "Personal relationship"],
+      ["Peer"],
+      new Date("2026-11-12T14:00:00Z"),
+    );
+
+    expect(corrected.relationshipContexts).toEqual(["Former colleague", "Personal relationship"]);
+    expect(corrected.relationshipRoles).toEqual(["Peer"]);
+    expect(corrected.classification).toBe("Friend or family");
+    expect(corrected.durableFacts).toEqual(withMemory.durableFacts);
+    expect(corrected.activeThreads).toEqual(withMemory.activeThreads);
+    expect(corrected.sources).toEqual(withMemory.sources);
   });
 });
 
