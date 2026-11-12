@@ -237,6 +237,11 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
         topic,
         state,
       })),
+      openLoops: record.openLoops.map(({ commitment, owner, status }) => ({
+        commitment,
+        owner,
+        status,
+      })),
     },
   }, {
     apiKey,
