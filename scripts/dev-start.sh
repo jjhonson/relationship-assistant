@@ -166,7 +166,7 @@ else
       start_fail "recorded forward is live, mismatched, malformed, or outside this Codespace/port; record retained for inspection at $(forward_meta_file)"
     fi
   fi
-  if local_port_in_use; then
+  if [ "$RA_DRY_RUN" != "1" ] && local_port_in_use; then
     start_fail "localhost:$RA_PORT is already in use by a process this workflow did not start (or by a forward for another Codespace). Free it and retry."
   fi
   log "[Mac] Forwarding localhost:$RA_PORT -> Codespace:$RA_PORT"
