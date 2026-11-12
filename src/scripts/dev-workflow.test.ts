@@ -73,6 +73,11 @@ function run(script: string, args: string[], extraEnv: Record<string, string> = 
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
+      RA_CODESPACE: "",
+      RA_REPO: "jjhonson/relationship-assistant",
+      RA_PORT: "3000",
+      RA_REMOTE_DIR: "/workspaces/relationship-assistant",
+      RA_DRY_RUN: "0",
       RA_STATE_DIR: path.join(tmp, "state"),
       ...extraEnv,
     },
@@ -84,6 +89,11 @@ function runAsync(script: string, args: string[], extraEnv: Record<string, strin
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
+      RA_CODESPACE: "",
+      RA_REPO: "jjhonson/relationship-assistant",
+      RA_PORT: "3000",
+      RA_REMOTE_DIR: "/workspaces/relationship-assistant",
+      RA_DRY_RUN: "0",
       RA_STATE_DIR: path.join(tmp, "state"),
       ...extraEnv,
     },
