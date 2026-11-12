@@ -276,6 +276,23 @@ export function createDiscoveredRelationshipRecord(
   };
 }
 
+export function replaceRelationshipLabels(
+  record: RelationshipRecord,
+  contexts: RelationshipContextValue[],
+  roles: RelationshipRoleValue[],
+  now = new Date(),
+): RelationshipRecord {
+  const relationshipContexts = unique(contexts);
+  const relationshipRoles = unique(roles);
+  return {
+    ...record,
+    updatedAt: now.toISOString(),
+    classification: classificationForContexts(relationshipContexts),
+    relationshipContexts,
+    relationshipRoles,
+  };
+}
+
 export function mergeInteractionIntoRelationship(
   record: RelationshipRecord,
   extraction: InteractionExtraction,
