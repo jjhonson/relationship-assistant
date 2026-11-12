@@ -276,6 +276,23 @@ export function createDiscoveredRelationshipRecord(
   };
 }
 
+export function replaceRelationshipLabels(
+  record: RelationshipRecord,
+  contexts: RelationshipContextValue[],
+  roles: RelationshipRoleValue[],
+  now = new Date(),
+): RelationshipRecord {
+  const relationshipContexts = unique(contexts);
+  const relationshipRoles = unique(roles);
+  return {
+    ...record,
+    updatedAt: now.toISOString(),
+    classification: classificationForContexts(relationshipContexts),
+    relationshipContexts,
+    relationshipRoles,
+  };
+}
+
 export function mergeInteractionIntoRelationship(
   record: RelationshipRecord,
   extraction: InteractionExtraction,
@@ -290,11 +307,7 @@ export function mergeInteractionIntoRelationship(
     relationshipRoles: unique([...record.relationshipRoles, ...extraction.relationshipRoles]),
     tags: unique([...record.tags, ...extraction.tags]),
     currentState: "Active",
-    openLoops: mergeByKey(
-      record.openLoops,
-      extraction.openLoops.map((item) => ({ ...item, sourceIds: [source.id] })),
-      (item) => normalize(item.commitment) + "|" + normalize(item.owner),
-    ),
+    openLoops: reconcileOpenLoops(record.openLoops, extraction.openLoops, source),
     unknowns: unique([...record.unknowns, ...extraction.unknowns]),
     durableFacts: mergeFacts(record.durableFacts, extraction.durableFacts, source),
     activeThreads: mergeThreads(record.activeThreads, extraction.activeThreads, source),
@@ -306,6 +319,29 @@ export function mergeInteractionIntoRelationship(
     })),
     sources: mergeByKey(record.sources, [source], (item) => item.id),
   };
+}
+
+function reconcileOpenLoops(
+  existing: RelationshipRecord["openLoops"],
+  incoming: InteractionExtraction["openLoops"],
+  source: RelationshipSource,
+) {
+  return incoming.map((item) => {
+    const key = normalize(item.commitment) + "|" + normalize(item.owner);
+    const prior = existing.find(
+      (loop) => normalize(loop.commitment) + "|" + normalize(loop.owner) === key,
+    );
+    if (!prior) {
+      return { ...item, sourceIds: [source.id] };
+    }
+    return {
+      ...prior,
+      status: item.status,
+      sourceIds: item.status === prior.status
+        ? prior.sourceIds
+        : unique([...prior.sourceIds, source.id]),
+    };
+  });
 }
 
 function mergeFacts(

@@ -21,6 +21,8 @@ export const INTERACTION_INFERENCE_SYSTEM_PROMPT = [
   "- Order active threads by future relationship value: consequential unresolved situations first; routine background developments later.",
   "- Keep active-thread state and next-change signals concise. The record should be scannable without rereading the transcript.",
   "- Open loops require a genuine commitment or unresolved promise. Vague social language is not a commitment.",
+  "- You will receive the current unresolved open commitments. Return openLoops as the CURRENT unresolved set after this interaction, not merely the new promises mentioned in this transcript.",
+  "- Carry forward a prior commitment if it is still unresolved even when it is not restated. Omit it if this interaction clearly fulfills, supersedes, or makes it obsolete.",
   "- Stewardship opportunities are possible future reasons to engage. Do not manufacture a cadence. Prefer a concrete future change, milestone, or relevance trigger. An empty list is valid.",
   "- Return only the strongest stewardship opportunities. Three is usually enough; omit weak topical matches.",
   "- Relationship contexts and roles must be directly supported. Do not infer Former colleague merely because two people discuss work.",
@@ -158,6 +160,7 @@ export async function inferInteractionWithOpenAI(
     currentMemory?: {
       durableFacts: Array<{ id: string; category: string; label: string; value: string }>;
       activeThreads: Array<{ id: string; topic: string; state: string }>;
+      openLoops: Array<{ commitment: string; owner: string; status: "Open" | "Overdue" | "Unclear" }>;
     };
   },
   options: {
@@ -190,7 +193,7 @@ export async function inferInteractionWithOpenAI(
         "Interaction date: " + input.interactionDate,
         "",
         "Current structured relationship memory:",
-        JSON.stringify(input.currentMemory ?? { durableFacts: [], activeThreads: [] }),
+        JSON.stringify(input.currentMemory ?? { durableFacts: [], activeThreads: [], openLoops: [] }),
         "",
         "Transcript:",
         input.transcript,

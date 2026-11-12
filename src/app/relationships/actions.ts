@@ -21,6 +21,7 @@ import {
   createManualRelationshipRecord,
   createRelationshipRecord,
   mergeInteractionIntoRelationship,
+  replaceRelationshipLabels,
   type RelationshipSource,
 } from "@/lib/relationship-record";
 import {
@@ -162,6 +163,29 @@ export async function saveDiscoveredRelationship(
   return { ok: true as const, id: record.id, existing: false as const };
 }
 
+export async function updateRelationshipLabels(id: string, formData: FormData) {
+  ensureDevelopment();
+  const record = await getRelationship(id);
+  if (!record) throw new Error("Relationship not found.");
+
+  const contextValues = formData.getAll("context")
+    .map((value) => String(value))
+    .filter((value): value is RelationshipContextValue =>
+      contexts.has(value as RelationshipContextValue),
+    );
+  const roleValues = formData.getAll("role")
+    .map((value) => String(value))
+    .filter((value): value is RelationshipRoleValue =>
+      roles.has(value as RelationshipRoleValue),
+    );
+
+  const updated = replaceRelationshipLabels(record, contextValues, roleValues);
+  await saveRelationship(updated);
+  revalidatePath("/relationships");
+  revalidatePath("/relationships/" + id);
+  redirect("/relationships/" + id + "?labels=1");
+}
+
 export async function createManualRelationship(formData: FormData) {
   ensureDevelopment();
   const personLabel = String(formData.get("personLabel") ?? "").trim();
@@ -212,6 +236,11 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
         id,
         topic,
         state,
+      })),
+      openLoops: record.openLoops.map(({ commitment, owner, status }) => ({
+        commitment,
+        owner,
+        status,
       })),
     },
   }, {

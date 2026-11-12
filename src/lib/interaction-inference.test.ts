@@ -9,6 +9,8 @@ describe("interaction inference", () => {
     expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("Always capture explicit relationship anchors");
     expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("birthdays and anniversaries");
     expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("employer/job/role");
+    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("CURRENT unresolved set");
+    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("fulfills, supersedes, or makes it obsolete");
   });
 
   it("uses structured output with provider storage disabled and returns only structured relationship intelligence", async () => {
@@ -18,6 +20,7 @@ describe("interaction inference", () => {
       expect(body.instructions).toBe(INTERACTION_INFERENCE_SYSTEM_PROMPT);
       expect(body.input).toContain("Austin has been learning guitar");
       expect(body.input).toContain("thread-house");
+      expect(body.input).toContain("Send the guitar article");
       expect(body.text.format.type).toBe("json_schema");
 
       return new Response(JSON.stringify({
@@ -64,6 +67,9 @@ describe("interaction inference", () => {
         ],
         activeThreads: [
           { id: "thread-house", topic: "Pinecrest house renovation", state: "Permit received." },
+        ],
+        openLoops: [
+          { commitment: "Send the guitar article", owner: "Jason", status: "Open" },
         ],
       },
     }, {

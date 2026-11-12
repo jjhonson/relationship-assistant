@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { DiagnosticPanel } from "@/components/DiagnosticPanel";
 import { DiscoveryResults } from "@/components/DiscoveryResults";
+import { SpecificPersonLookup } from "@/components/SpecificPersonLookup";
 import { loadConfig } from "@/lib/gmail/config";
 import { listDiscoveryExclusions } from "@/lib/discovery-preferences";
 import { analyzeDiscovery } from "@/lib/gmail/discovery";
@@ -129,6 +130,7 @@ export default async function DiscoverPage({
           </a>
         </div>
       </header>
+      <SpecificPersonLookup />
       <DiscoveryResults
         candidates={candidates}
         hiddenCount={diagnostics.excludedUserConfirmed}

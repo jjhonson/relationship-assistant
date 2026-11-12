@@ -1,23 +1,45 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { addTranscriptInteraction } from "../actions";
+import { addTranscriptInteraction, updateRelationshipLabels } from "../actions";
 import { getRelationship } from "@/lib/relationship-store";
+import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 
 export const dynamic = "force-dynamic";
+
+const contextOptions: RelationshipContextValue[] = [
+  "Personal relationship",
+  "Family",
+  "Current coworker",
+  "Former colleague",
+  "Recruiter",
+  "Service provider",
+  "Professional contact",
+];
+
+const roleOptions: RelationshipRoleValue[] = [
+  "Friend",
+  "Mentor",
+  "Mentee",
+  "Advisor",
+  "Sponsor",
+  "Peer",
+  "Collaborator",
+];
 
 export default async function RelationshipDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ updated?: string }>;
+  searchParams: Promise<{ updated?: string; labels?: string }>;
 }) {
   const { id } = await params;
-  const { updated } = await searchParams;
+  const { updated, labels } = await searchParams;
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
 
   const action = addTranscriptInteraction.bind(null, relationship.id);
+  const labelsAction = updateRelationshipLabels.bind(null, relationship.id);
   const primaryFacts = relationship.durableFacts.slice(0, 4);
   const additionalFacts = relationship.durableFacts.slice(4);
   const primaryThreads = relationship.activeThreads.slice(0, 3);
@@ -34,6 +56,11 @@ export default async function RelationshipDetailPage({
       {updated === "1" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           Relationship updated. The transcript itself was not saved.
+        </div>
+      )}
+      {labels === "1" && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          Relationship context updated.
         </div>
       )}
 
@@ -61,6 +88,52 @@ export default async function RelationshipDetailPage({
           Last observed interaction: {relationship.lastInteractionAt ?? "Unknown"} · {relationship.sources.length} source
           {relationship.sources.length === 1 ? "" : "s"} represented
         </p>
+
+        <details className="mt-5 border-t border-stone-200 pt-4">
+          <summary className="cursor-pointer text-sm font-medium text-indigo-700">
+            Edit relationship context
+          </summary>
+          <form action={labelsAction} className="mt-4 space-y-4">
+            <fieldset>
+              <legend className="text-xs font-semibold uppercase tracking-wide text-stone-500">Contexts</legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {contextOptions.map((value) => (
+                  <label key={value} className="flex items-center gap-2 rounded-full border border-stone-300 px-3 py-1.5 text-sm">
+                    <input
+                      type="checkbox"
+                      name="context"
+                      value={value}
+                      defaultChecked={relationship.relationshipContexts.includes(value)}
+                    />
+                    {value}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend className="text-xs font-semibold uppercase tracking-wide text-stone-500">Roles</legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {roleOptions.map((value) => (
+                  <label key={value} className="flex items-center gap-2 rounded-full border border-stone-300 px-3 py-1.5 text-sm">
+                    <input
+                      type="checkbox"
+                      name="role"
+                      value={value}
+                      defaultChecked={relationship.relationshipRoles.includes(value)}
+                    />
+                    {value}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <button
+              type="submit"
+              className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800"
+            >
+              Save relationship context
+            </button>
+          </form>
+        </details>
       </header>
 
       <section className="grid gap-6 lg:grid-cols-2">

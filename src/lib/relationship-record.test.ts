@@ -3,6 +3,7 @@ import {
   createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
   mergeInteractionIntoRelationship,
+  replaceRelationshipLabels,
   type InteractionExtraction,
 } from "./relationship-record";
 
@@ -96,6 +97,42 @@ describe("relationship discovery onboarding", () => {
   });
 });
 
+describe("relationship label correction", () => {
+  it("replaces confirmed contexts and roles without disturbing accumulated memory", () => {
+    const seeded = createManualRelationshipRecord(
+      "Mike Curtis",
+      ["Former colleague", "Professional contact"],
+      ["Collaborator", "Peer"],
+      new Date("2026-11-12T12:00:00Z"),
+    );
+    const withMemory = mergeInteractionIntoRelationship(
+      seeded,
+      extraction,
+      {
+        id: "transcript:mike",
+        source: "transcript",
+        observedAt: "2026-11-04",
+        label: "Call transcript",
+      },
+      new Date("2026-11-12T13:00:00Z"),
+    );
+
+    const corrected = replaceRelationshipLabels(
+      withMemory,
+      ["Former colleague", "Personal relationship"],
+      ["Peer"],
+      new Date("2026-11-12T14:00:00Z"),
+    );
+
+    expect(corrected.relationshipContexts).toEqual(["Former colleague", "Personal relationship"]);
+    expect(corrected.relationshipRoles).toEqual(["Peer"]);
+    expect(corrected.classification).toBe("Friend or family");
+    expect(corrected.durableFacts).toEqual(withMemory.durableFacts);
+    expect(corrected.activeThreads).toEqual(withMemory.activeThreads);
+    expect(corrected.sources).toEqual(withMemory.sources);
+  });
+});
+
 describe("relationship record interaction merge", () => {
   it("adds durable context, active threads, and stewardship opportunities without replacing user-confirmed relationship identity", () => {
     const record = createManualRelationshipRecord(
@@ -133,6 +170,58 @@ describe("relationship record interaction merge", () => {
     ]);
     expect(updated.stewardshipOpportunities).toHaveLength(1);
     expect(updated.sources.map((source) => source.id)).toContain("transcript:test");
+  });
+
+  it("reconciles open commitments instead of accumulating fulfilled or superseded promises", () => {
+    const record = createManualRelationshipRecord("Mike Curtis");
+    const firstExtraction: InteractionExtraction = {
+      ...extraction,
+      durableFacts: [],
+      activeThreads: [],
+      openLoops: [{
+        commitment: "Ping Jason after travel to schedule the product deep dive.",
+        owner: "Mike",
+        status: "Open",
+      }],
+      stewardshipOpportunities: [],
+    };
+    const first = mergeInteractionIntoRelationship(
+      record,
+      firstExtraction,
+      {
+        id: "transcript:nov4",
+        source: "transcript",
+        observedAt: "2026-11-04",
+        label: "Call transcript",
+      },
+    );
+
+    const secondExtraction: InteractionExtraction = {
+      ...extraction,
+      durableFacts: [],
+      activeThreads: [],
+      openLoops: [{
+        commitment: "Reach out to schedule the next product walkthrough.",
+        owner: "Mike",
+        status: "Open",
+      }],
+      stewardshipOpportunities: [],
+    };
+    const second = mergeInteractionIntoRelationship(
+      first,
+      secondExtraction,
+      {
+        id: "transcript:nov11",
+        source: "transcript",
+        observedAt: "2026-11-11",
+        label: "Call transcript",
+      },
+    );
+
+    expect(first.openLoops).toHaveLength(1);
+    expect(second.openLoops).toHaveLength(1);
+    expect(second.openLoops[0].commitment).toBe("Reach out to schedule the next product walkthrough.");
+    expect(second.openLoops[0].sourceIds).toEqual(["transcript:nov11"]);
   });
 
   it("updates an existing active thread instead of duplicating it", () => {
