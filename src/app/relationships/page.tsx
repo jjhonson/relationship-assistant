@@ -123,7 +123,12 @@ export default async function RelationshipsPage() {
                       <p className="mt-1 text-sm text-stone-600">
                         {relationship.relationshipContexts.length > 0
                           ? relationship.relationshipContexts.join(" · ")
-                          : relationship.classification}
+                          : "No user-confirmed context yet"}
+                        {relationship.labelAuthority !== "user-confirmed" && (
+                          <span className="ml-2 text-xs text-amber-700">
+                            {relationship.labelAuthority === "inferred-only" ? "AI analysis only" : "Previously saved; review needed"}
+                          </span>
+                        )}
                       </p>
                     </div>
                     <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-600">

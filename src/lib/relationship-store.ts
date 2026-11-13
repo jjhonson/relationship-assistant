@@ -29,6 +29,14 @@ async function readStore(): Promise<StoreFile> {
       relationships: parsed.relationships.map((relationship) => ({
         ...relationship,
         identities: Array.isArray(relationship.identities) ? relationship.identities : [],
+        relationshipContexts: Array.isArray(relationship.relationshipContexts) ? relationship.relationshipContexts : [],
+        relationshipRoles: Array.isArray(relationship.relationshipRoles) ? relationship.relationshipRoles : [],
+        // Older saved records mixed user and model labels, so provenance cannot be backfilled.
+        labelAuthority: relationship.labelAuthority ?? "legacy-unverified",
+        inferredRelationshipContexts: Array.isArray(relationship.inferredRelationshipContexts)
+          ? relationship.inferredRelationshipContexts : [],
+        inferredRelationshipRoles: Array.isArray(relationship.inferredRelationshipRoles)
+          ? relationship.inferredRelationshipRoles : [],
       })),
     };
   } catch (error) {

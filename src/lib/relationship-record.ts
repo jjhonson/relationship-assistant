@@ -63,6 +63,15 @@ export type StewardshipOpportunity = {
   observedAt: string;
 };
 
+export type RelationshipLabelSuggestion<T extends string> = {
+  value: T;
+  sourceIds: string[];
+  lastSuggestedAt: string;
+  verification: "Unverified";
+};
+
+export type RelationshipLabelAuthority = "user-confirmed" | "legacy-unverified" | "inferred-only";
+
 export type RelationshipRecord = {
   id: string;
   personLabel: string;
@@ -72,6 +81,10 @@ export type RelationshipRecord = {
   classification: RelationshipInference["classification"]["value"];
   relationshipContexts: RelationshipContextValue[];
   relationshipRoles: RelationshipRoleValue[];
+  // Missing on older local records: their saved labels have unknown origin.
+  labelAuthority?: RelationshipLabelAuthority;
+  inferredRelationshipContexts?: RelationshipLabelSuggestion<RelationshipContextValue>[];
+  inferredRelationshipRoles?: RelationshipLabelSuggestion<RelationshipRoleValue>[];
   disposition: RelationshipInference["disposition"]["value"];
   currentState: RelationshipInference["currentState"]["value"];
   tags: string[];
@@ -139,8 +152,11 @@ export function createRelationshipRecord(
     updatedAt: timestamp,
     lastInteractionAt: inference.history.latestObservedMeaningfulInteraction || null,
     classification: inference.classification.value,
-    relationshipContexts: unique(inference.relationshipContexts.map((item) => item.value)),
-    relationshipRoles: unique(inference.relationshipRoles.map((item) => item.value)),
+    relationshipContexts: [],
+    relationshipRoles: [],
+    labelAuthority: "inferred-only",
+    inferredRelationshipContexts: uniqueSuggestions(inference.relationshipContexts, sources),
+    inferredRelationshipRoles: uniqueSuggestions(inference.relationshipRoles, sources),
     disposition: inference.disposition.value,
     currentState: inference.currentState.value,
     tags: unique(inference.tags.map((tag) => tag.label)),
@@ -187,6 +203,9 @@ export function createManualRelationshipRecord(
     classification: classificationForContexts(relationshipContexts),
     relationshipContexts,
     relationshipRoles,
+    labelAuthority: "user-confirmed",
+    inferredRelationshipContexts: [],
+    inferredRelationshipRoles: [],
     disposition: "Relationship worth managing",
     currentState: "Unclear",
     tags: [],
@@ -240,6 +259,9 @@ export function createDiscoveredRelationshipRecord(
     classification: classificationForContexts(relationshipContexts),
     relationshipContexts,
     relationshipRoles,
+    labelAuthority: "user-confirmed",
+    inferredRelationshipContexts: [],
+    inferredRelationshipRoles: [],
     disposition: "Relationship worth managing",
     currentState: "Unclear",
     tags: [],
@@ -290,6 +312,13 @@ export function replaceRelationshipLabels(
     classification: classificationForContexts(relationshipContexts),
     relationshipContexts,
     relationshipRoles,
+    labelAuthority: "user-confirmed",
+    inferredRelationshipContexts: (record.inferredRelationshipContexts ?? []).filter(
+      (item) => !relationshipContexts.includes(item.value),
+    ),
+    inferredRelationshipRoles: (record.inferredRelationshipRoles ?? []).filter(
+      (item) => !relationshipRoles.includes(item.value),
+    ),
   };
 }
 
@@ -303,8 +332,15 @@ export function mergeInteractionIntoRelationship(
     ...record,
     updatedAt: now.toISOString(),
     lastInteractionAt: maxDate(record.lastInteractionAt, source.observedAt),
-    relationshipContexts: unique([...record.relationshipContexts, ...extraction.relationshipContexts]),
-    relationshipRoles: unique([...record.relationshipRoles, ...extraction.relationshipRoles]),
+    // Model suggestions never modify user-selected or legacy saved labels.
+    inferredRelationshipContexts: mergeSuggestedLabels(
+      record.inferredRelationshipContexts ?? [], extraction.relationshipContexts, record.relationshipContexts,
+      record.labelAuthority === "user-confirmed", source,
+    ),
+    inferredRelationshipRoles: mergeSuggestedLabels(
+      record.inferredRelationshipRoles ?? [], extraction.relationshipRoles, record.relationshipRoles,
+      record.labelAuthority === "user-confirmed", source,
+    ),
     tags: unique([...record.tags, ...extraction.tags]),
     currentState: "Active",
     openLoops: reconcileOpenLoops(record.openLoops, extraction.openLoops, source),
@@ -319,6 +355,51 @@ export function mergeInteractionIntoRelationship(
     })),
     sources: mergeByKey(record.sources, [source], (item) => item.id),
   };
+}
+
+function uniqueSuggestions<T extends string>(
+  items: Array<{ value: T; evidenceIds: string[] }>,
+  sources: RelationshipSource[],
+): RelationshipLabelSuggestion<T>[] {
+  const suggestions: RelationshipLabelSuggestion<T>[] = [];
+  for (const item of items) {
+    const existing = suggestions.find((label) => label.value === item.value);
+    if (existing) {
+      existing.sourceIds = unique([...existing.sourceIds, ...item.evidenceIds]);
+    } else {
+      suggestions.push({
+        value: item.value,
+        sourceIds: unique(item.evidenceIds),
+        lastSuggestedAt: sources[0]?.observedAt ?? "",
+        verification: "Unverified",
+      });
+    }
+  }
+  return suggestions;
+}
+
+function mergeSuggestedLabels<T extends string>(
+  existing: RelationshipLabelSuggestion<T>[],
+  incoming: T[],
+  recordedLabels: T[],
+  recordedLabelsConfirmed: boolean,
+  source: RelationshipSource,
+): RelationshipLabelSuggestion<T>[] {
+  const result = existing.map((item) => ({ ...item, sourceIds: [...item.sourceIds] }));
+  for (const value of unique(incoming)) {
+    if (recordedLabelsConfirmed && recordedLabels.includes(value)) continue;
+    const prior = result.find((item) => item.value === value);
+    if (prior) {
+      prior.sourceIds = unique([...prior.sourceIds, source.id]);
+      prior.lastSuggestedAt = source.observedAt;
+    } else {
+      result.push({
+        value, sourceIds: [source.id], lastSuggestedAt: source.observedAt,
+        verification: "Unverified",
+      });
+    }
+  }
+  return result;
 }
 
 function reconcileOpenLoops(
