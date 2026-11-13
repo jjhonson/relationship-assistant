@@ -25,7 +25,8 @@ export const INTERACTION_INFERENCE_SYSTEM_PROMPT = [
   "- Carry forward a prior commitment if it is still unresolved even when it is not restated. Omit it if this interaction clearly fulfills, supersedes, or makes it obsolete.",
   "- Stewardship opportunities are possible future reasons to engage. Do not manufacture a cadence. Prefer a concrete future change, milestone, or relevance trigger. An empty list is valid.",
   "- Return only the strongest stewardship opportunities. Three is usually enough; omit weak topical matches.",
-  "- Relationship contexts and roles must be directly supported. Do not infer Former colleague merely because two people discuss work.",
+  "- Relationship contexts and roles here are AI suggestions, never user confirmation. They must be directly supported; do not infer Former colleague merely because two people discuss work.",
+  "- Current structured memory may include labels the user has explicitly confirmed. Do not repeat a confirmed label as a new suggestion. Do not treat one conversation's topic as a redefinition of the relationship.",
   "- Preserve uncertainty in unknowns.",
   "- Do not draft outreach.",
 ].join("\n");
@@ -161,6 +162,7 @@ export async function inferInteractionWithOpenAI(
       durableFacts: Array<{ id: string; category: string; label: string; value: string }>;
       activeThreads: Array<{ id: string; topic: string; state: string }>;
       openLoops: Array<{ commitment: string; owner: string; status: "Open" | "Overdue" | "Unclear" }>;
+      confirmedLabels?: { contexts: RelationshipContextValue[]; roles: RelationshipRoleValue[] };
     };
   },
   options: {
