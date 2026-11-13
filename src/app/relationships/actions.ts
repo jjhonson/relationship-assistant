@@ -242,6 +242,11 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
         owner,
         status,
       })),
+      // Only explicitly confirmed labels have authority in subsequent inference.
+      confirmedLabels: {
+        contexts: record.labelAuthority === "user-confirmed" ? record.relationshipContexts : [],
+        roles: record.labelAuthority === "user-confirmed" ? record.relationshipRoles : [],
+      },
     },
   }, {
     apiKey,
