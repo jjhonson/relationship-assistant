@@ -69,6 +69,8 @@ describe("relationship discovery onboarding", () => {
 
     expect(record.relationshipContexts).toEqual(["Former colleague", "Personal relationship"]);
     expect(record.relationshipRoles).toEqual(["Peer"]);
+    expect(record.labelAuthority).toBe("user-confirmed");
+    expect(record.inferredRelationshipContexts).toEqual([]);
     expect(record.classification).toBe("Friend or family");
     expect(record.lastInteractionAt).toBe("2026-11-04");
     expect(record.identities).toHaveLength(1);
@@ -126,6 +128,8 @@ describe("relationship label correction", () => {
 
     expect(corrected.relationshipContexts).toEqual(["Former colleague", "Personal relationship"]);
     expect(corrected.relationshipRoles).toEqual(["Peer"]);
+    expect(corrected.labelAuthority).toBe("user-confirmed");
+    expect(corrected.inferredRelationshipContexts).toEqual([]);
     expect(corrected.classification).toBe("Friend or family");
     expect(corrected.durableFacts).toEqual(withMemory.durableFacts);
     expect(corrected.activeThreads).toEqual(withMemory.activeThreads);
@@ -134,6 +138,60 @@ describe("relationship label correction", () => {
 });
 
 describe("relationship record interaction merge", () => {
+  it("retains user-confirmed labels across repeated AI suggestions and tracks suggestion provenance", () => {
+    const record = createManualRelationshipRecord(
+      "Mike Curtis", ["Personal relationship", "Former colleague"], ["Peer"],
+      new Date("2026-11-12T12:00:00Z"),
+    );
+    const proposed: InteractionExtraction = {
+      ...extraction,
+      relationshipContexts: ["Professional contact", "Personal relationship"],
+      relationshipRoles: ["Friend", "Collaborator", "Peer"],
+      durableFacts: [], activeThreads: [], openLoops: [], stewardshipOpportunities: [],
+    };
+    const first = mergeInteractionIntoRelationship(record, proposed, {
+      id: "transcript:nov4", source: "transcript", observedAt: "2026-11-04", label: "Call transcript",
+    });
+    const second = mergeInteractionIntoRelationship(first, proposed, {
+      id: "transcript:nov11", source: "transcript", observedAt: "2026-11-11", label: "Call transcript",
+    });
+
+    expect(second.relationshipContexts).toEqual(["Personal relationship", "Former colleague"]);
+    expect(second.relationshipRoles).toEqual(["Peer"]);
+    expect(second.classification).toBe("Friend or family");
+    expect(second.inferredRelationshipContexts).toEqual([{
+      value: "Professional contact",
+      sourceIds: ["transcript:nov4", "transcript:nov11"],
+      lastSuggestedAt: "2026-11-11", verification: "Unverified",
+    }]);
+    expect(second.inferredRelationshipRoles?.map((label) => label.value)).toEqual(["Friend", "Collaborator"]);
+    expect(second.inferredRelationshipRoles?.[0].sourceIds).toEqual(["transcript:nov4", "transcript:nov11"]);
+    expect(second.sources).toHaveLength(3);
+
+    const confirmed = replaceRelationshipLabels(
+      second, ["Personal relationship", "Former colleague"], ["Peer", "Collaborator"],
+    );
+    expect(confirmed.inferredRelationshipRoles?.map((label) => label.value)).toEqual(["Friend"]);
+    expect(confirmed.relationshipRoles).toEqual(["Peer", "Collaborator"]);
+    expect(confirmed.durableFacts).toEqual(second.durableFacts);
+    expect(confirmed.sources).toEqual(second.sources);
+  });
+
+  it("does not falsely backfill old, mixed labels as user-confirmed", () => {
+    const legacy = createManualRelationshipRecord("Older contact", ["Professional contact"], ["Friend"]);
+    delete legacy.labelAuthority; // Simulate a record written before provenance tracking existed.
+    const updated = mergeInteractionIntoRelationship(legacy, {
+      ...extraction, relationshipContexts: ["Personal relationship"], relationshipRoles: ["Mentor"],
+      durableFacts: [], activeThreads: [], openLoops: [], stewardshipOpportunities: [],
+    }, { id: "transcript:new", source: "transcript", observedAt: "2026-11-13", label: "Call transcript" });
+    expect(updated.labelAuthority).toBeUndefined();
+    expect(updated.relationshipContexts).toEqual(["Professional contact"]);
+    expect(updated.inferredRelationshipContexts?.[0].value).toBe("Personal relationship");
+    const reviewed = replaceRelationshipLabels(updated, ["Personal relationship"], ["Peer"]);
+    expect(reviewed.labelAuthority).toBe("user-confirmed");
+    expect(reviewed.relationshipContexts).toEqual(["Personal relationship"]);
+  });
+
   it("adds durable context, active threads, and stewardship opportunities without replacing user-confirmed relationship identity", () => {
     const record = createManualRelationshipRecord(
       "Matthew Strongin",
@@ -154,7 +212,14 @@ describe("relationship record interaction merge", () => {
       new Date("2026-11-10T12:00:00Z"),
     );
 
-    expect(updated.relationshipContexts).toEqual(["Former colleague", "Personal relationship"]);
+    expect(updated.relationshipContexts).toEqual(["Former colleague"]);
+    expect(updated.labelAuthority).toBe("user-confirmed");
+    expect(updated.inferredRelationshipContexts).toEqual([{
+      value: "Personal relationship",
+      sourceIds: ["transcript:test"],
+      lastSuggestedAt: "2026-11-06",
+      verification: "Unverified",
+    }]);
     expect(updated.classification).toBe("Professional contact");
     expect(updated.currentState).toBe("Active");
     expect(updated.lastInteractionAt).toBe("2026-11-06");
