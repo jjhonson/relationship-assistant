@@ -46,6 +46,9 @@ export default async function RelationshipDetailPage({
   const additionalThreads = relationship.activeThreads.slice(3);
   const primaryOpportunities = relationship.stewardshipOpportunities.slice(0, 3);
   const additionalOpportunities = relationship.stewardshipOpportunities.slice(3);
+  const inferredContexts = relationship.inferredRelationshipContexts ?? [];
+  const inferredRoles = relationship.inferredRelationshipRoles ?? [];
+  const labelAuthority = relationship.labelAuthority ?? "legacy-unverified";
 
   return (
     <div className="space-y-6">
@@ -69,7 +72,18 @@ export default async function RelationshipDetailPage({
           Relationship record
         </p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">{relationship.personLabel}</h1>
-        <div className="mt-3 flex flex-wrap gap-2 text-sm">
+        <div className="mt-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+            {labelAuthority === "user-confirmed" ? "Your confirmed relationship labels" :
+              labelAuthority === "legacy-unverified" ? "Previously saved labels (review needed)" : "Your confirmed relationship labels"}
+          </p>
+          {labelAuthority === "legacy-unverified" && (
+            <p className="mt-1 text-xs text-amber-700">
+              These labels predate provenance tracking. We cannot tell which were selected by you and which came from AI.
+              Review and save them below to confirm your choices.
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-2 text-sm">
           {relationship.relationshipContexts.map((item) => (
             <span key={item} className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-800">
               {item}
@@ -81,9 +95,31 @@ export default async function RelationshipDetailPage({
             </span>
           ))}
           {relationship.relationshipContexts.length === 0 && relationship.relationshipRoles.length === 0 && (
-            <span className="text-stone-500">Relationship context not yet established.</span>
+            <span className="text-stone-500">No labels confirmed yet.</span>
           )}
+          </div>
         </div>
+        {(inferredContexts.length > 0 || inferredRoles.length > 0) && (
+          <div className="mt-4 border-t border-stone-100 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">AI-suggested (not confirmed)</p>
+            <p className="mt-1 text-xs text-stone-600">
+              Suggestions from conversation evidence, not changes to your confirmed labels.
+              Select any you agree with in the editor below to confirm them.
+            </p>
+            <ul className="mt-2 flex flex-wrap gap-2 text-sm">
+              {[...inferredContexts.map((item) => ({ ...item, kind: "Context" })),
+                ...inferredRoles.map((item) => ({ ...item, kind: "Role" }))].map((item) => (
+                <li key={item.kind + ":" + item.value} className="rounded-lg border border-dashed border-stone-300 px-3 py-2 text-stone-700">
+                  <span className="font-medium">{item.value}</span>
+                  <span className="ml-2 text-xs text-stone-500">{item.kind} · Unverified · {item.lastSuggestedAt}</span>
+                  <span className="block text-xs text-stone-500">
+                    Source: {item.sourceIds.map((id) => relationship.sources.find((source) => source.id === id)?.label ?? "Recorded evidence").join(", ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p className="mt-4 text-sm text-stone-600">
           Last observed interaction: {relationship.lastInteractionAt ?? "Unknown"} · {relationship.sources.length} source
           {relationship.sources.length === 1 ? "" : "s"} represented
@@ -91,9 +127,12 @@ export default async function RelationshipDetailPage({
 
         <details className="mt-5 border-t border-stone-200 pt-4">
           <summary className="cursor-pointer text-sm font-medium text-indigo-700">
-            Edit relationship context
+            Review / confirm relationship labels
           </summary>
           <form action={labelsAction} className="mt-4 space-y-4">
+            <p className="text-sm text-stone-600">
+              Choose only the contexts and roles you personally confirm. AI suggestions remain separate until you select them.
+            </p>
             <fieldset>
               <legend className="text-xs font-semibold uppercase tracking-wide text-stone-500">Contexts</legend>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -130,7 +169,7 @@ export default async function RelationshipDetailPage({
               type="submit"
               className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800"
             >
-              Save relationship context
+              Save confirmed labels
             </button>
           </form>
         </details>
