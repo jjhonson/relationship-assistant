@@ -3,6 +3,7 @@ import {
   createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
   mergeInteractionIntoRelationship,
+  replaceRelationshipIntention,
   replaceRelationshipLabels,
   type InteractionExtraction,
 } from "./relationship-record";
@@ -134,6 +135,52 @@ describe("relationship label correction", () => {
     expect(corrected.durableFacts).toEqual(withMemory.durableFacts);
     expect(corrected.activeThreads).toEqual(withMemory.activeThreads);
     expect(corrected.sources).toEqual(withMemory.sources);
+  });
+});
+
+describe("user-set relationship intention", () => {
+  it("keeps a chosen mode and desired outcome distinct from labels and inferred memory", () => {
+    const original = createManualRelationshipRecord("Alex Rivera", "Recruiter", undefined, new Date("2026-11-14T10:00:00Z"));
+    const directed = replaceRelationshipIntention(
+      original,
+      "Stay in Touch",
+      "Stay a useful, recognizable professional contact without pretending we are close friends.",
+      new Date("2026-11-14T11:00:00Z"),
+    );
+    const withInteraction = mergeInteractionIntoRelationship(directed, extraction, {
+      id: "transcript:synthetic",
+      source: "transcript",
+      observedAt: "2026-11-14",
+      label: "Synthetic example",
+    }, new Date("2026-11-14T12:00:00Z"));
+
+    expect(directed.intention).toEqual({
+      mode: "Stay in Touch",
+      desiredOutcome: "Stay a useful, recognizable professional contact without pretending we are close friends.",
+      confirmedAt: "2026-11-14T11:00:00.000Z",
+    });
+    expect(withInteraction.intention).toEqual(directed.intention);
+    expect(withInteraction.relationshipContexts).toEqual(["Recruiter"]);
+    expect(withInteraction.durableFacts.length).toBeGreaterThan(0);
+  });
+
+  it("lets the user change or clear intention without touching relationship memory", () => {
+    const original = createManualRelationshipRecord("Taylor Example");
+    expect(original.intention).toBeNull();
+    const connected = replaceRelationshipIntention(original, "Stay Connected", "  Share useful ideas.  ");
+    const cleared = replaceRelationshipIntention(connected, null, "  ");
+
+    expect(connected.intention?.desiredOutcome).toBe("Share useful ideas.");
+    expect(cleared.intention).toBeNull();
+    expect(cleared.relationshipContexts).toEqual(original.relationshipContexts);
+    expect(cleared.sources).toEqual(original.sources);
+  });
+
+  it("refuses overlong intentions and unsupported modes", () => {
+    const original = createManualRelationshipRecord("Sample Contact");
+    expect(() => replaceRelationshipIntention(original, "Stay Close", "x".repeat(601))).toThrow("600 characters");
+    expect(() => replaceRelationshipIntention(original, "Best Friend" as "Stay Close", ""))
+      .toThrow("Invalid relationship intention mode");
   });
 });
 
