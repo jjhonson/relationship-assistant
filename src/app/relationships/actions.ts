@@ -21,6 +21,8 @@ import {
   createManualRelationshipRecord,
   createRelationshipRecord,
   mergeInteractionIntoRelationship,
+  relationshipIntentionModes,
+  replaceRelationshipIntention,
   replaceRelationshipLabels,
   type RelationshipSource,
 } from "@/lib/relationship-record";
@@ -184,6 +186,32 @@ export async function updateRelationshipLabels(id: string, formData: FormData) {
   revalidatePath("/relationships");
   revalidatePath("/relationships/" + id);
   redirect("/relationships/" + id + "?labels=1");
+}
+
+export async function updateRelationshipIntention(id: string, formData: FormData) {
+  ensureDevelopment();
+  const record = await getRelationship(id);
+  if (!record) throw new Error("Relationship not found.");
+
+  const rawMode = formData.get("intentionMode");
+  const rawOutcome = formData.get("desiredOutcome");
+  if (typeof rawMode !== "string" || typeof rawOutcome !== "string") {
+    throw new Error("Relationship intention form is invalid.");
+  }
+  const mode = rawMode.trim();
+  if (mode !== "" && !relationshipIntentionModes.some((value) => value === mode)) {
+    throw new Error("Unknown relationship intention mode.");
+  }
+
+  const updated = replaceRelationshipIntention(
+    record,
+    mode === "" ? null : mode as (typeof relationshipIntentionModes)[number],
+    rawOutcome,
+  );
+  await saveRelationship(updated);
+  revalidatePath("/relationships");
+  revalidatePath("/relationships/" + id);
+  redirect("/relationships/" + id + "?intention=1");
 }
 
 export async function createManualRelationship(formData: FormData) {

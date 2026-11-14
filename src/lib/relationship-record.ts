@@ -72,6 +72,15 @@ export type RelationshipLabelSuggestion<T extends string> = {
 
 export type RelationshipLabelAuthority = "user-confirmed" | "legacy-unverified" | "inferred-only";
 
+export const relationshipIntentionModes = ["Stay in Touch", "Stay Connected", "Stay Close"] as const;
+export type RelationshipIntentionMode = (typeof relationshipIntentionModes)[number];
+
+export type RelationshipIntention = {
+  mode: RelationshipIntentionMode | null;
+  desiredOutcome: string;
+  confirmedAt: string;
+};
+
 export type RelationshipRecord = {
   id: string;
   personLabel: string;
@@ -81,6 +90,8 @@ export type RelationshipRecord = {
   classification: RelationshipInference["classification"]["value"];
   relationshipContexts: RelationshipContextValue[];
   relationshipRoles: RelationshipRoleValue[];
+  // Set only by the user. Older saved relationships legitimately have no intention yet.
+  intention?: RelationshipIntention | null;
   // Missing on older local records: their saved labels have unknown origin.
   labelAuthority?: RelationshipLabelAuthority;
   inferredRelationshipContexts?: RelationshipLabelSuggestion<RelationshipContextValue>[];
@@ -154,6 +165,7 @@ export function createRelationshipRecord(
     classification: inference.classification.value,
     relationshipContexts: [],
     relationshipRoles: [],
+    intention: null,
     labelAuthority: "inferred-only",
     inferredRelationshipContexts: uniqueSuggestions(inference.relationshipContexts, sources),
     inferredRelationshipRoles: uniqueSuggestions(inference.relationshipRoles, sources),
@@ -203,6 +215,7 @@ export function createManualRelationshipRecord(
     classification: classificationForContexts(relationshipContexts),
     relationshipContexts,
     relationshipRoles,
+    intention: null,
     labelAuthority: "user-confirmed",
     inferredRelationshipContexts: [],
     inferredRelationshipRoles: [],
@@ -259,6 +272,7 @@ export function createDiscoveredRelationshipRecord(
     classification: classificationForContexts(relationshipContexts),
     relationshipContexts,
     relationshipRoles,
+    intention: null,
     labelAuthority: "user-confirmed",
     inferredRelationshipContexts: [],
     inferredRelationshipRoles: [],
@@ -319,6 +333,29 @@ export function replaceRelationshipLabels(
     inferredRelationshipRoles: (record.inferredRelationshipRoles ?? []).filter(
       (item) => !relationshipRoles.includes(item.value),
     ),
+  };
+}
+
+export function replaceRelationshipIntention(
+  record: RelationshipRecord,
+  mode: RelationshipIntentionMode | null,
+  desiredOutcome: string,
+  now = new Date(),
+): RelationshipRecord {
+  if (mode !== null && !relationshipIntentionModes.includes(mode)) {
+    throw new Error("Invalid relationship intention mode.");
+  }
+  const outcome = desiredOutcome.trim();
+  if (outcome.length > 600) {
+    throw new Error("Relationship outcome must be 600 characters or fewer.");
+  }
+  const timestamp = now.toISOString();
+  return {
+    ...record,
+    updatedAt: timestamp,
+    intention: mode !== null || outcome
+      ? { mode, desiredOutcome: outcome, confirmedAt: timestamp }
+      : null,
   };
 }
 

@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { addTranscriptInteraction, updateRelationshipLabels } from "../actions";
+import { addTranscriptInteraction, updateRelationshipIntention, updateRelationshipLabels } from "../actions";
 import { getRelationship } from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
+import { relationshipIntentionModes } from "@/lib/relationship-record";
 
 export const dynamic = "force-dynamic";
 
@@ -31,15 +32,16 @@ export default async function RelationshipDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ updated?: string; labels?: string }>;
+  searchParams: Promise<{ updated?: string; labels?: string; intention?: string }>;
 }) {
   const { id } = await params;
-  const { updated, labels } = await searchParams;
+  const { updated, labels, intention } = await searchParams;
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
 
   const action = addTranscriptInteraction.bind(null, relationship.id);
   const labelsAction = updateRelationshipLabels.bind(null, relationship.id);
+  const intentionAction = updateRelationshipIntention.bind(null, relationship.id);
   const primaryFacts = relationship.durableFacts.slice(0, 4);
   const additionalFacts = relationship.durableFacts.slice(4);
   const primaryThreads = relationship.activeThreads.slice(0, 3);
@@ -64,6 +66,11 @@ export default async function RelationshipDetailPage({
       {labels === "1" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           Relationship context updated.
+        </div>
+      )}
+      {intention === "1" && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          Relationship intention saved. It stays yours to set and change, not the AI&apos;s.
         </div>
       )}
 
@@ -175,6 +182,60 @@ export default async function RelationshipDetailPage({
         </details>
       </header>
 
+      <section className="rounded-2xl border border-indigo-200 bg-white p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Your intention</p>
+            <h2 className="mt-1 text-xl font-semibold text-stone-900">What does a good relationship look like?</h2>
+            <p className="mt-2 max-w-3xl text-sm text-stone-600">
+              Set the kind of connection you want to maintain. This is your goal, not a closeness score or a
+              category the system will change based on how often you talk.
+            </p>
+          </div>
+          {relationship.intention?.mode && (
+            <span className="rounded-full bg-indigo-100 px-3 py-1.5 text-sm font-semibold text-indigo-800">
+              {relationship.intention.mode}
+            </span>
+          )}
+        </div>
+        <form action={intentionAction} className="mt-5 space-y-4">
+          <label className="block text-sm font-medium text-stone-700">
+            Relationship mode
+            <select
+              name="intentionMode"
+              defaultValue={relationship.intention?.mode ?? ""}
+              className="mt-1 block w-full max-w-md rounded-lg border border-stone-300 bg-white px-3 py-2"
+            >
+              <option value="">Not set yet</option>
+              {relationshipIntentionModes.map((mode) => (
+                <option key={mode} value={mode}>{mode}</option>
+              ))}
+            </select>
+          </label>
+          <p className="text-xs text-stone-500">
+            Stay in Touch (professional distance) · Stay Connected (warm professional tie) ·
+            Stay Close (close friends or family). These are different destinations, not steps on a ladder.
+          </p>
+          <label className="block text-sm font-medium text-stone-700">
+            What would you like this relationship to be like over time? <span className="font-normal text-stone-500">(optional)</span>
+            <textarea
+              name="desiredOutcome"
+              rows={3}
+              maxLength={600}
+              defaultValue={relationship.intention?.desiredOutcome ?? ""}
+              placeholder="For example: Be a trusted former colleague who shares useful ideas, remembers what matters, and stays naturally connected."
+              className="mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
+            />
+          </label>
+          <button
+            type="submit"
+            className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800"
+          >
+            Save relationship intention
+          </button>
+        </form>
+      </section>
+
       <section className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-stone-200 bg-white p-6">
           <h2 className="text-lg font-semibold">Durable context</h2>
@@ -262,9 +323,10 @@ export default async function RelationshipDetailPage({
       </section>
 
       <section className="rounded-2xl border border-stone-200 bg-white p-6">
-        <h2 className="text-lg font-semibold">Possible reasons to engage</h2>
+        <h2 className="text-lg font-semibold">Ways to show up</h2>
         <p className="mt-1 text-sm text-stone-600">
-          Suggestions, not obligations. Silence is valid when there is no authentic reason to reach out.
+          Possibilities observed in conversations, not tasks or obligations. The next step is to turn these
+          into timely, person-specific recommendations. Silence is valid when there is no authentic reason to reach out.
         </p>
         {relationship.stewardshipOpportunities.length === 0 ? (
           <p className="mt-4 text-sm text-stone-500">No new stewardship opportunity captured yet.</p>
@@ -276,6 +338,12 @@ export default async function RelationshipDetailPage({
                   <p className="font-medium text-indigo-950">{opportunity.reason}</p>
                   <p className="mt-2 text-sm text-indigo-800">
                     Trigger: {opportunity.trigger}
+                  </p>
+                  <p className="mt-3 text-xs text-indigo-700">
+                    Evidence: {opportunity.sourceIds.map((id) => {
+                      const source = relationship.sources.find((item) => item.id === id);
+                      return source ? `${source.label} (${source.observedAt})` : "Unresolved source";
+                    }).join(" · ") || "No linked source"}
                   </p>
                 </li>
               ))}

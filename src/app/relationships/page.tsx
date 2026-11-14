@@ -130,6 +130,9 @@ export default async function RelationshipsPage() {
                           </span>
                         )}
                       </p>
+                      <p className="mt-2 text-xs font-medium text-indigo-700">
+                        {relationship.intention?.mode ?? "Intention not set"}
+                      </p>
                     </div>
                     <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-600">
                       {relationship.currentState}
