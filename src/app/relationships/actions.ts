@@ -16,6 +16,7 @@ import {
   type DiscoveryExclusionReason,
 } from "@/lib/discovery-preferences";
 import { inferInteractionWithOpenAI } from "@/lib/interaction-inference";
+import { reviewRelationshipWithOpenAI } from "@/lib/relationship-stewardship";
 import {
   createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
@@ -212,6 +213,28 @@ export async function updateRelationshipIntention(id: string, formData: FormData
   revalidatePath("/relationships");
   revalidatePath("/relationships/" + id);
   redirect("/relationships/" + id + "?intention=1");
+}
+
+export async function reviewRelationshipWays(id: string) {
+  ensureDevelopment();
+  const record = await getRelationship(id);
+  if (!record) throw new Error("Relationship not found.");
+
+  // The pilot belongs to Jason; keep the name/time zone configurable for later users.
+  const userLabel = process.env.RELATIONSHIP_USER_LABEL ?? "Jason";
+  const userTimeZone = process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver";
+  const reviewedAt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: userTimeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+
+  // Only existing structured memory is sent. Neither raw transcripts nor the
+  // resulting advice are persisted, and nothing is sent on the user's behalf.
+  return reviewRelationshipWithOpenAI(record, {
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    model: process.env.OPENAI_RELATIONSHIP_MODEL,
+    userLabel,
+    reviewedAt,
+  });
 }
 
 export async function createManualRelationship(formData: FormData) {
