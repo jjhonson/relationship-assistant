@@ -4,6 +4,7 @@ import { addTranscriptInteraction, updateRelationshipIntention, updateRelationsh
 import { getRelationship } from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
+import WaysToShowUpReview from "./WaysToShowUpReview";
 
 export const dynamic = "force-dynamic";
 
@@ -325,45 +326,44 @@ export default async function RelationshipDetailPage({
       <section className="rounded-2xl border border-stone-200 bg-white p-6">
         <h2 className="text-lg font-semibold">Ways to show up</h2>
         <p className="mt-1 text-sm text-stone-600">
-          Possibilities observed in conversations, not tasks or obligations. The next step is to turn these
-          into timely, person-specific recommendations. Silence is valid when there is no authentic reason to reach out.
+          Look for a timely, specific way to be thoughtful or useful, based on what you know about this person
+          and the connection you want to maintain. No action is a perfectly good outcome.
         </p>
-        {relationship.stewardshipOpportunities.length === 0 ? (
-          <p className="mt-4 text-sm text-stone-500">No new stewardship opportunity captured yet.</p>
-        ) : (
-          <>
-            <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-              {primaryOpportunities.map((opportunity) => (
-                <li key={opportunity.id} className="rounded-xl bg-indigo-50 p-4">
-                  <p className="font-medium text-indigo-950">{opportunity.reason}</p>
-                  <p className="mt-2 text-sm text-indigo-800">
-                    Trigger: {opportunity.trigger}
-                  </p>
-                  <p className="mt-3 text-xs text-indigo-700">
-                    Evidence: {opportunity.sourceIds.map((id) => {
-                      const source = relationship.sources.find((item) => item.id === id);
-                      return source ? `${source.label} (${source.observedAt})` : "Unresolved source";
-                    }).join(" · ") || "No linked source"}
-                  </p>
-                </li>
-              ))}
-            </ul>
-            {additionalOpportunities.length > 0 && (
-              <details className="mt-3 text-sm">
-                <summary className="cursor-pointer font-medium text-indigo-700">
-                  {additionalOpportunities.length} more possible reasons
-                </summary>
+        <WaysToShowUpReview relationshipId={relationship.id} hasIntention={Boolean(relationship.intention?.mode)} />
+        <details className="mt-5 border-t border-stone-100 pt-4">
+          <summary className="cursor-pointer text-sm font-medium text-indigo-700">
+            Future triggers captured from conversations ({relationship.stewardshipOpportunities.length})
+          </summary>
+          {relationship.stewardshipOpportunities.length === 0 ? (
+            <p className="mt-3 text-sm text-stone-500">No future triggers captured yet.</p>
+          ) : (
+            <>
+              <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+                {primaryOpportunities.map((opportunity) => (
+                  <li key={opportunity.id} className="rounded-xl bg-stone-50 p-3">
+                    <p className="text-sm font-medium text-stone-900">{opportunity.reason}</p>
+                    <p className="mt-2 text-xs text-stone-600">Watch for: {opportunity.trigger}</p>
+                    <p className="mt-2 text-xs text-stone-500">
+                      Evidence: {opportunity.sourceIds.map((id) => {
+                        const source = relationship.sources.find((item) => item.id === id);
+                        return source ? `${source.label} (${source.observedAt})` : "Unresolved source";
+                      }).join(" · ") || "No linked source"}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              {additionalOpportunities.length > 0 && (
                 <ul className="mt-3 space-y-2">
                   {additionalOpportunities.map((opportunity) => (
-                    <li key={opportunity.id} className="rounded-xl bg-indigo-50 p-3 text-indigo-950">
+                    <li key={opportunity.id} className="rounded-xl bg-stone-50 p-3 text-sm text-stone-700">
                       {opportunity.reason}
                     </li>
                   ))}
                 </ul>
-              </details>
-            )}
-          </>
-        )}
+              )}
+            </>
+          )}
+        </details>
       </section>
 
       {relationship.openLoops.length > 0 && (
