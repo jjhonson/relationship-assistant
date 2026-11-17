@@ -2,7 +2,7 @@
 
 Helps people rediscover, understand, and thoughtfully maintain important personal and professional relationships.
 
-This is an **initial prototype**. The dashboard uses fictional, hard-coded sample data only. A separate **Gmail read-only proof of concept** lives at `/gmail` (see below); no database, payments, or AI providers are used.
+This is a **local-first development prototype**, not a deployed product. The original dashboard uses fictional sample data, while the separate `/relationships` route saves deliberate user-authored relationship memory to a private local JSON file. The `/gmail` proof of concept is read-only; selected AI features use a separately configured OpenAI API key. There is no hosted database or payments system.
 
 ## Stack
 
@@ -26,6 +26,16 @@ npm run dev        # http://localhost:3000
 | `npm run lint` | ESLint |
 | `npm run typecheck` | TypeScript check |
 | `npm test` | Run unit tests (Vitest) |
+
+## Quick capture (Stage 10A, development only)
+
+At `/relationships`, type or dictate a short note in **Remember something** and select **Save memory**. The same input appears on existing relationship pages for updates and catch-ups. No name, contact method, role, or relationship-mode field is required. The text is saved to `.data/relationships.json` as a dated, user-authored encounter **before** AI interpretation, so an unavailable model cannot lose the original note.
+
+With `OPENAI_API_KEY` configured locally, bounded structured interpretation proposes participants, person-specific facts, shared details (such as a couple's dogs), other people mentioned, and explicit commitments. New identities can start as sparse provisional records; exact-email or explicit person-page context can link a known record. A name match alone requires a lightweight choice on the saved-note page. No autonomous messages, reminder tasks, automatic notifications, or background content retrieval occur. A saved note can involve several people and is viewable from each linked person page.
+
+The saved-note page shows the original wording and lets you retry pending interpretation or resolve uncertain identities. A person page allows correction of an extracted name. Unknown contact fields remain unfilled. A future slice will add photos/business-card images to this same capture process.
+
+**Privacy boundary:** User-typed notes are intentionally retained in the local private JSON store. They are sent for interpretation only to the configured OpenAI Responses API with `store: false`. Raw transcripts supplied to the separate conversation-learning feature remain non-persistent. Do not commit `.data/`, `.env.local`, private notes, or API keys.
 
 ## Codespaces dev start/stop (run on the Mac host)
 
@@ -90,6 +100,8 @@ Unit tests (`src/scripts/dev-workflow.test.ts`) use a rejecting fake `gh`, fake 
 - `src/lib/format.ts` – date/initials helpers
 - `src/components/` – small shared UI components
 - `src/lib/gmail/discovery.ts` – deterministic, metadata-only candidate ranking and exclusions
+- `src/lib/capture.ts`, `capture-inference.ts` – multi-person quick-capture model, cautious identity reconciliation, and schema-validated inference
+- `src/app/captures/[id]/page.tsx` – original note, linked/uncertain identities, and optional resolution
 
 ## Stage 2 fictional relationship-inference benchmark
 

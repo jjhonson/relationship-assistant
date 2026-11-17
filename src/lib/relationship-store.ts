@@ -1,12 +1,24 @@
 import "server-only";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  applyCaptureExtraction,
+  isCaptureForRelationship,
+  newCaptureEvent,
+  resolveCapturePerson,
+  type CaptureEvent,
+  type CaptureExtraction,
+} from "./capture";
 import type { RelationshipIdentity, RelationshipRecord } from "./relationship-record";
 
 type StoreFile = {
   version: 1;
   relationships: RelationshipRecord[];
+  // Optional in older version-1 files. No destructive migration required.
+  captures: CaptureEvent[];
 };
+
+let mutationQueue: Promise<unknown> = Promise.resolve();
 
 function storePath() {
   const root = path.join(process.cwd(), ".data");
@@ -26,6 +38,7 @@ async function readStore(): Promise<StoreFile> {
     }
     return {
       ...parsed,
+      captures: Array.isArray(parsed.captures) ? parsed.captures : [],
       relationships: parsed.relationships.map((relationship) => ({
         ...relationship,
         identities: Array.isArray(relationship.identities) ? relationship.identities : [],
@@ -41,7 +54,7 @@ async function readStore(): Promise<StoreFile> {
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { version: 1, relationships: [] };
+      return { version: 1, relationships: [], captures: [] };
     }
     throw error;
   }
@@ -56,6 +69,18 @@ async function writeStore(store: StoreFile) {
     mode: 0o600,
   });
   await rename(temporary, target.file);
+}
+
+function mutateStore<T>(update: (store: StoreFile) => T | Promise<T>): Promise<T> {
+  // Serialize local, single-process writes so two quick saves do not overwrite each other.
+  const result = mutationQueue.then(async () => {
+    const store = await readStore();
+    const value = await update(store);
+    await writeStore(store);
+    return value;
+  });
+  mutationQueue = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 export async function listRelationships() {
@@ -85,13 +110,62 @@ export async function findRelationshipByIdentity(
 }
 
 export async function saveRelationship(record: RelationshipRecord) {
+  return mutateStore((store) => {
+    const index = store.relationships.findIndex((relationship) => relationship.id === record.id);
+    if (index >= 0) {
+      store.relationships[index] = record;
+    } else {
+      store.relationships.push(record);
+    }
+    return record;
+  });
+}
+
+export async function saveNewCapture(note: string, contextRelationshipId: string | null = null) {
+  const event = newCaptureEvent(note, contextRelationshipId);
+  return mutateStore((store) => {
+    if (contextRelationshipId && !store.relationships.some((record) => record.id === contextRelationshipId)) {
+      throw new Error("The selected relationship was not found.");
+    }
+    store.captures.push(event);
+    return event;
+  });
+}
+
+export async function getCapture(id: string) {
   const store = await readStore();
-  const index = store.relationships.findIndex((relationship) => relationship.id === record.id);
-  if (index >= 0) {
-    store.relationships[index] = record;
-  } else {
-    store.relationships.push(record);
-  }
-  await writeStore(store);
-  return record;
+  return store.captures.find((event) => event.id === id) ?? null;
+}
+
+export async function listCapturesForRelationship(relationshipId: string) {
+  const store = await readStore();
+  return store.captures.filter((event) => isCaptureForRelationship(event, relationshipId))
+    .sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
+}
+
+export async function listRecentCaptures() {
+  const store = await readStore();
+  return [...store.captures].sort((a, b) => b.capturedAt.localeCompare(a.capturedAt)).slice(0, 8);
+}
+
+export async function saveCaptureInterpretation(id: string, extraction: CaptureExtraction) {
+  return mutateStore((store) => {
+    const index = store.captures.findIndex((event) => event.id === id);
+    if (index < 0) throw new Error("Saved note not found.");
+    const updated = applyCaptureExtraction(store.captures[index], extraction, store.relationships);
+    store.captures[index] = updated.event;
+    store.relationships = updated.relationships;
+    return updated.event;
+  });
+}
+
+export async function saveCapturePersonResolution(id: string, personIndex: number, selectedId: string) {
+  return mutateStore((store) => {
+    const index = store.captures.findIndex((event) => event.id === id);
+    if (index < 0) throw new Error("Saved note not found.");
+    const updated = resolveCapturePerson(store.captures[index], personIndex, selectedId, store.relationships);
+    store.captures[index] = updated.event;
+    store.relationships = updated.relationships;
+    return updated.event;
+  });
 }
