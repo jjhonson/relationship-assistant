@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { addTranscriptInteraction, updateRelationshipIntention, updateRelationshipLabels } from "../actions";
-import { getRelationship } from "@/lib/relationship-store";
+import { correctRelationshipName } from "../capture-actions";
+import { getRelationship, listCapturesForRelationship } from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
+import QuickCaptureForm from "@/components/QuickCaptureForm";
 
 export const dynamic = "force-dynamic";
 
@@ -32,12 +34,13 @@ export default async function RelationshipDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ updated?: string; labels?: string; intention?: string }>;
+  searchParams: Promise<{ updated?: string; labels?: string; intention?: string; name?: string }>;
 }) {
   const { id } = await params;
-  const { updated, labels, intention } = await searchParams;
+  const { updated, labels, intention, name } = await searchParams;
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
+  const capturedNotes = await listCapturesForRelationship(id);
 
   const action = addTranscriptInteraction.bind(null, relationship.id);
   const labelsAction = updateRelationshipLabels.bind(null, relationship.id);
@@ -51,6 +54,18 @@ export default async function RelationshipDetailPage({
   const inferredContexts = relationship.inferredRelationshipContexts ?? [];
   const inferredRoles = relationship.inferredRelationshipRoles ?? [];
   const labelAuthority = relationship.labelAuthority ?? "legacy-unverified";
+  const nameAction = correctRelationshipName.bind(null, relationship.id);
+  const latestFact = (label: string) => relationship.durableFacts
+    .filter((item) => item.label.toLowerCase() === label.toLowerCase())
+    .sort((a, b) => b.lastObservedAt.localeCompare(a.lastObservedAt))[0];
+  const contactDetails = [
+    { label: "Email", value: relationship.identities.find((item) => item.kind === "email")?.value ?? "", fromNote: relationship.identities.some((item) => item.source === "capture") },
+    { label: "Phone", value: latestFact("Phone")?.value ?? "", fromNote: !!latestFact("Phone") },
+    { label: "Company", value: latestFact("Company")?.value ?? "", fromNote: !!latestFact("Company") },
+    { label: "Role", value: latestFact("Role")?.value ?? "", fromNote: !!latestFact("Role") },
+    { label: "City", value: latestFact("City")?.value ?? "", fromNote: !!latestFact("City") },
+    { label: "LinkedIn", value: latestFact("LinkedIn")?.value ?? "", fromNote: !!latestFact("LinkedIn") },
+  ];
 
   return (
     <div className="space-y-6">
@@ -73,12 +88,40 @@ export default async function RelationshipDetailPage({
           Relationship intention saved. It stays yours to set and change, not the AI&apos;s.
         </div>
       )}
+      {name === "1" && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          Name corrected and saved as user-confirmed.
+        </div>
+      )}
 
       <header className="rounded-2xl border border-stone-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
           Relationship record
         </p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">{relationship.personLabel}</h1>
+        {relationship.personLabelAuthority === "inferred-unverified" && (
+          <p className="mt-1 text-xs text-amber-700">Name extracted from a note. Confirm or correct when you have a moment.</p>
+        )}
+        <div className="mt-5 grid gap-3 border-b border-stone-100 pb-5 sm:grid-cols-2 lg:grid-cols-3">
+          {contactDetails.map((item) => (
+            <div key={item.label}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{item.label}</p>
+              <p className="mt-1 break-words text-sm text-stone-900">{item.value || <span className="text-stone-400">Not recorded</span>}</p>
+              {item.value && item.fromNote && <p className="text-xs text-stone-500">From saved context (verify if needed)</p>}
+            </div>
+          ))}
+        </div>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm font-medium text-indigo-700">Correct name</summary>
+          <form action={nameAction} className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="text-sm text-stone-700">
+              Name
+              <input name="personLabel" required maxLength={120} defaultValue={relationship.personLabel}
+                className="mt-1 block rounded-lg border border-stone-300 px-3 py-2" />
+            </label>
+            <button type="submit" className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white">Save correction</button>
+          </form>
+        </details>
         <div className="mt-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
             {labelAuthority === "user-confirmed" ? "Your confirmed relationship labels" :
@@ -181,6 +224,18 @@ export default async function RelationshipDetailPage({
           </form>
         </details>
       </header>
+
+      <section className="rounded-2xl border border-stone-200 bg-stone-50 p-5">
+        <h2 className="text-lg font-semibold">Where things stand</h2>
+        <p className="mt-2 text-sm text-stone-700">
+          {relationship.openLoops.length > 0
+            ? relationship.openLoops.length + " recorded open commitment" + (relationship.openLoops.length === 1 ? "" : "s") + ". See the details below."
+            : "No open commitments recorded. Nothing needs doing just because this person is in your relationships."}
+        </p>
+        {capturedNotes[0]?.summary && <p className="mt-2 text-sm text-stone-600">Latest remembered: {capturedNotes[0].summary}</p>}
+      </section>
+
+      <QuickCaptureForm contextRelationshipId={relationship.id} compact />
 
       <section className="rounded-2xl border border-indigo-200 bg-white p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -377,6 +432,24 @@ export default async function RelationshipDetailPage({
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {capturedNotes.length > 0 && (
+        <section className="rounded-2xl border border-stone-200 bg-white p-6">
+          <h2 className="text-lg font-semibold">Remembered moments</h2>
+          <p className="mt-1 text-sm text-stone-600">Dated notes you saved yourself. Select one to see the original wording and everyone linked to it.</p>
+          <ol className="mt-4 space-y-3">
+            {capturedNotes.map((capture) => (
+              <li key={capture.id} className="rounded-xl border border-stone-200 p-4">
+                <Link href={"/captures/" + capture.id} className="font-medium text-indigo-700 hover:underline">
+                  {capture.capturedAt.slice(0, 10)} · {capture.summary || "Saved note"}
+                </Link>
+                <p className="mt-1 line-clamp-2 text-sm text-stone-600">{capture.note}</p>
+                {capture.status === "pending" && <span className="text-xs text-amber-700">Awaiting interpretation</span>}
+              </li>
+            ))}
+          </ol>
         </section>
       )}
 

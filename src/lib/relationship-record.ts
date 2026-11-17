@@ -7,7 +7,7 @@ import type {
 
 export type RelationshipSource = {
   id: string;
-  source: "gmail" | "transcript" | "manual";
+  source: "gmail" | "transcript" | "manual" | "capture";
   observedAt: string;
   label: string;
 };
@@ -16,7 +16,7 @@ export type RelationshipIdentity = {
   id: string;
   kind: "email";
   value: string;
-  source: "gmail";
+  source: "gmail" | "capture";
   label: string;
   confirmed: boolean;
   sourceIds: string[];
@@ -84,6 +84,8 @@ export type RelationshipIntention = {
 export type RelationshipRecord = {
   id: string;
   personLabel: string;
+  // Present on new quick-capture records or after explicit name correction.
+  personLabelAuthority?: "inferred-unverified" | "user-confirmed";
   createdAt: string;
   updatedAt: string;
   lastInteractionAt: string | null;

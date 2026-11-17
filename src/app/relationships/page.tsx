@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createManualRelationship } from "./actions";
-import { listRelationships } from "@/lib/relationship-store";
+import QuickCaptureForm from "@/components/QuickCaptureForm";
+import { listRecentCaptures, listRelationships } from "@/lib/relationship-store";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ const roleOptions = [
 ];
 
 export default async function RelationshipsPage() {
-  const relationships = await listRelationships();
+  const [relationships, recentCaptures] = await Promise.all([listRelationships(), listRecentCaptures()]);
 
   return (
     <div className="space-y-8">
@@ -37,16 +38,38 @@ export default async function RelationshipsPage() {
         </p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">Relationship memory</h1>
         <p className="mt-2 max-w-3xl text-stone-600">
-          Confirm a small set of relationships, then let new interactions make each record more useful.
-          This prototype stores structured relationship memory locally and does not retain raw transcript text.
+          Remember the people and moments that matter. A short note can start a new relationship
+          or add to one you already know. Call transcripts are handled separately and are not retained.
         </p>
       </div>
 
-      <section className="rounded-2xl border border-stone-200 bg-white p-6">
-        <h2 className="text-lg font-semibold">Add a relationship manually</h2>
-        <p className="mt-1 text-sm text-stone-600">
-          Use this when someone is not available through Gmail onboarding yet.
-        </p>
+      <QuickCaptureForm />
+
+      {recentCaptures.length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold">Recently remembered</h2>
+          <ul className="mt-3 space-y-2">
+            {recentCaptures.map((capture) => (
+              <li key={capture.id}>
+                <Link href={"/captures/" + capture.id} className="block rounded-xl border border-stone-200 bg-white p-4 hover:border-indigo-300">
+                  <span className="text-xs text-stone-500">{capture.capturedAt.slice(0, 10)}</span>
+                  <p className="mt-1 text-sm font-medium text-stone-900">
+                    {capture.summary || capture.note.slice(0, 180)}
+                  </p>
+                  <span className="text-xs text-indigo-700">
+                    {capture.status === "pending" ? "Saved, awaiting interpretation" :
+                      capture.people.some((person) => person.resolution === "needs-review") ? "Some identities need review" : "View saved memory"}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <details className="rounded-2xl border border-stone-200 bg-white p-6">
+        <summary className="cursor-pointer text-sm font-medium text-indigo-700">Or create a record using fields</summary>
+        <p className="mt-2 text-sm text-stone-600">Optional legacy form. Quick capture above needs none of these fields.</p>
         <form action={createManualRelationship} className="mt-4 grid gap-4 sm:grid-cols-3">
           <label className="text-sm font-medium text-stone-700">
             Name
@@ -92,7 +115,7 @@ export default async function RelationshipsPage() {
             </button>
           </div>
         </form>
-      </section>
+      </details>
 
       <section>
         <div className="flex items-end justify-between gap-4">
