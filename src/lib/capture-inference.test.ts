@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CAPTURE_SYSTEM_PROMPT, inferCaptureWithOpenAI, validateCaptureExtraction } from "./capture-inference";
+import { CAPTURE_PHOTO_CONTEXT_PROMPT, CAPTURE_SYSTEM_PROMPT, inferCaptureWithOpenAI, validateCaptureExtraction } from "./capture-inference";
 
 const response = {
   summary: "Met Tom and Judy across the fence.",
@@ -13,6 +13,27 @@ const response = {
 };
 
 describe("quick capture inference", () => {
+  it("separates image evidence from user's context and instructs the model not to promote every card signer into a contact", async () => {
+    const fetchImpl = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.instructions).toBe(CAPTURE_SYSTEM_PROMPT + "\n" + CAPTURE_PHOTO_CONTEXT_PROMPT);
+      expect(body.input).toContain("Selected photo transcription and context");
+      expect(body.input).toContain("Photo transcription");
+      expect(body.store).toBe(false);
+      return new Response(JSON.stringify({ output: [{ content: [{ type: "output_text", text: JSON.stringify({
+        ...response,
+        participants: [response.participants[0]],
+        otherPeople: [{ name: "Cindy", connection: "Named on the holiday card" }],
+      }) }] }] }));
+    });
+    const result = await inferCaptureWithOpenAI({
+      note: "Photo transcription: Happy Diwali, from Tom and Cindy", capturedAt: "2026-11-18", source: "user-image",
+      contextPersonLabel: "Tom",
+    }, { apiKey: "fake-test-only", fetchImpl: fetchImpl as typeof fetch });
+    expect(result.participants.map((person) => person.name)).toEqual(["Tom"]);
+    expect(result.otherPeople.map((person) => person.name)).toEqual(["Cindy"]);
+  });
+
   it("uses private, strict structured model output without treating source text as instructions", async () => {
     const fetchImpl = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body));

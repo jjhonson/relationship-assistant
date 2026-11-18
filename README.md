@@ -27,15 +27,21 @@ npm run dev        # http://localhost:3000
 | `npm run typecheck` | TypeScript check |
 | `npm test` | Run unit tests (Vitest) |
 
-## Quick capture (Stage 10A, development only)
+## Quick capture (Stage 10A text / Stage 10B photo, development only)
 
 At `/relationships`, type or dictate a short note in **Remember something** and select **Save memory**. The same input appears on existing relationship pages for updates and catch-ups. No name, contact method, role, or relationship-mode field is required. The text is saved to `.data/relationships.json` as a dated, user-authored encounter **before** AI interpretation, so an unavailable model cannot lose the original note.
 
 With `OPENAI_API_KEY` configured locally, bounded structured interpretation proposes participants, person-specific facts, shared details (such as a couple's dogs), other people mentioned, and explicit commitments. New identities can start as sparse provisional records; exact-email or explicit person-page context can link a known record. A name match alone requires a lightweight choice on the saved-note page. No autonomous messages, reminder tasks, automatic notifications, or background content retrieval occur. A saved note can involve several people and is viewable from each linked person page.
 
-The saved-note page shows the original wording and lets you retry pending interpretation or resolve uncertain identities. A person page allows correction of an extracted name. Unknown contact fields remain unfilled. A future slice will add photos/business-card images to this same capture process.
+The saved-note page shows the original wording and lets you retry pending interpretation or resolve uncertain identities. A person page allows correction of an extracted name. Unknown contact fields remain unfilled.
 
-**Privacy boundary:** User-typed notes are intentionally retained in the local private JSON store. They are sent for interpretation only to the configured OpenAI Responses API with `store: false`. Raw transcripts supplied to the separate conversation-learning feature remain non-persistent. Do not commit `.data/`, `.env.local`, private notes, or API keys.
+**Photo capture (Stage 10B draft):** In that same form, optionally select a JPEG, PNG, or WebP image (up to 4 MB). A phone browser may offer a camera option. You can add context, such as "Holiday card from Arvin, an old friend," so the system knows which relationship matters. The photo is read by OpenAI with provider storage disabled; the app retains the *extracted text* and brief *visible observations* separately from your own words, then runs the existing structured relationship interpretation. It does **not** save the uploaded image. If the image cannot be read, nothing from it is saved and the form explains the failure. If the second interpretation fails after photo reading, the extracted text and observations remain pending locally and can be retried without the image.
+
+For cards and group photos, the prompt distinguishes the intended relationship from spouses, children, pets, and vendor/photo credits. Only the primary intended person should become a managed relationship; other names remain contextual unless separately identified and approved. This is prompt guidance plus the existing cautious matching flow, not a guarantee that AI reads every card correctly. Review the saved text and people before treating them as reliable. Connected-people/shared-household modeling remains separately scoped in Issue #48.
+
+**Controlled acceptance image:** `fixtures/fictional-diwali-card.png` is an entirely fictional Diwali card, with its editable SVG source beside it. In an isolated test dataset, choose that photo and write `Holiday card from Kiran, a former colleague` as the optional context. Expected: transcription identifies Kiran, Maya, Tara, Dev, their life updates and dog Pippin; only Kiran is proposed as the primary relationship, and vendor credits (Orchard Press / Jo Fischer) are not contacts. No date of the family's milestones should be invented. Check the observed output rather than assuming this prompt is infallible; only then consider testing a real person's card with their privacy in mind.
+
+**Privacy boundary:** User-typed notes and text extracted from deliberately selected photos are intentionally retained in the local private JSON store. The original photo is held only for the immediate request and is not retained by this app. Selected images and/or text are sent only to the configured OpenAI Responses API with `store: false`. Raw transcripts supplied to the separate conversation-learning feature remain non-persistent. Do not commit `.data/`, `.env.local`, private notes, photos, or API keys.
 
 ## Codespaces dev start/stop (run on the Mac host)
 
@@ -100,7 +106,7 @@ Unit tests (`src/scripts/dev-workflow.test.ts`) use a rejecting fake `gh`, fake 
 - `src/lib/format.ts` – date/initials helpers
 - `src/components/` – small shared UI components
 - `src/lib/gmail/discovery.ts` – deterministic, metadata-only candidate ranking and exclusions
-- `src/lib/capture.ts`, `capture-inference.ts` – multi-person quick-capture model, cautious identity reconciliation, and schema-validated inference
+- `src/lib/capture.ts`, `capture-inference.ts`, `capture-image.ts` – text/photo capture model, bounded vision transcription, cautious identity reconciliation, and schema-validated inference
 - `src/app/captures/[id]/page.tsx` – original note, linked/uncertain identities, and optional resolution
 
 ## Stage 2 fictional relationship-inference benchmark

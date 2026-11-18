@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { captureInterpretationText } from "@/lib/capture";
+import { MAX_CAPTURE_IMAGE_BYTES, observeCaptureImageWithOpenAI, validateCaptureImage } from "@/lib/capture-image";
 import { inferCaptureWithOpenAI } from "@/lib/capture-inference";
 import {
   getCapture,
@@ -9,6 +11,7 @@ import {
   saveCaptureInterpretation,
   saveCapturePersonResolution,
   saveNewCapture,
+  saveNewImageCapture,
   saveRelationship,
 } from "@/lib/relationship-store";
 
@@ -24,14 +27,69 @@ async function interpretIfAvailable(id: string) {
   const context = capture.contextRelationshipId ? await getRelationship(capture.contextRelationshipId) : null;
   try {
     const extraction = await inferCaptureWithOpenAI({
-      note: capture.note,
+      note: captureInterpretationText(capture),
       capturedAt: capture.capturedAt,
       contextPersonLabel: context?.personLabel,
+      source: capture.source,
     }, { apiKey, model: process.env.OPENAI_RELATIONSHIP_MODEL });
     await saveCaptureInterpretation(capture.id, extraction);
   } catch {
     // The user-authored note was already saved. Keep it pending and do not log private content.
   }
+}
+
+export type CaptureFormState = { error: string | null };
+
+export async function saveUniversalCapture(
+  contextRelationshipId: string | null,
+  _previous: CaptureFormState,
+  formData: FormData,
+): Promise<CaptureFormState> {
+  ensureDevelopment();
+  const rawNote = formData.get("note");
+  const rawPhoto = formData.get("photo");
+  if (typeof rawNote !== "string") return { error: "Write a note or choose a photo." };
+  const note = rawNote.trim();
+  if (note.length > 1_500 && rawPhoto instanceof File && rawPhoto.size > 0) {
+    return { error: "Keep the context accompanying a photo under 1,500 characters." };
+  }
+
+  let eventId: string;
+  if (rawPhoto instanceof File && rawPhoto.size > 0) {
+    const apiKey = process.env.OPENAI_API_KEY ?? "";
+    if (!apiKey) return { error: "Photo capture needs OpenAI configured. Nothing was saved." };
+    if (rawPhoto.size > MAX_CAPTURE_IMAGE_BYTES) return { error: "Choose a photo smaller than 4 MB." };
+    try {
+      const bytes = new Uint8Array(await rawPhoto.arrayBuffer());
+      validateCaptureImage(bytes, rawPhoto.type);
+      const context = contextRelationshipId ? await getRelationship(contextRelationshipId) : null;
+      const observation = await observeCaptureImageWithOpenAI({
+        bytes, mimeType: rawPhoto.type, note, contextPersonLabel: context?.personLabel,
+      }, { apiKey, model: process.env.OPENAI_RELATIONSHIP_MODEL });
+      // The original image is not saved anywhere; only extracted text and observations remain.
+      const event = await saveNewImageCapture({ note, ...observation }, contextRelationshipId);
+      eventId = event.id;
+    } catch (error) {
+      if (error instanceof Error && (
+        error.message.startsWith("Choose an image") || error.message.startsWith("Use a JPEG") ||
+        error.message.startsWith("The photo did not yield"))) {
+        return { error: error.message + " The image was not saved." };
+      }
+      return { error: "We could not interpret that photo. Nothing was saved. Try another image or a text note." };
+    }
+  } else {
+    if (!note || note.length > 5_000) return { error: "Write a note of up to 5,000 characters or choose a photo." };
+    try {
+      eventId = (await saveNewCapture(note, contextRelationshipId)).id;
+    } catch {
+      return { error: "The note could not be saved. Please try again." };
+    }
+  }
+
+  await interpretIfAvailable(eventId);
+  revalidatePath("/relationships");
+  if (contextRelationshipId) revalidatePath("/relationships/" + contextRelationshipId);
+  redirect("/captures/" + eventId);
 }
 
 export async function saveQuickCapture(contextRelationshipId: string | null, formData: FormData) {

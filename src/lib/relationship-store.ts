@@ -5,6 +5,7 @@ import {
   applyCaptureExtraction,
   isCaptureForRelationship,
   newCaptureEvent,
+  newImageCaptureEvent,
   resolveCapturePerson,
   type CaptureEvent,
   type CaptureExtraction,
@@ -123,6 +124,20 @@ export async function saveRelationship(record: RelationshipRecord) {
 
 export async function saveNewCapture(note: string, contextRelationshipId: string | null = null) {
   const event = newCaptureEvent(note, contextRelationshipId);
+  return mutateStore((store) => {
+    if (contextRelationshipId && !store.relationships.some((record) => record.id === contextRelationshipId)) {
+      throw new Error("The selected relationship was not found.");
+    }
+    store.captures.push(event);
+    return event;
+  });
+}
+
+export async function saveNewImageCapture(
+  input: { note: string; sourceText: string; visualDetails: string },
+  contextRelationshipId: string | null = null,
+) {
+  const event = newImageCaptureEvent(input, contextRelationshipId);
   return mutateStore((store) => {
     if (contextRelationshipId && !store.relationships.some((record) => record.id === contextRelationshipId)) {
       throw new Error("The selected relationship was not found.");
