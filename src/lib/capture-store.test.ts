@@ -10,6 +10,7 @@ import {
   saveCaptureInterpretation,
   saveCapturePersonResolution,
   saveNewCapture,
+  saveNewImageCapture,
   saveRelationship,
 } from "./relationship-store";
 import { createManualRelationshipRecord } from "./relationship-record";
@@ -45,6 +46,24 @@ describe("local quick capture persistence", () => {
     expect((await stat(path.join(testDir, ".data/relationships.json"))).mode & 0o777).toBe(0o600);
     expect(await getCapture(saved.id)).toMatchObject({ status: "pending" });
     expect(await listRecentCaptures()).toHaveLength(1);
+  });
+
+  it("saves only transcribed image evidence and user context, never raw image bytes", async () => {
+    const saved = await saveNewImageCapture({
+      note: "From my friend Arvin",
+      sourceText: "Happy Diwali!\nArvin and Cindy",
+      visualDetails: "A white dog is in the picture.",
+    });
+    const disk = await readFile(path.join(testDir, ".data/relationships.json"), "utf8");
+    expect(disk).toContain('"source": "user-image"');
+    expect(disk).toContain('"sourceText": "Happy Diwali!\\nArvin and Cindy"');
+    expect(disk).not.toContain("data:image/");
+    expect(await getCapture(saved.id)).toMatchObject({ status: "pending", note: "From my friend Arvin" });
+    await saveCaptureInterpretation(saved.id, {
+      ...extraction, participants: [{ ...blankParticipant, name: "Arvin" }],
+      otherPeople: [{ name: "Cindy", connection: "Named as a signer" }],
+    });
+    expect((await listRelationships()).map((person) => person.personLabel)).toEqual(["Arvin"]);
   });
 
   it("saves linked people and encounter atomically when extraction succeeds", async () => {

@@ -100,7 +100,7 @@ export default async function RelationshipDetailPage({
         </p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">{relationship.personLabel}</h1>
         {relationship.personLabelAuthority === "inferred-unverified" && (
-          <p className="mt-1 text-xs text-amber-700">Name extracted from a note. Confirm or correct when you have a moment.</p>
+          <p className="mt-1 text-xs text-amber-700">Name identified from a saved memory. Confirm or correct when you have a moment.</p>
         )}
         <div className="mt-5 grid gap-3 border-b border-stone-100 pb-5 sm:grid-cols-2 lg:grid-cols-3">
           {contactDetails.map((item) => (
@@ -438,14 +438,17 @@ export default async function RelationshipDetailPage({
       {capturedNotes.length > 0 && (
         <section className="rounded-2xl border border-stone-200 bg-white p-6">
           <h2 className="text-lg font-semibold">Remembered moments</h2>
-          <p className="mt-1 text-sm text-stone-600">Dated notes you saved yourself. Select one to see the original wording and everyone linked to it.</p>
+          <p className="mt-1 text-sm text-stone-600">Notes and photos you saved yourself. Select one to see its source details and everyone linked to it.</p>
           <ol className="mt-4 space-y-3">
             {capturedNotes.map((capture) => (
               <li key={capture.id} className="rounded-xl border border-stone-200 p-4">
                 <Link href={"/captures/" + capture.id} className="font-medium text-indigo-700 hover:underline">
-                  {capture.capturedAt.slice(0, 10)} · {capture.summary || "Saved note"}
+                  {capture.capturedAt.slice(0, 10)} · {capture.summary || (capture.source === "user-image" ? "Saved photo" : "Saved note")}
                 </Link>
-                <p className="mt-1 line-clamp-2 text-sm text-stone-600">{capture.note}</p>
+                <p className="mt-1 line-clamp-2 text-sm text-stone-600">
+                  {capture.source === "user-image" ? "Photo" : "Note"}
+                  {capture.note ? ` · ${capture.source === "user-image" ? "Your context: " : ""}${capture.note}` : " · No written context"}
+                </p>
                 {capture.status === "pending" && <span className="text-xs text-amber-700">Awaiting interpretation</span>}
               </li>
             ))}

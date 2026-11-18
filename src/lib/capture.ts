@@ -40,9 +40,12 @@ export type CapturedPerson = CaptureParticipant & {
 export type CaptureEvent = {
   id: string;
   capturedAt: string;
-  source: "user-text";
-  // This is a deliberately saved user-authored note, never a raw third-party transcript.
+  source: "user-text" | "user-image";
+  // Text notes are user-authored. Image captures preserve the user's optional note separately
+  // from the text and visual details extracted from the intentionally supplied image.
   note: string;
+  sourceText?: string;
+  visualDetails?: string;
   contextRelationshipId: string | null;
   status: "pending" | "interpreted";
   summary: string;
@@ -70,6 +73,44 @@ export function newCaptureEvent(note: string, contextRelationshipId: string | nu
   };
 }
 
+export function newImageCaptureEvent(
+  input: { note: string; sourceText: string; visualDetails: string },
+  contextRelationshipId: string | null,
+  now = new Date(),
+): CaptureEvent {
+  const note = input.note.trim();
+  const sourceText = input.sourceText.trim();
+  const visualDetails = input.visualDetails.trim();
+  if (note.length > 1_500 || sourceText.length > 8_000 || visualDetails.length > 1_500 ||
+    (!sourceText && !visualDetails)) {
+    throw new Error("The photo did not yield usable information within the capture limits.");
+  }
+  return {
+    id: randomUUID(),
+    capturedAt: now.toISOString(),
+    source: "user-image",
+    note,
+    sourceText,
+    visualDetails,
+    contextRelationshipId,
+    status: "pending",
+    summary: "",
+    people: [],
+    sharedDetails: [],
+    otherPeople: [],
+    commitments: [],
+  };
+}
+
+export function captureInterpretationText(event: CaptureEvent) {
+  if (event.source !== "user-image") return event.note;
+  return [
+    event.note && "User-provided context (not printed on the image):\n" + event.note,
+    event.sourceText && "Text read from the selected photo:\n" + event.sourceText,
+    event.visualDetails && "Visible non-text details (model observations, not verified identities):\n" + event.visualDetails,
+  ].filter(Boolean).join("\n\n");
+}
+
 function normalized(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -88,11 +129,11 @@ function capturedSource(event: CaptureEvent): RelationshipSource {
     id: "capture:" + event.id,
     source: "capture",
     observedAt: event.capturedAt.slice(0, 10),
-    label: "Your saved note",
+    label: event.source === "user-image" ? "Photo you chose (image not retained)" : "Your saved note",
   };
 }
 
-function createProvisional(name: string, now: Date): RelationshipRecord {
+function createProvisional(name: string, now: Date, sourceKind: CaptureEvent["source"]): RelationshipRecord {
   const record = createManualRelationshipRecord(name, undefined, undefined, now);
   return {
     ...record,
@@ -102,7 +143,9 @@ function createProvisional(name: string, now: Date): RelationshipRecord {
     history: {
       earliestObservedMeaningfulInteraction: "",
       latestObservedMeaningfulInteraction: "",
-      pattern: "Started from a user-authored note; other history is not yet known.",
+      pattern: sourceKind === "user-image"
+        ? "Started from a photo the user chose to capture; other history is not yet known."
+        : "Started from a user-authored note; other history is not yet known.",
       evidenceIds: [],
     },
     unknowns: [],
@@ -162,7 +205,7 @@ function addParticipantMemory(
         source: "capture",
         value: email,
         confirmed: false,
-        label: "From your saved note (unverified)",
+        label: source.label + " (unverified)",
         sourceIds: [source.id],
       });
     }
@@ -220,7 +263,7 @@ export function applyCaptureExtraction(
       chosen = emailMatches[0];
       resolution = "linked";
     } else if (!repeated && candidates.length === 0) {
-      chosen = createProvisional(name, now);
+      chosen = createProvisional(name, now, event.source);
       relationships.push(chosen);
       resolution = "created";
     }
@@ -270,7 +313,7 @@ export function resolveCapturePerson(
   const resolution: CapturedPerson["resolution"] = selectedId === "new" ? "created" : "linked";
   const source = capturedSource(event);
   if (!chosen) {
-    chosen = createProvisional(person.name, now);
+    chosen = createProvisional(person.name, now, event.source);
     relationships.push(chosen);
   }
   const position = relationships.findIndex((record) => record.id === chosen!.id);

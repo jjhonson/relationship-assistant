@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200">
+  <!-- Entirely fictional, deterministic OCR/vision acceptance fixture. -->
+  <rect width="900" height="1200" fill="#fefaf1"/>
+  <rect x="37" y="37" width="826" height="1126" rx="22" fill="none" stroke="#b18a53" stroke-width="3"/>
+  <rect x="50" y="50" width="800" height="1100" rx="17" fill="none" stroke="#d8bd8d" stroke-width="1"/>
+  <g stroke="#b18a53" stroke-width="4" stroke-linecap="round" fill="none">
+    <path d="M146 84 v73 M450 84 v73 M754 84 v73"/>
+    <path d="M110 156 q36 -32 72 0 M414 156 q36 -32 72 0 M718 156 q36 -32 72 0"/>
+  </g>
+  <g fill="#e7b354">
+    <path d="M125 163 q21 41 42 0 Z M429 163 q21 41 42 0 Z M733 163 q21 41 42 0 Z"/>
+  </g>
+  <text x="450" y="263" text-anchor="middle" font-family="DejaVu Serif, serif" font-size="65" fill="#7a4c62">Shubh Diwali</text>
+  <text x="450" y="313" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="24" letter-spacing="3" fill="#8b6544">WARMTH, LIGHT &amp; NEW BEGINNINGS</text>
+  <line x1="180" y1="359" x2="720" y2="359" stroke="#dcc6a1" stroke-width="2"/>
+  <text x="450" y="432" text-anchor="middle" font-family="DejaVu Serif, serif" font-size="30" fill="#4b4b48">What a year it has been for our family.</text>
+  <text x="450" y="491" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#4b4b48">Tara started college in Oregon, and Dev</text>
+  <text x="450" y="531" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#4b4b48">has taken up guitar. Pippin, our white</text>
+  <text x="450" y="571" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#4b4b48">dog, remains in charge of the household.</text>
+  <text x="450" y="647" text-anchor="middle" font-family="DejaVu Serif, serif" font-size="28" fill="#7a4c62">With love,</text>
+  <text x="450" y="691" text-anchor="middle" font-family="DejaVu Serif, serif" font-size="35" fill="#7a4c62">Kiran, Maya, Tara &amp; Dev</text>
+  <g transform="translate(290 747)">
+    <rect x="0" y="93" width="320" height="164" rx="38" fill="#6685a0"/>
+    <path d="M48 104 L92 30 H225 L269 104" stroke="#35556c" stroke-width="16" stroke-linejoin="round" fill="#b7d2e2"/>
+    <ellipse cx="158" cy="107" rx="78" ry="95" fill="#f5f4e9" stroke="#a0a099" stroke-width="3"/>
+    <ellipse cx="86" cy="84" rx="30" ry="58" transform="rotate(25 86 84)" fill="#ebeae1" stroke="#999994" stroke-width="3"/>
+    <ellipse cx="229" cy="84" rx="30" ry="58" transform="rotate(-25 229 84)" fill="#ebeae1" stroke="#999994" stroke-width="3"/>
+    <circle cx="126" cy="107" r="8" fill="#3a3a3a"/>
+    <circle cx="189" cy="107" r="8" fill="#3a3a3a"/>
+    <ellipse cx="157" cy="143" rx="20" ry="13" fill="#55524e"/>
+    <path d="M157 154 q-22 35 -40 12 M157 154 q22 35 40 12" stroke="#55524e" stroke-width="4" fill="none"/>
+    <rect x="0" y="210" width="320" height="28" rx="8" fill="#35556c"/>
+    <circle cx="59" cy="259" r="31" fill="#343b40"/>
+    <circle cx="259" cy="259" r="31" fill="#343b40"/>
+  </g>
+  <text x="450" y="1073" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#88847d">Printed by Orchard Press | Illustration: Jo Fischer</text>
+  <text x="450" y="1110" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#aaa69e">Fictional test card • not a real person or event</text>
+</svg>

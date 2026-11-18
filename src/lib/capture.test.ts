@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCaptureExtraction,
+  captureInterpretationText,
   isCaptureForRelationship,
   newCaptureEvent,
+  newImageCaptureEvent,
   resolveCapturePerson,
   type CaptureExtraction,
   type CaptureParticipant,
@@ -23,6 +25,40 @@ function extraction(participants: CaptureParticipant[], other: Partial<CaptureEx
 }
 
 describe("universal text capture", () => {
+  it("stores photo-derived text and visible details separately from user context, without an image payload", () => {
+    const event = newImageCaptureEvent({
+      note: "Holiday card from Arvin, my old colleague",
+      sourceText: "Shubh Diwali!\nFrom Arvin and Cindy, Anjali and Sajai",
+      visualDetails: "A white dog in a car, possibly with family members.",
+    }, null, now);
+    expect(event.source).toBe("user-image");
+    expect(event.note).toBe("Holiday card from Arvin, my old colleague");
+    expect(event.sourceText).toContain("Shubh Diwali!");
+    expect(event.visualDetails).toContain("white dog");
+    expect(JSON.stringify(event)).not.toContain("data:image/");
+    expect(captureInterpretationText(event)).toContain("Text read from the selected photo");
+
+    const interpreted = applyCaptureExtraction(event, extraction([person("Arvin")], {
+      summary: "Received a holiday card from Arvin.",
+      otherPeople: [{ name: "Cindy", connection: "Named in the sign-off" },
+        { name: "Anjali", connection: "Named in the sign-off" },
+        { name: "Sajai", connection: "Named in the sign-off" }],
+      sharedDetails: ["A white dog appears in the photo."],
+    }), [], now);
+    expect(interpreted.relationships.map((item) => item.personLabel)).toEqual(["Arvin"]);
+    expect(interpreted.event.otherPeople).toHaveLength(3);
+    expect(interpreted.relationships[0].sources[0].label).toBe("Photo you chose (image not retained)");
+    expect(interpreted.relationships[0].lastInteractionAt).toBeNull();
+  });
+
+  it("allows an image-only memory with no presumed relationship, but rejects empty photo results", () => {
+    const event = newImageCaptureEvent({ note: "", sourceText: "", visualDetails: "An old team photo." }, null, now);
+    const applied = applyCaptureExtraction(event, extraction([], { summary: "Team photograph." }), [], now);
+    expect(applied.relationships).toHaveLength(0);
+    expect(applied.event.status).toBe("interpreted");
+    expect(() => newImageCaptureEvent({ note: "", sourceText: "", visualDetails: "" }, null, now)).toThrow();
+  });
+
   it("creates two provisional neighbors from one note, preserves dogs as shared context, and leaves contact details unknown", () => {
     const event = newCaptureEvent(
       "Met Tom and Judy across the back fence. Their dogs are Pepper and Scout.", null, now,

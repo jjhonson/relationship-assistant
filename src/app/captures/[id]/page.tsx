@@ -24,13 +24,38 @@ export default async function SavedCapturePage({ params }: { params: Promise<{ i
         <h1 className="mt-1 text-2xl font-bold text-stone-900">
           {capture.summary || "A note you wanted to remember"}
         </h1>
-        <p className="mt-2 text-sm text-stone-500">Recorded {capture.capturedAt.slice(0, 10)}</p>
-        <div className="mt-5 rounded-xl bg-stone-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">What you wrote</p>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-stone-800">{capture.note}</p>
-        </div>
+        <p className="mt-2 text-sm text-stone-500">
+          {capture.source === "user-image" ? "Photo selected" : "Note recorded"} {capture.capturedAt.slice(0, 10)}
+          {capture.source === "user-image" ? " (not necessarily the date of the event)" : ""}
+        </p>
+        {capture.note && (
+          <div className="mt-5 rounded-xl bg-stone-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+              {capture.source === "user-image" ? "Context you added" : "What you wrote"}
+            </p>
+            <p className="mt-2 whitespace-pre-wrap text-sm text-stone-800">{capture.note}</p>
+          </div>
+        )}
+        {capture.source === "user-image" && (
+          <div className="mt-5 space-y-3">
+            {capture.sourceText && (
+              <div className="rounded-xl bg-stone-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Text read from photo</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-stone-800">{capture.sourceText}</p>
+              </div>
+            )}
+            {capture.visualDetails && (
+              <div className="rounded-xl bg-stone-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Visible details</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-stone-800">{capture.visualDetails}</p>
+              </div>
+            )}
+          </div>
+        )}
         <p className="mt-3 text-xs text-stone-500">
-          This user-authored note is saved in the local app. Unknown details stay unknown, and the original wording remains available.
+          {capture.source === "user-image"
+            ? "The original image was not retained. Text and visual details were extracted by AI and may be inaccurate; check them before relying on them."
+            : "This user-authored note is saved in the local app. Unknown details stay unknown, and the original wording remains available."}
         </p>
       </header>
 
@@ -38,8 +63,9 @@ export default async function SavedCapturePage({ params }: { params: Promise<{ i
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6">
           <h2 className="font-semibold text-amber-950">Saved, but not yet interpreted</h2>
           <p className="mt-2 text-sm text-amber-900">
-            The note is safe. Interpretation may be unavailable because the model is not configured or its response failed validation.
-            You can retry after checking the local model setup.
+            {capture.source === "user-image"
+              ? "The extracted text and observations are saved, but the relationship interpretation is pending. You can retry using those saved details; the image itself was not retained."
+              : "The note is safe. Interpretation may be unavailable because the model is not configured or its response failed validation. You can retry after checking the local model setup."}
           </p>
           <form action={retryAction} className="mt-4">
             <button type="submit" className="rounded-lg border border-amber-400 bg-white px-4 py-2 text-sm font-medium text-amber-950">

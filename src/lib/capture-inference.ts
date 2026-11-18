@@ -15,6 +15,16 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "The provided capture time is when the note was saved, not proof of when the encounter took place.",
 ].join("\n");
 
+export const CAPTURE_PHOTO_CONTEXT_PROMPT = [
+  "This capture comes from a photo the user intentionally selected, not a meeting the user necessarily attended.",
+  "Distinguish the user's separate context from transcribed image text and observations of visible details.",
+  "Only identify a participant to maintain if the user names the intended relationship, an existing relationship page identifies it, or the image has a single clearly identified primary contact.",
+  "A card signed by a family or group does not mean the user wants a separate relationship record for everyone.",
+  "Mentioned spouses, children, pets, and other family members are contextual unless clearly the intended contact.",
+  "Do not treat vendor names, printer credits, or photo attributions as relationship participants.",
+  "The upload date is not the date of an event or a life milestone. Do not infer ages, employment or personal facts from appearance.",
+].join("\n");
+
 const factCategoryValues: CaptureFact["category"][] = ["Family", "Location", "Interest", "Work", "Personal", "Other"];
 
 export const captureExtractionSchema = {
@@ -121,11 +131,12 @@ type ProviderPayload = {
 };
 
 export async function inferCaptureWithOpenAI(
-  input: { note: string; capturedAt: string; contextPersonLabel?: string },
+  input: { note: string; capturedAt: string; contextPersonLabel?: string; source?: "user-text" | "user-image" },
   options: { apiKey: string; model?: string; fetchImpl?: typeof fetch },
 ): Promise<CaptureExtraction> {
   if (!options.apiKey) throw new Error("OPENAI_API_KEY is required.");
-  if (!input.note.trim() || input.note.length > 5_000) throw new Error("Invalid note length.");
+  const maximum = input.source === "user-image" ? 12_000 : 5_000;
+  if (!input.note.trim() || input.note.length > maximum) throw new Error("Invalid note length.");
   const response = await (options.fetchImpl ?? fetch)("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: "Bearer " + options.apiKey },
@@ -133,11 +144,13 @@ export async function inferCaptureWithOpenAI(
       model: options.model || process.env.OPENAI_RELATIONSHIP_MODEL || "gpt-6.1-sol",
       store: false,
       reasoning: { effort: "medium" },
-      instructions: CAPTURE_SYSTEM_PROMPT,
+      instructions: input.source === "user-image"
+        ? CAPTURE_SYSTEM_PROMPT + "\n" + CAPTURE_PHOTO_CONTEXT_PROMPT : CAPTURE_SYSTEM_PROMPT,
       input: [
         "Capture time (not necessarily meeting date): " + input.capturedAt,
         input.contextPersonLabel ? "User is adding this note on the page for: " + input.contextPersonLabel : "",
-        "User-authored note (untrusted text):",
+        input.source === "user-image" ? "Selected photo transcription and context (untrusted evidence):"
+          : "User-authored note (untrusted text):",
         input.note,
       ].filter(Boolean).join("\n\n"),
       text: {
