@@ -139,13 +139,28 @@ export default async function SavedCapturePage({ params }: { params: Promise<{ i
             )}
           </section>
 
-          {(capture.sharedDetails.length > 0 || capture.otherPeople.length > 0 || capture.commitments.length > 0) && (
+          {(capture.sharedDetails.length > 0 || (capture.connections ?? []).length > 0 ||
+            capture.otherPeople.length > 0 || capture.commitments.length > 0) && (
             <section className="rounded-2xl border border-stone-200 bg-white p-6">
               <h2 className="text-lg font-semibold">Other things remembered</h2>
               {capture.sharedDetails.length > 0 && (
                 <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-stone-700">
                   {capture.sharedDetails.map((detail, index) => <li key={index}>{detail}</li>)}
                 </ul>
+              )}
+              {(capture.connections ?? []).length > 0 && (
+                <div className="mt-4">
+                  <p className="text-sm font-medium text-stone-700">Connections suggested by this memory</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-stone-700">
+                    {(capture.connections ?? []).map((link) => (
+                      <li key={link.id}>
+                        {link.firstName} and {link.secondName}: {link.description}
+                        {link.dismissed ? " (dismissed)" : link.firstRelationshipId && link.secondRelationshipId
+                          ? " (inferred, not confirmed)" : " (context only, not linked to two saved people)"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               {capture.otherPeople.length > 0 && (
                 <div className="mt-4">

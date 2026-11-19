@@ -10,6 +10,7 @@ import {
   getRelationship,
   saveCaptureInterpretation,
   saveCapturePersonResolution,
+  saveConnectionDismissal,
   saveNewCapture,
   saveNewImageCapture,
   saveRelationship,
@@ -144,4 +145,12 @@ export async function correctRelationshipName(id: string, formData: FormData) {
   revalidatePath("/relationships");
   revalidatePath("/relationships/" + id);
   redirect("/relationships/" + id + "?name=1");
+}
+
+export async function dismissInferredConnection(relationshipId: string, captureId: string, connectionId: string) {
+  ensureDevelopment();
+  await saveConnectionDismissal(captureId, connectionId, relationshipId);
+  revalidatePath("/relationships/" + relationshipId);
+  revalidatePath("/captures/" + captureId);
+  redirect("/relationships/" + relationshipId);
 }

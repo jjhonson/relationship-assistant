@@ -1,4 +1,4 @@
-import type { CaptureExtraction, CaptureFact } from "./capture";
+import type { CaptureConnection, CaptureExtraction, CaptureFact } from "./capture";
 
 export const CAPTURE_SYSTEM_PROMPT = [
   "Interpret a short, deliberately saved personal recollection for a relationship assistant.",
@@ -7,6 +7,9 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "Return people the user actually met or is explicitly updating as participants. Multiple participants are allowed.",
   "Mentioned spouses, family members, friends, or pets are context, not additional participant records unless the user also met them.",
   "Put details that belong to a specific participant in their fields or facts. Put household pets, shared location, and group information in sharedDetails if ownership is collective or uncertain.",
+  "Also put clearly household-wide facts (shared move, home, household pets) in householdDetails. Do not add an individual person's news or a general team update there.",
+  "For explicitly supported connections between named people, use connections with names exactly as they appear in participants or otherPeople. Use household only when they explicitly share a home, not merely because they are partners, neighbors, in one photo, or met together.",
+  "A connection between people in the same encounter is not implied simply by co-occurrence. Never assume marriage, family status, or a shared residence.",
   "Put other people mentioned but not directly met in otherPeople. Never put a dog's name in participants or otherPeople.",
   "Use empty strings for unknown optional fields. A first name alone is valid. An empty participants list is valid if no person can be confidently identified.",
   "Keep the summary short, factual, and faithful to the note. Do not embellish or recommend outreach.",
@@ -30,7 +33,7 @@ const factCategoryValues: CaptureFact["category"][] = ["Family", "Location", "In
 export const captureExtractionSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "participants", "sharedDetails", "otherPeople", "commitments"],
+  required: ["summary", "participants", "sharedDetails", "householdDetails", "connections", "otherPeople", "commitments"],
   properties: {
     summary: { type: "string" },
     participants: {
@@ -64,6 +67,21 @@ export const captureExtractionSchema = {
       },
     },
     sharedDetails: { type: "array", items: { type: "string" } },
+    householdDetails: { type: "array", items: { type: "string" } },
+    connections: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["firstName", "secondName", "kind", "description"],
+        properties: {
+          firstName: { type: "string" },
+          secondName: { type: "string" },
+          kind: { type: "string", enum: ["household", "family", "colleague", "other"] },
+          description: { type: "string" },
+        },
+      },
+    },
     otherPeople: {
       type: "array",
       items: {
@@ -98,6 +116,8 @@ export function validateCaptureExtraction(value: unknown): asserts value is Capt
   const result = value as Record<string, unknown>;
   if (!validString(result.summary, 1_000) || !Array.isArray(result.participants) || result.participants.length > 12 ||
     !validStrings(result.sharedDetails, 30) ||
+    (result.householdDetails !== undefined && !validStrings(result.householdDetails, 30)) ||
+    (result.connections !== undefined && (!Array.isArray(result.connections) || result.connections.length > 20)) ||
     !Array.isArray(result.otherPeople) || result.otherPeople.length > 30 ||
     !Array.isArray(result.commitments) || result.commitments.length > 20) {
     throw new Error("Invalid capture interpretation fields.");
@@ -118,6 +138,16 @@ export function validateCaptureExtraction(value: unknown): asserts value is Capt
     if (!item || typeof item !== "object") throw new Error("Invalid related person.");
     const other = item as Record<string, unknown>;
     if (!validString(other.name) || !validString(other.connection)) throw new Error("Invalid related person fields.");
+  }
+  for (const item of (result.connections ?? []) as unknown[]) {
+    if (!item || typeof item !== "object") throw new Error("Invalid captured connection.");
+    const connection = item as Record<string, unknown>;
+    if (!validString(connection.firstName, 120) || !validString(connection.secondName, 120) ||
+      !validString(connection.description, 500) ||
+      !(["household", "family", "colleague", "other"] satisfies CaptureConnection["kind"][])
+        .includes(connection.kind as CaptureConnection["kind"])) {
+      throw new Error("Invalid captured connection fields.");
+    }
   }
   for (const item of result.commitments) {
     if (!item || typeof item !== "object") throw new Error("Invalid commitment.");

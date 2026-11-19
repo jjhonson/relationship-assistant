@@ -3,10 +3,13 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   applyCaptureExtraction,
+  connectedPeopleFromCaptures,
+  dismissCapturedConnection,
   isCaptureForRelationship,
   newCaptureEvent,
   newImageCaptureEvent,
   resolveCapturePerson,
+  sharedHouseholdContextFromCaptures,
   type CaptureEvent,
   type CaptureExtraction,
 } from "./capture";
@@ -158,6 +161,24 @@ export async function listCapturesForRelationship(relationshipId: string) {
     .sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
 }
 
+export async function listConnectedPeopleForRelationship(relationshipId: string) {
+  const store = await readStore();
+  const known = new Map(store.relationships.map((record) => [record.id, record]));
+  return connectedPeopleFromCaptures(store.captures, relationshipId).flatMap((connection) => {
+    const related = known.get(connection.relatedRelationshipId);
+    return related ? [{ ...connection, related }] : [];
+  });
+}
+
+export async function listSharedHouseholdContextForRelationship(relationshipId: string) {
+  const store = await readStore();
+  const known = new Map(store.relationships.map((record) => [record.id, record]));
+  return sharedHouseholdContextFromCaptures(store.captures, relationshipId).flatMap((context) => {
+    const via = known.get(context.viaRelationshipId);
+    return via ? [{ ...context, via }] : [];
+  });
+}
+
 export async function listRecentCaptures() {
   const store = await readStore();
   return [...store.captures].sort((a, b) => b.capturedAt.localeCompare(a.capturedAt)).slice(0, 8);
@@ -182,5 +203,27 @@ export async function saveCapturePersonResolution(id: string, personIndex: numbe
     store.captures[index] = updated.event;
     store.relationships = updated.relationships;
     return updated.event;
+  });
+}
+
+export async function saveConnectionDismissal(captureId: string, connectionId: string, relationshipId: string) {
+  return mutateStore((store) => {
+    const index = store.captures.findIndex((event) => event.id === captureId);
+    if (index < 0) throw new Error("Saved note not found.");
+    const updated = dismissCapturedConnection(store.captures[index], connectionId, relationshipId);
+    const original = (store.captures[index].connections ?? []).find((link) => link.id === connectionId)!;
+    // Dismiss all existing evidence for this same inferred link so an older suggestion
+    // does not reappear immediately. The source notes themselves remain untouched.
+    store.captures = store.captures.map((event, i) => ({
+      ...(i === index ? updated : event),
+      connections: ((i === index ? updated : event).connections ?? []).map((link) => {
+        const samePair = (link.firstRelationshipId === original.firstRelationshipId &&
+          link.secondRelationshipId === original.secondRelationshipId) ||
+          (link.firstRelationshipId === original.secondRelationshipId &&
+            link.secondRelationshipId === original.firstRelationshipId);
+        return samePair && link.kind === original.kind ? { ...link, dismissed: true } : link;
+      }),
+    }));
+    return updated;
   });
 }

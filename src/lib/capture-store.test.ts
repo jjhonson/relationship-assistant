@@ -5,10 +5,13 @@ import path from "node:path";
 import {
   getCapture,
   listCapturesForRelationship,
+  listConnectedPeopleForRelationship,
+  listSharedHouseholdContextForRelationship,
   listRecentCaptures,
   listRelationships,
   saveCaptureInterpretation,
   saveCapturePersonResolution,
+  saveConnectionDismissal,
   saveNewCapture,
   saveNewImageCapture,
   saveRelationship,
@@ -81,6 +84,34 @@ describe("local quick capture persistence", () => {
     expect(disk.captures[0].people.map((person: { relationshipId: string }) => person.relationshipId).sort())
       .toEqual(disk.relationships.map((record: { id: string }) => record.id).sort());
     await expect(saveCaptureInterpretation(saved.id, extraction)).rejects.toThrow("already interpreted");
+  });
+
+  it("shows shared household evidence from the other participant, and permits a durable correction", async () => {
+    const first = await saveNewCapture("Met Tom and Judy, who share a home, and their two dogs.");
+    const interpreted = await saveCaptureInterpretation(first.id, {
+      ...extraction,
+      participants: [blankParticipant, { ...blankParticipant, name: "Judy" }],
+      connections: [{ firstName: "Tom", secondName: "Judy", kind: "household", description: "Share a home." }],
+      householdDetails: ["Their two dogs share the home."],
+    });
+    const people = await listRelationships();
+    const tom = people.find((record) => record.personLabel === "Tom")!;
+    const judy = people.find((record) => record.personLabel === "Judy")!;
+    expect((await listConnectedPeopleForRelationship(judy.id))[0].related.id).toBe(tom.id);
+    const followup = await saveNewCapture("Tom said their household moved recently.", tom.id);
+    await saveCaptureInterpretation(followup.id, {
+      ...extraction,
+      sharedDetails: ["The household moved recently."],
+      householdDetails: ["Their household moved recently."],
+    });
+    const shared = await listSharedHouseholdContextForRelationship(judy.id);
+    expect(shared).toHaveLength(1);
+    expect(shared[0]).toMatchObject({ via: { id: tom.id }, event: { id: followup.id } });
+    expect(await listCapturesForRelationship(judy.id)).toHaveLength(1); // Not a direct Judy interaction.
+    await saveConnectionDismissal(first.id, interpreted.connections![0].id, judy.id);
+    expect(await listConnectedPeopleForRelationship(judy.id)).toEqual([]);
+    expect(await listSharedHouseholdContextForRelationship(judy.id)).toEqual([]);
+    expect((await getCapture(first.id))?.connections![0].dismissed).toBe(true);
   });
 
   it("preserves an ambiguous encounter without making a duplicate and resolves on user choice", async () => {
