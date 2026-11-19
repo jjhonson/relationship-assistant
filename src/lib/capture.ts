@@ -27,8 +27,26 @@ export type CaptureExtraction = {
   summary: string;
   participants: CaptureParticipant[];
   sharedDetails: string[];
+  // Only information explicitly about a shared home/household is eligible to be
+  // surfaced on another household member's page. Other group details stay local.
+  householdDetails?: string[];
+  connections?: CaptureConnection[];
   otherPeople: Array<{ name: string; connection: string }>;
   commitments: Array<{ owner: string; description: string }>;
+};
+
+export type CaptureConnection = {
+  firstName: string;
+  secondName: string;
+  kind: "household" | "family" | "colleague" | "other";
+  description: string;
+};
+
+export type CapturedConnection = CaptureConnection & {
+  id: string;
+  firstRelationshipId: string | null;
+  secondRelationshipId: string | null;
+  dismissed: boolean;
 };
 
 export type CapturedPerson = CaptureParticipant & {
@@ -51,6 +69,8 @@ export type CaptureEvent = {
   summary: string;
   people: CapturedPerson[];
   sharedDetails: string[];
+  householdDetails?: string[];
+  connections?: CapturedConnection[];
   otherPeople: CaptureExtraction["otherPeople"];
   commitments: CaptureExtraction["commitments"];
 };
@@ -68,6 +88,8 @@ export function newCaptureEvent(note: string, contextRelationshipId: string | nu
     summary: "",
     people: [],
     sharedDetails: [],
+    householdDetails: [],
+    connections: [],
     otherPeople: [],
     commitments: [],
   };
@@ -97,6 +119,8 @@ export function newImageCaptureEvent(
     summary: "",
     people: [],
     sharedDetails: [],
+    householdDetails: [],
+    connections: [],
     otherPeople: [],
     commitments: [],
   };
@@ -161,6 +185,20 @@ function participantFacts(person: CaptureParticipant): CaptureFact[] {
     { category: "Personal", label: "LinkedIn", value: person.linkedin },
   ];
   return [...fields, ...person.facts].filter((fact) => fact.label.trim() && fact.value.trim());
+}
+
+function resolvedIdForName(people: CapturedPerson[], name: string): string | null {
+  const matches = people.filter((person) => normalized(person.name) === normalized(name) && person.relationshipId);
+  // Never resolve an edge to one of several people who share the same name.
+  return matches.length === 1 ? matches[0].relationshipId : null;
+}
+
+function resolvedConnections(connections: CapturedConnection[], people: CapturedPerson[]): CapturedConnection[] {
+  return connections.map((connection) => ({
+    ...connection,
+    firstRelationshipId: resolvedIdForName(people, connection.firstName),
+    secondRelationshipId: resolvedIdForName(people, connection.secondName),
+  }));
 }
 
 function addParticipantMemory(
@@ -281,6 +319,16 @@ export function applyCaptureExtraction(
     });
   }
 
+  const connections: CapturedConnection[] = (extraction.connections ?? [])
+    .filter((link) => normalized(link.firstName) !== normalized(link.secondName))
+    .map((link) => ({
+      ...link,
+      id: randomUUID(),
+      firstRelationshipId: null,
+      secondRelationshipId: null,
+      dismissed: false,
+    }));
+
   return {
     event: {
       ...event,
@@ -288,6 +336,8 @@ export function applyCaptureExtraction(
       summary: extraction.summary.trim(),
       people,
       sharedDetails: extraction.sharedDetails,
+      householdDetails: extraction.householdDetails ?? [],
+      connections: resolvedConnections(connections, people),
       otherPeople: extraction.otherPeople,
       commitments: extraction.commitments,
     },
@@ -318,11 +368,13 @@ export function resolveCapturePerson(
   }
   const position = relationships.findIndex((record) => record.id === chosen!.id);
   relationships[position] = addParticipantMemory(chosen, person, source, now);
+  const updatedPeople = event.people.map((item, i) => i === index
+    ? { ...item, relationshipId: chosen!.id, resolution, candidateIds: [] } : item);
   return {
     event: {
       ...event,
-      people: event.people.map((item, i) => i === index
-        ? { ...item, relationshipId: chosen!.id, resolution, candidateIds: [] } : item),
+      people: updatedPeople,
+      connections: resolvedConnections(event.connections ?? [], updatedPeople),
     },
     relationships,
   };
@@ -330,4 +382,63 @@ export function resolveCapturePerson(
 
 export function isCaptureForRelationship(event: CaptureEvent, relationshipId: string) {
   return event.contextRelationshipId === relationshipId || event.people.some((person) => person.relationshipId === relationshipId);
+}
+
+export function connectedPeopleFromCaptures(captures: CaptureEvent[], relationshipId: string) {
+  const connections = captures.flatMap((event) => (event.connections ?? [])
+    .filter((link) => !link.dismissed && link.firstRelationshipId && link.secondRelationshipId &&
+      link.firstRelationshipId !== link.secondRelationshipId &&
+      (link.firstRelationshipId === relationshipId || link.secondRelationshipId === relationshipId))
+    .map((link) => ({
+      event,
+      link,
+      relatedRelationshipId: link.firstRelationshipId === relationshipId
+        ? link.secondRelationshipId! : link.firstRelationshipId!,
+    })))
+    .sort((a, b) => b.event.capturedAt.localeCompare(a.event.capturedAt));
+  const seen = new Set<string>();
+  return connections.filter(({ relatedRelationshipId, link }) => {
+    const key = relatedRelationshipId + ":" + link.kind;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function sharedHouseholdContextFromCaptures(captures: CaptureEvent[], relationshipId: string) {
+  const householdLinks = captures.flatMap((event) => (event.connections ?? [])
+    .filter((link) => link.kind === "household" && !link.dismissed &&
+      link.firstRelationshipId && link.secondRelationshipId &&
+      link.firstRelationshipId !== link.secondRelationshipId &&
+      (link.firstRelationshipId === relationshipId || link.secondRelationshipId === relationshipId))
+    .map((link) => ({
+      memberId: link.firstRelationshipId === relationshipId
+        ? link.secondRelationshipId! : link.firstRelationshipId!,
+      linkedAt: event.capturedAt,
+    })));
+  const seen = new Set<string>();
+  return captures.flatMap((event) => {
+    if (event.status !== "interpreted" || !event.householdDetails?.length ||
+      isCaptureForRelationship(event, relationshipId)) return [];
+    return householdLinks.flatMap(({ memberId, linkedAt }) => {
+      // Context before two people were known to share a household is not silently backfilled.
+      if (event.capturedAt < linkedAt || !isCaptureForRelationship(event, memberId)) return [];
+      return event.householdDetails!.flatMap((detail) => {
+        const key = event.id + ":" + detail;
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [{ event, detail, viaRelationshipId: memberId }];
+      });
+    });
+  }).sort((a, b) => b.event.capturedAt.localeCompare(a.event.capturedAt));
+}
+
+export function dismissCapturedConnection(event: CaptureEvent, connectionId: string, relationshipId: string) {
+  const target = (event.connections ?? []).find((link) => link.id === connectionId &&
+    (link.firstRelationshipId === relationshipId || link.secondRelationshipId === relationshipId));
+  if (!target || target.dismissed) throw new Error("Connected-person suggestion not found.");
+  return {
+    ...event,
+    connections: (event.connections ?? []).map((link) => link.id === connectionId ? { ...link, dismissed: true } : link),
+  };
 }

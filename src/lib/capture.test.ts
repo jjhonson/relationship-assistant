@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   applyCaptureExtraction,
   captureInterpretationText,
+  connectedPeopleFromCaptures,
+  dismissCapturedConnection,
   isCaptureForRelationship,
   newCaptureEvent,
   newImageCaptureEvent,
   resolveCapturePerson,
+  sharedHouseholdContextFromCaptures,
   type CaptureExtraction,
   type CaptureParticipant,
 } from "./capture";
@@ -25,6 +28,67 @@ function extraction(participants: CaptureParticipant[], other: Partial<CaptureEx
 }
 
 describe("universal text capture", () => {
+  it("keeps explicit household connections source-backed and shares later household context without inventing a Judy interaction", () => {
+    const first = applyCaptureExtraction(newCaptureEvent(
+      "Met Tom and Judy, who live together next door. Their dogs are Pepper and Scout.", null, now,
+    ), extraction([person("Tom"), person("Judy")], {
+      sharedDetails: ["Their dogs are Pepper and Scout."],
+      householdDetails: ["Their household has dogs Pepper and Scout."],
+      connections: [{ firstName: "Tom", secondName: "Judy", kind: "household", description: "Share a home next door." }],
+    }), [], now);
+    const [tom, judy] = first.relationships;
+    expect(first.event.connections).toMatchObject([{
+      firstRelationshipId: tom.id, secondRelationshipId: judy.id, dismissed: false, kind: "household",
+    }]);
+    expect(connectedPeopleFromCaptures([first.event], judy.id)[0].relatedRelationshipId).toBe(tom.id);
+
+    const secondDate = new Date("2026-11-18T18:00:00Z");
+    const second = applyCaptureExtraction(newCaptureEvent(
+      "Tom said they moved from Austin in October and the dogs are settling in.", tom.id, secondDate,
+    ), extraction([person("Tom")], {
+      sharedDetails: ["Their household moved from Austin in October."],
+      householdDetails: ["The household moved from Austin in October (year not specified)."],
+    }), first.relationships, secondDate);
+
+    expect(second.relationships).toHaveLength(2);
+    expect(second.relationships.find((item) => item.id === judy.id)?.durableFacts).toEqual([]);
+    expect(isCaptureForRelationship(second.event, judy.id)).toBe(false);
+    const shared = sharedHouseholdContextFromCaptures([first.event, second.event], judy.id);
+    expect(shared).toHaveLength(1);
+    expect(shared[0]).toMatchObject({ event: { id: second.event.id }, viaRelationshipId: tom.id });
+    expect(shared[0].detail).toContain("year not specified");
+
+    const dismissed = dismissCapturedConnection(first.event, first.event.connections![0].id, judy.id);
+    expect(connectedPeopleFromCaptures([dismissed], judy.id)).toEqual([]);
+    expect(sharedHouseholdContextFromCaptures([dismissed, second.event], judy.id)).toEqual([]);
+  });
+
+  it("does not infer a household from a shared encounter or create incidental children as contacts", () => {
+    const result = applyCaptureExtraction(newCaptureEvent(
+      "Met Sam and Lee at a conference. Sam said daughter Lily is learning guitar.", null, now,
+    ), extraction([person("Sam"), person("Lee")], {
+      otherPeople: [{ name: "Lily", connection: "Sam's daughter, learning guitar" }],
+      sharedDetails: ["All attended the same conference."],
+      connections: [{ firstName: "Sam", secondName: "Lily", kind: "family", description: "Sam's daughter" }],
+    }), [], now);
+    expect(result.relationships.map((record) => record.personLabel)).toEqual(["Sam", "Lee"]);
+    expect(connectedPeopleFromCaptures([result.event], result.relationships[0].id)).toEqual([]);
+    expect(sharedHouseholdContextFromCaptures([result.event], result.relationships[1].id)).toEqual([]);
+    expect(result.event.connections?.[0].secondRelationshipId).toBeNull();
+  });
+
+  it("waits for ambiguous identity resolution before activating an explicit person link", () => {
+    const existing = createManualRelationshipRecord("Tom Wilson", undefined, undefined, now);
+    const first = applyCaptureExtraction(newCaptureEvent("Tom and Judy share a household.", null, now),
+      extraction([person("Tom"), person("Judy")], {
+        connections: [{ firstName: "Tom", secondName: "Judy", kind: "household", description: "Live together." }],
+      }), [existing], now);
+    const judy = first.relationships.find((record) => record.personLabel === "Judy")!;
+    expect(connectedPeopleFromCaptures([first.event], judy.id)).toEqual([]);
+    const resolved = resolveCapturePerson(first.event, 0, existing.id, first.relationships, now);
+    expect(connectedPeopleFromCaptures([resolved.event], judy.id)[0].relatedRelationshipId).toBe(existing.id);
+  });
+
   it("stores photo-derived text and visible details separately from user context, without an image payload", () => {
     const event = newImageCaptureEvent({
       note: "Holiday card from Arvin, my old colleague",

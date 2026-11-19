@@ -1,8 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { addTranscriptInteraction, updateRelationshipIntention, updateRelationshipLabels } from "../actions";
-import { correctRelationshipName } from "../capture-actions";
-import { getRelationship, listCapturesForRelationship } from "@/lib/relationship-store";
+import { correctRelationshipName, dismissInferredConnection } from "../capture-actions";
+import {
+  getRelationship,
+  listCapturesForRelationship,
+  listConnectedPeopleForRelationship,
+  listSharedHouseholdContextForRelationship,
+} from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
 import QuickCaptureForm from "@/components/QuickCaptureForm";
@@ -41,6 +46,8 @@ export default async function RelationshipDetailPage({
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
   const capturedNotes = await listCapturesForRelationship(id);
+  const connectedPeople = await listConnectedPeopleForRelationship(id);
+  const sharedHouseholdContext = await listSharedHouseholdContextForRelationship(id);
 
   const action = addTranscriptInteraction.bind(null, relationship.id);
   const labelsAction = updateRelationshipLabels.bind(null, relationship.id);
@@ -236,6 +243,52 @@ export default async function RelationshipDetailPage({
       </section>
 
       <QuickCaptureForm contextRelationshipId={relationship.id} compact />
+
+      {(connectedPeople.length > 0 || sharedHouseholdContext.length > 0) && (
+        <section className="rounded-2xl border border-stone-200 bg-white p-6">
+          <h2 className="text-lg font-semibold">Connected people and shared context</h2>
+          <p className="mt-1 text-sm text-stone-600">
+            Connections inferred from memories you saved, not confirmed relationships. Notes from another person
+            are not treated as conversations you had with {relationship.personLabel}.
+          </p>
+          {connectedPeople.length > 0 && (
+            <ul className="mt-4 space-y-3">
+              {connectedPeople.map(({ related, link, event }) => (
+                <li key={link.id} className="rounded-xl border border-stone-200 p-4">
+                  <Link href={"/relationships/" + related.id} className="font-medium text-indigo-700 hover:underline">
+                    {related.personLabel}
+                  </Link>
+                  <span className="ml-2 text-xs text-stone-500">{link.kind === "household" ? "Shared household" :
+                    link.kind === "colleague" ? "Colleague" : link.kind === "family" ? "Family connection" : "Connection"} · Unverified</span>
+                  <p className="mt-1 text-sm text-stone-700">{link.description}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                    <Link href={"/captures/" + event.id} className="text-indigo-700 hover:underline">View source memory</Link>
+                    <form action={dismissInferredConnection.bind(null, id, event.id, link.id)}>
+                      <button type="submit" className="font-medium text-rose-700 hover:underline">Not connected</button>
+                    </form>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {sharedHouseholdContext.length > 0 && (
+            <div className="mt-4 border-t border-stone-100 pt-4">
+              <h3 className="text-sm font-semibold text-stone-800">Potentially shared household details</h3>
+              <ul className="mt-2 space-y-3">
+                {sharedHouseholdContext.map(({ event, detail, via }, index) => (
+                  <li key={event.id + ":" + index} className="rounded-lg bg-stone-50 p-3 text-sm text-stone-700">
+                    {detail}
+                    <p className="mt-1 text-xs text-stone-500">
+                      From a saved memory about {via.personLabel}, not an interaction with {relationship.personLabel}.
+                      {" "}<Link href={"/captures/" + event.id} className="text-indigo-700 hover:underline">Review source</Link>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="rounded-2xl border border-indigo-200 bg-white p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
