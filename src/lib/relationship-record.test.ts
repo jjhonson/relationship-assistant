@@ -3,6 +3,7 @@ import {
   createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
   mergeInteractionIntoRelationship,
+  recordActionableMemoryFeedback,
   replaceRelationshipIntention,
   replaceRelationshipLabels,
   type InteractionExtraction,
@@ -381,5 +382,120 @@ describe("relationship record interaction merge", () => {
     expect(second.activeThreads[0].sourceIds).toEqual(["transcript:first", "transcript:second"]);
     expect(second.stewardshipOpportunities).toHaveLength(1);
     expect(second.stewardshipOpportunities[0].reason).toContain("moved into construction");
+  });
+});
+
+describe("actionable memory feedback foundation", () => {
+  const source = {
+    id: "transcript:fictional-one",
+    source: "transcript" as const,
+    observedAt: "2026-11-05",
+    label: "Fictional meeting",
+  };
+  const openLoop = {
+    commitment: "Send a draft proposal to Pat.",
+    owner: "Jason",
+    status: "Open" as const,
+  };
+  const opportunity = {
+    reason: "Ask about the book club's next selection.",
+    trigger: "After the winter reading list is announced.",
+  };
+  const bareExtraction: InteractionExtraction = {
+    ...extraction,
+    durableFacts: [],
+    activeThreads: [],
+    relationshipContexts: [],
+    tags: [],
+    openLoops: [openLoop],
+    stewardshipOpportunities: [opportunity],
+  };
+
+  it("keeps a completed commitment in the correction history without resurrecting it on same-evidence replay", () => {
+    const record = createManualRelationshipRecord("Fictional Pat");
+    const learned = mergeInteractionIntoRelationship(record, bareExtraction, source);
+    const completed = recordActionableMemoryFeedback(
+      learned,
+      { kind: "open-loop", commitment: " send a draft proposal to pat. ", owner: "jason" },
+      "Done",
+      new Date("2026-11-16T18:00:00Z"),
+    );
+
+    expect(completed.openLoops).toEqual([]);
+    expect(completed.stewardshipOpportunities).toHaveLength(1);
+    expect(completed.actionableMemoryFeedback).toEqual([{
+      kind: "open-loop",
+      key: '["open-loop","send a draft proposal to pat.","jason"]',
+      disposition: "Done",
+      originalText: openLoop.commitment,
+      sourceIds: [source.id],
+      decidedAt: "2026-11-16T18:00:00.000Z",
+    }]);
+
+    // The schema is JSON-safe because the real store serializes relationship records.
+    const reloaded = JSON.parse(JSON.stringify(completed)) as typeof completed;
+    const replayed = mergeInteractionIntoRelationship(reloaded, bareExtraction, source);
+    expect(replayed.openLoops).toEqual([]);
+    expect(replayed.actionableMemoryFeedback).toEqual(completed.actionableMemoryFeedback);
+    expect(replayed.stewardshipOpportunities).toHaveLength(1);
+
+    // A later, independently observed promise with the same wording may be new work.
+    const newlyPromised = mergeInteractionIntoRelationship(replayed, bareExtraction, {
+      ...source, id: "transcript:fictional-later", observedAt: "2027-03-01",
+    });
+    expect(newlyPromised.openLoops).toHaveLength(1);
+    expect(newlyPromised.openLoops[0].sourceIds).toEqual(["transcript:fictional-later"]);
+  });
+
+  it("suppresses a dismissed opportunity by content across new extraction IDs, but preserves other opportunities", () => {
+    const learned = mergeInteractionIntoRelationship(
+      createManualRelationshipRecord("Fictional Reader"), bareExtraction, source,
+    );
+    const dismissed = recordActionableMemoryFeedback(
+      learned, { kind: "opportunity", id: learned.stewardshipOpportunities[0].id },
+      "Not relevant",
+    );
+
+    const next = mergeInteractionIntoRelationship(dismissed, {
+      ...bareExtraction,
+      stewardshipOpportunities: [
+        { reason: "  ASK about the book club's next selection. ", trigger: opportunity.trigger },
+        { reason: "Check in after the art show.", trigger: "When the exhibit closes." },
+      ],
+    }, { ...source, id: "transcript:fictional-two" });
+
+    expect(next.stewardshipOpportunities.map((item) => item.reason)).toEqual([
+      "Check in after the art show.",
+    ]);
+    expect(next.openLoops).toHaveLength(1);
+    expect(next.actionableMemoryFeedback?.[0]).toMatchObject({
+      kind: "opportunity", disposition: "Not relevant", sourceIds: [source.id],
+    });
+  });
+
+  it("distinguishes incorrect memory from done, rejects missing targets, and tolerates old records", () => {
+    const legacy = createManualRelationshipRecord("Fictional Colleague");
+    delete legacy.actionableMemoryFeedback;
+    const learned = mergeInteractionIntoRelationship(legacy, bareExtraction, source);
+    expect(() => recordActionableMemoryFeedback(
+      learned, { kind: "open-loop", commitment: "A different promise", owner: "Jason" }, "Incorrect",
+    )).toThrow("Actionable memory not found");
+    expect(() => recordActionableMemoryFeedback(
+      learned, { kind: "opportunity", id: "missing" }, "Not relevant",
+    )).toThrow("Actionable memory not found");
+    expect(() => recordActionableMemoryFeedback(
+      learned, { kind: "open-loop", ...openLoop }, "Unknown" as "Done",
+    )).toThrow("Unsupported actionable memory disposition");
+
+    const corrected = recordActionableMemoryFeedback(
+      learned, { kind: "open-loop", commitment: openLoop.commitment, owner: openLoop.owner }, "Incorrect",
+    );
+    const newPromise = mergeInteractionIntoRelationship(corrected, {
+      ...bareExtraction,
+      openLoops: [{ ...openLoop, owner: "Pat" }],
+    }, { ...source, id: "transcript:fictional-three" });
+    expect(newPromise.openLoops).toHaveLength(1);
+    expect(newPromise.openLoops[0].owner).toBe("Pat");
+    expect(newPromise.actionableMemoryFeedback?.[0].disposition).toBe("Incorrect");
   });
 });

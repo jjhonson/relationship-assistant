@@ -51,6 +51,8 @@ async function readStore(): Promise<StoreFile> {
           ? relationship.inferredRelationshipContexts : [],
         inferredRelationshipRoles: Array.isArray(relationship.inferredRelationshipRoles)
           ? relationship.inferredRelationshipRoles : [],
+        actionableMemoryFeedback: Array.isArray(relationship.actionableMemoryFeedback)
+          ? relationship.actionableMemoryFeedback : [],
       })),
     };
   } catch (error) {
