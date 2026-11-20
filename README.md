@@ -1,8 +1,28 @@
 # Relationship Assistant
 
-Helps people rediscover, understand, and thoughtfully maintain important personal and professional relationships.
+[![CI](https://github.com/jjhonson/relationship-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/jjhonson/relationship-assistant/actions/workflows/ci.yml)
 
-This is a **local-first development prototype**, not a deployed product. The original dashboard uses fictional sample data, while the separate `/relationships` route saves deliberate user-authored relationship memory to a private local JSON file. The `/gmail` proof of concept is read-only; selected AI features use a separately configured OpenAI API key. There is no hosted database or payments system.
+**A memory for relationships, built to make meaningful connection easier.**
+
+We have interesting experiences, conversations and ideas. We also know people who might appreciate them. Relationship Assistant explores the missing step between remembering those things and actually connecting with someone. It should help with the work, not manufacture obligations or send messages on anyone's behalf.
+
+> **Status:** Active, public development. This is a personal-alpha prototype, not a deployed service. The homepage still contains fictional examples; the actual memory pilot lives at `/relationships` and uses a private local store in the development environment. It is **not yet a durable database**. No real people's data or secrets belong in this repository.
+
+## What's working
+
+- **Remember something:** one plain-language note (or native device dictation) can create a sparse person, capture an encounter, or update an existing relationship without a contact-form wizard.
+- **Selected photos:** identify relevant text and observations from an intentionally uploaded card or image, without storing the original image.
+- **Cumulative, inspectable memory:** preserve dated facts, source links, unknowns and careful identity matching.
+- **Connected people:** link evidence-backed related people and show appropriate shared household context without inventing a conversation with the other person.
+- **Control:** review and correct an inferred name or connection. No autonomous outreach.
+
+## What we're building next
+
+The next target is an **experienceable personal alpha**: open a person or save a meaningful moment, discover a credible subject or useful reason to connect, decide whether to act, and learn from what actually happened. No forced contact cadence, no automatic sales follow-up, and **no suggestion** is an acceptable result.
+
+Read the [personal alpha plan](docs/personal-alpha.md) or browse the work: [milestone #52](https://github.com/jjhonson/relationship-assistant/issues/52), [person-first connection #53](https://github.com/jjhonson/relationship-assistant/issues/53), [durable storage #54](https://github.com/jjhonson/relationship-assistant/issues/54), and [public project quality #55](https://github.com/jjhonson/relationship-assistant/issues/55).
+
+GitHub Actions runs install, lint, tests, build, and typecheck on proposed changes and on `main`. The badge reports that workflow's real status rather than a manually updated claim.
 
 ## Stack
 
@@ -27,7 +47,7 @@ npm run dev        # http://localhost:3000
 | `npm run typecheck` | TypeScript check |
 | `npm test` | Run unit tests (Vitest) |
 
-## Quick capture (Stage 10A text / Stage 10B photo, development only)
+## Quick capture: text, photos and connected people (development only)
 
 At `/relationships`, type or dictate a short note in **Remember something** and select **Save memory**. The same input appears on existing relationship pages for updates and catch-ups. No name, contact method, role, or relationship-mode field is required. The text is saved to `.data/relationships.json` as a dated, user-authored encounter **before** AI interpretation, so an unavailable model cannot lose the original note.
 
@@ -35,9 +55,9 @@ With `OPENAI_API_KEY` configured locally, bounded structured interpretation prop
 
 The saved-note page shows the original wording and lets you retry pending interpretation or resolve uncertain identities. A person page allows correction of an extracted name. Unknown contact fields remain unfilled.
 
-**Photo capture (Stage 10B draft):** In that same form, optionally select a JPEG, PNG, or WebP image (up to 4 MB). A phone browser may offer a camera option. You can add context, such as "Holiday card from Arvin, an old friend," so the system knows which relationship matters. The photo is read by OpenAI with provider storage disabled; the app retains the *extracted text* and brief *visible observations* separately from your own words, then runs the existing structured relationship interpretation. It does **not** save the uploaded image. If the image cannot be read, nothing from it is saved and the form explains the failure. If the second interpretation fails after photo reading, the extracted text and observations remain pending locally and can be retried without the image.
+**Photo capture (Stage 10B, merged):** In that same form, optionally select a JPEG, PNG, or WebP image (up to 4 MB). A phone browser may offer a camera option. You can add context, such as "Holiday card from Arvin, an old friend," so the system knows which relationship matters. The photo is read by OpenAI with provider storage disabled; the app retains the *extracted text* and brief *visible observations* separately from your own words, then runs the existing structured relationship interpretation. It does **not** save the uploaded image. If the image cannot be read, nothing from it is saved and the form explains the failure. If the second interpretation fails after photo reading, the extracted text and observations remain pending locally and can be retried without the image.
 
-For cards and group photos, the prompt distinguishes the intended relationship from spouses, children, pets, and vendor/photo credits. Only the primary intended person should become a managed relationship; other names remain contextual unless separately identified and approved. This is prompt guidance plus the existing cautious matching flow, not a guarantee that AI reads every card correctly. Review the saved text and people before treating them as reliable. Connected-people/shared-household modeling remains separately scoped in Issue #48.
+For cards and group photos, the prompt distinguishes the intended relationship from spouses, children, pets, and vendor/photo credits. Only the primary intended person should become a managed relationship; other names remain contextual unless separately identified and approved. This is prompt guidance plus the existing cautious matching flow, not a guarantee that AI reads every card correctly. Review the saved text and people before treating them as reliable. Connected people and source-aware shared-household context were added in Stage 10C ([PR #51](https://github.com/jjhonson/relationship-assistant/pull/51)). That bounded feature does not claim to model every family, colleague or household change.
 
 **Controlled acceptance image:** `fixtures/fictional-diwali-card.png` is an entirely fictional Diwali card, with its editable SVG source beside it. In an isolated test dataset, choose that photo and write `Holiday card from Kiran, a former colleague` as the optional context. Expected: transcription identifies Kiran, Maya, Tara, Dev, their life updates and dog Pippin; only Kiran is proposed as the primary relationship, and vendor credits (Orchard Press / Jo Fischer) are not contacts. No date of the family's milestones should be invented. Check the observed output rather than assuming this prompt is infallible; only then consider testing a real person's card with their privacy in mind.
 
