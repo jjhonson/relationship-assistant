@@ -11,6 +11,7 @@ import {
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
 import QuickCaptureForm from "@/components/QuickCaptureForm";
+import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
 
 export const dynamic = "force-dynamic";
 
@@ -56,8 +57,6 @@ export default async function RelationshipDetailPage({
   const additionalFacts = relationship.durableFacts.slice(4);
   const primaryThreads = relationship.activeThreads.slice(0, 3);
   const additionalThreads = relationship.activeThreads.slice(3);
-  const primaryOpportunities = relationship.stewardshipOpportunities.slice(0, 3);
-  const additionalOpportunities = relationship.stewardshipOpportunities.slice(3);
   const inferredContexts = relationship.inferredRelationshipContexts ?? [];
   const inferredRoles = relationship.inferredRelationshipRoles ?? [];
   const labelAuthority = relationship.labelAuthority ?? "legacy-unverified";
@@ -241,6 +240,8 @@ export default async function RelationshipDetailPage({
         </p>
         {capturedNotes[0]?.summary && <p className="mt-2 text-sm text-stone-600">Latest remembered: {capturedNotes[0].summary}</p>}
       </section>
+
+      <ConnectionSubjectsReview relationshipId={relationship.id} />
 
       <QuickCaptureForm contextRelationshipId={relationship.id} compact />
 
@@ -430,49 +431,25 @@ export default async function RelationshipDetailPage({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-stone-200 bg-white p-6">
-        <h2 className="text-lg font-semibold">Ways to show up</h2>
-        <p className="mt-1 text-sm text-stone-600">
-          Possibilities observed in conversations, not tasks or obligations. The next step is to turn these
-          into timely, person-specific recommendations. Silence is valid when there is no authentic reason to reach out.
-        </p>
-        {relationship.stewardshipOpportunities.length === 0 ? (
-          <p className="mt-4 text-sm text-stone-500">No new stewardship opportunity captured yet.</p>
-        ) : (
-          <>
-            <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-              {primaryOpportunities.map((opportunity) => (
-                <li key={opportunity.id} className="rounded-xl bg-indigo-50 p-4">
-                  <p className="font-medium text-indigo-950">{opportunity.reason}</p>
-                  <p className="mt-2 text-sm text-indigo-800">
-                    Trigger: {opportunity.trigger}
-                  </p>
-                  <p className="mt-3 text-xs text-indigo-700">
-                    Evidence: {opportunity.sourceIds.map((id) => {
-                      const source = relationship.sources.find((item) => item.id === id);
-                      return source ? `${source.label} (${source.observedAt})` : "Unresolved source";
-                    }).join(" · ") || "No linked source"}
-                  </p>
-                </li>
-              ))}
-            </ul>
-            {additionalOpportunities.length > 0 && (
-              <details className="mt-3 text-sm">
-                <summary className="cursor-pointer font-medium text-indigo-700">
-                  {additionalOpportunities.length} more possible reasons
-                </summary>
-                <ul className="mt-3 space-y-2">
-                  {additionalOpportunities.map((opportunity) => (
-                    <li key={opportunity.id} className="rounded-xl bg-indigo-50 p-3 text-indigo-950">
-                      {opportunity.reason}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-          </>
-        )}
-      </section>
+      {relationship.stewardshipOpportunities.length > 0 && (
+        <details className="rounded-xl border border-stone-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-medium text-stone-700">
+            Previously captured future signals ({relationship.stewardshipOpportunities.length})
+          </summary>
+          <p className="mt-2 text-xs text-stone-500">
+            Historical possibilities, not evidence that the triggering event occurred. They are separate from current connection ideas above.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {relationship.stewardshipOpportunities.map((opportunity) => (
+              <li key={opportunity.id} className="rounded-lg bg-stone-50 p-3 text-sm">
+                <p className="font-medium text-stone-900">{opportunity.reason}</p>
+                <p className="mt-1 text-stone-600">Watch for: {opportunity.trigger}</p>
+                <p className="mt-1 text-xs text-stone-500">Captured {opportunity.observedAt}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {relationship.openLoops.length > 0 && (
         <section className="rounded-2xl border border-stone-200 bg-white p-6">

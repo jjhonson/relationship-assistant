@@ -16,6 +16,7 @@ import {
   type DiscoveryExclusionReason,
 } from "@/lib/discovery-preferences";
 import { inferInteractionWithOpenAI } from "@/lib/interaction-inference";
+import { reviewConnectionSubjects } from "@/lib/connection-subjects";
 import {
   createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
@@ -294,4 +295,24 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
   revalidatePath("/relationships");
   revalidatePath("/relationships/" + id);
   redirect("/relationships/" + id + "?updated=1");
+}
+
+
+/** On-demand ideas only. No raw transcripts, sent messages, or saved recommendations. */
+export async function reviewRelationshipConnection(id: string) {
+  ensureDevelopment();
+  const record = await getRelationship(id);
+  if (!record) throw new Error("Relationship not found.");
+
+  const timeZone = process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver";
+  const reviewedAt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+
+  return reviewConnectionSubjects(record, {
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    model: process.env.OPENAI_RELATIONSHIP_MODEL,
+    userLabel: process.env.RELATIONSHIP_USER_LABEL ?? "Jason",
+    reviewedAt,
+  });
 }
