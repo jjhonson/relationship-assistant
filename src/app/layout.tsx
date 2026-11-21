@@ -20,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <nav className="flex items-center gap-4 text-sm">
               <Link href="/relationships" className="font-medium text-indigo-700 underline">Relationship memory</Link>
+              <Link href="/moments" className="text-stone-600 underline">Your moments</Link>
               <Link href="/discover" className="text-stone-600 underline">Discover relationships</Link>
               <Link href="/real-pilot" className="text-stone-600 underline">Real-contact pilot</Link>
               <Link href="/pilot" className="text-stone-600 underline">Fictional context pilot</Link>
