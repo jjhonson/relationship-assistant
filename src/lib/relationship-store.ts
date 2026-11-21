@@ -14,12 +14,15 @@ import {
   type CaptureExtraction,
 } from "./capture";
 import type { RelationshipIdentity, RelationshipRecord } from "./relationship-record";
+import { createPersonalMoment, type PersonalMoment, type PersonalMomentInput } from "./personal-moment";
 
 type StoreFile = {
   version: 1;
   relationships: RelationshipRecord[];
   // Optional in older version-1 files. No destructive migration required.
   captures: CaptureEvent[];
+  // Optional in earlier version-1 files; add without rewriting old identities or memories.
+  moments: PersonalMoment[];
 };
 
 let mutationQueue: Promise<unknown> = Promise.resolve();
@@ -43,6 +46,8 @@ async function readStore(): Promise<StoreFile> {
     return {
       ...parsed,
       captures: Array.isArray(parsed.captures) ? parsed.captures : [],
+      moments: parsed.moments === undefined ? [] : Array.isArray(parsed.moments) ? parsed.moments :
+        (() => { throw new Error("Unsupported personal moments store format."); })(),
       relationships: parsed.relationships.map((relationship) => ({
         ...relationship,
         identities: Array.isArray(relationship.identities) ? relationship.identities : [],
@@ -58,7 +63,7 @@ async function readStore(): Promise<StoreFile> {
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { version: 1, relationships: [], captures: [] };
+      return { version: 1, relationships: [], captures: [], moments: [] };
     }
     throw error;
   }
@@ -225,5 +230,25 @@ export async function saveConnectionDismissal(captureId: string, connectionId: s
       }),
     }));
     return updated;
+  });
+}
+
+
+/** User-side moments are separate from third-party encounter/relationship memories. */
+export async function listPersonalMoments() {
+  const store = await readStore();
+  return [...store.moments].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function getPersonalMoment(id: string) {
+  const store = await readStore();
+  return store.moments.find((moment) => moment.id === id) ?? null;
+}
+
+export async function savePersonalMoment(input: PersonalMomentInput) {
+  const moment = createPersonalMoment(input);
+  return mutateStore((store) => {
+    store.moments.push(moment);
+    return moment;
   });
 }
