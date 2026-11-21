@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { reviewUserMoment } from "../actions";
+import { reviewUserMoment } from "./actions";
 import type { MomentPeopleReview } from "@/lib/moment-people";
 
 export default function MomentPeopleReview({ momentId }: { momentId: string }) {
