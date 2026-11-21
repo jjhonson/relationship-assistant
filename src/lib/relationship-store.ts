@@ -252,3 +252,20 @@ export async function savePersonalMoment(input: PersonalMomentInput) {
     return moment;
   });
 }
+
+
+/** Changing eligibility is a local choice; it never initiates an AI review. */
+export async function setPersonalMomentConsideration(
+  id: string,
+  consideration: PersonalMoment["consideration"],
+) {
+  if (consideration !== "private" && consideration !== "consider-people") {
+    throw new Error("Invalid moment consideration choice.");
+  }
+  return mutateStore((store) => {
+    const index = store.moments.findIndex((moment) => moment.id === id);
+    if (index < 0) throw new Error("Saved moment not found.");
+    store.moments[index] = { ...store.moments[index], consideration };
+    return store.moments[index];
+  });
+}
