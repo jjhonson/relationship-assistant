@@ -7,6 +7,7 @@ import {
   getPersonalMoment,
   listRelationships,
   savePersonalMoment,
+  setPersonalMomentConsideration,
 } from "@/lib/relationship-store";
 
 function ensureDevelopment() {
@@ -41,4 +42,16 @@ export async function reviewUserMoment(momentId: string) {
     model: process.env.OPENAI_RELATIONSHIP_MODEL,
     reviewedAt,
   });
+}
+
+
+export async function changeMomentConsideration(id: string, formData: FormData) {
+  ensureDevelopment();
+  const choice = formData.get("consideration");
+  if (choice !== "private" && choice !== "consider-people") {
+    throw new Error("Invalid moment consideration choice.");
+  }
+  await setPersonalMomentConsideration(id, choice);
+  revalidatePath("/moments");
+  redirect("/moments?updated=" + encodeURIComponent(id));
 }
