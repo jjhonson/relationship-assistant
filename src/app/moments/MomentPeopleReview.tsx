@@ -71,7 +71,7 @@ export default function MomentPeopleReview({ momentId }: { momentId: string }) {
                   <summary className="cursor-pointer font-medium text-indigo-700">
                     Why this person? Review source
                   </summary>
-                  <p className="mt-2">Based on your saved moment and this person's dated history:</p>
+                  <p className="mt-2">Based on your saved moment and this person&apos;s dated history:</p>
                   <ul className="mt-1 space-y-1">
                     {match.evidence.map((source) => {
                       const captureId = source.id.startsWith("capture:") ?
