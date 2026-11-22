@@ -35,17 +35,15 @@ export default async function MomentsPage({
         </p>
         <form action={saveUserMoment} className="mt-4 space-y-4">
           <label className="block text-sm font-medium text-stone-800">
-            What caught your attention?
-            <textarea name="description" required maxLength={1000} rows={3}
-              placeholder="I saw a beginner-friendly guitar workshop… or: I came away from a film thinking about…"
+            What do you want to remember?
+            <textarea name="description" required maxLength={3000} rows={5}
+              placeholder="I found a helpful guitar exercise and liked the simple explanation… or: I disliked a documentary, but it raised interesting questions about learning."
               className="mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" />
           </label>
-          <label className="block text-sm font-medium text-stone-800">
-            What made it meaningful or interesting? <span className="font-normal text-stone-500">(optional)</span>
-            <textarea name="reflection" maxLength={2000} rows={2}
-              placeholder="What I liked, disliked, questioned, learned or might want to discuss…"
-              className="mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" />
-          </label>
+          <p className="text-xs text-stone-500">
+            Include what happened and what you thought, liked, disliked or questioned in one note.
+            Saving something does not mean you recommend it.
+          </p>
           <label className="block text-sm font-medium text-stone-800">
             Link <span className="font-normal text-stone-500">(optional, http/https only)</span>
             <input name="url" type="url" maxLength={2048} placeholder="https://example.org/..."
@@ -97,13 +95,9 @@ export default async function MomentsPage({
                   {moment.consideration === "private" ? "Private moment" : "Eligible for optional private matching"}
                 </p>
                 <p className="mt-2 whitespace-pre-wrap text-sm font-medium text-stone-900">{moment.description}</p>
-                {moment.reflection ? (
+                {moment.reflection && (
                   <p className="mt-2 whitespace-pre-wrap text-sm text-stone-700">
                     <strong>What it meant to you:</strong> {moment.reflection}
-                  </p>
-                ) : (
-                  <p className="mt-2 text-xs text-stone-500">
-                    No reaction recorded. Saving this does not imply that you liked or recommend it.
                   </p>
                 )}
                 {moment.url && (

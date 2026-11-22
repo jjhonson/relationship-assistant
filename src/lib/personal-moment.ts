@@ -29,8 +29,8 @@ export function createPersonalMoment(
   const reflection = String(input.reflection ?? "").trim();
   const url = String(input.url ?? "").trim();
 
-  if (!description || description.length > 1000) {
-    throw new Error("Describe what you want to remember (up to 1,000 characters).");
+  if (!description || description.length > 3000) {
+    throw new Error("Describe what you want to remember (up to 3,000 characters).");
   }
   if (reflection.length > 2000) {
     throw new Error("Your thoughts must be 2,000 characters or fewer.");
