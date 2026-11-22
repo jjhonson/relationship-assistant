@@ -236,7 +236,8 @@ export async function createManualRelationship(formData: FormData) {
   redirect("/relationships/" + record.id);
 }
 
-export async function addTranscriptInteraction(id: string, formData: FormData) {
+/** Shared persistence path; callers choose their navigation after success. */
+export async function learnFromPastedConversation(id: string, formData: FormData) {
   ensureDevelopment();
   const record = await getRelationship(id);
   if (!record) throw new Error("Relationship not found.");
@@ -295,7 +296,13 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
 
   revalidatePath("/relationships");
   revalidatePath("/relationships/" + id);
-  redirect("/relationships/" + id + "?updated=1");
+  return { relationshipId: id };
+}
+
+/** Retain the old form's redirect, but only after its shared write completes. */
+export async function addTranscriptInteraction(id: string, formData: FormData) {
+  const { relationshipId } = await learnFromPastedConversation(id, formData);
+  redirect("/relationships/" + relationshipId + "?updated=1");
 }
 
 

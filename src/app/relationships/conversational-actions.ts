@@ -1,11 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getRelationship, savePersonalMoment } from "@/lib/relationship-store";
 import { interpretConversationalCapture, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
-import { addTranscriptInteraction } from "./actions";
-import { saveQuickCapture } from "./capture-actions";
+import { learnFromPastedConversation } from "./actions";
+import { saveQuickCaptureWithoutRedirect } from "./capture-actions";
 
 function ensureDevelopment() {
   if (process.env.NODE_ENV !== "development") {
@@ -54,7 +53,8 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
     form.set("interactionDate", input.interactionDate);
     form.set("transcript", input.text);
     // Existing safe inference path retains only structured memory and sourced metadata.
-    return addTranscriptInteraction(relationshipId, form);
+    const { relationshipId: savedId } = await learnFromPastedConversation(relationshipId, form);
+    return { saved: true as const, destination: "/relationships/" + encodeURIComponent(savedId) + "?updated=1" };
   }
 
   if (input.kind === "note") {
@@ -64,7 +64,8 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
     const form = new FormData();
     form.set("note", input.text);
     // Explicitly user-authored notes preserve their wording as an intentional memory.
-    return saveQuickCapture(relationshipId, form);
+    const { captureId } = await saveQuickCaptureWithoutRedirect(relationshipId, form);
+    return { saved: true as const, destination: "/captures/" + encodeURIComponent(captureId) };
   }
 
   if (input.kind === "moment") {
@@ -75,7 +76,7 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
     // A personal moment is private by default, without automatic matching or outreach.
     const saved = await savePersonalMoment({ description: input.text, consideration: "private" });
     revalidatePath("/moments");
-    redirect("/moments?saved=" + encodeURIComponent(saved.id));
+    return { saved: true as const, destination: "/moments?saved=" + encodeURIComponent(saved.id) };
   }
   throw new Error("Choose what kind of material to save.");
 }

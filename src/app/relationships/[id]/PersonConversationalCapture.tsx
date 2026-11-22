@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import {
   previewPersonCapture,
   saveReviewedPersonCapture,
@@ -25,6 +26,7 @@ function kindLabel(kind: CaptureKind) {
 export default function PersonConversationalCapture({
   relationshipId, personLabel,
 }: { relationshipId: string; personLabel: string }) {
+  const router = useRouter();
   const [text, setText] = useState("");
   const [interpretation, setInterpretation] = useState<CaptureInterpretation | null>(null);
   const [kind, setKind] = useState<ConfirmedKind | "">("");
@@ -74,12 +76,20 @@ export default function PersonConversationalCapture({
     }
     setError(null);
     startSave(async () => {
+      let destination: string;
       try {
-        await saveReviewedPersonCapture(relationshipId, { text, kind, source, interactionDate });
+        const saved = await saveReviewedPersonCapture(relationshipId, {
+          text, kind, source, interactionDate,
+        });
+        destination = saved.destination;
       } catch (cause) {
         setError(cause instanceof Error && /up to \d|valid conversation date/i.test(cause.message)
-          ? cause.message : "Unable to save this interpretation. Your text is still here; nothing was sent to another person.");
+          ? cause.message
+          : "Save could not be confirmed. Check the saved record before retrying to avoid duplicates.");
+        return;
       }
+      // Navigate only after a confirmed save, outside the error handler.
+      router.push(destination);
     });
   }
 
