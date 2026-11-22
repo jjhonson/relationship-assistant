@@ -500,9 +500,10 @@ export default async function RelationshipDetailPage({
             <select
               name="source"
               required
-              defaultValue="meeting"
+              defaultValue=""
               className="mt-1 block w-full max-w-md rounded-lg border border-stone-300 bg-white px-3 py-2"
             >
+              <option value="" disabled>Choose a source</option>
               {PASTED_CONVERSATION_SOURCES.map((source) => (
                 <option key={source.value} value={source.value}>{source.label}</option>
               ))}
