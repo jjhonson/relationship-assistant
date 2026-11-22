@@ -10,6 +10,7 @@ import {
 } from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
+import { PASTED_CONVERSATION_SOURCES } from "@/lib/pasted-conversation";
 import QuickCaptureForm from "@/components/QuickCaptureForm";
 import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
 
@@ -81,7 +82,7 @@ export default async function RelationshipDetailPage({
 
       {updated === "1" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          Relationship updated. The transcript itself was not saved.
+          Relationship updated. The pasted conversation itself was not saved.
         </div>
       )}
       {labels === "1" && (
@@ -487,15 +488,28 @@ export default async function RelationshipDetailPage({
       )}
 
       <section className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-6">
-        <h2 className="text-lg font-semibold">Add a new conversation</h2>
+        <h2 className="text-lg font-semibold">Learn from a pasted conversation</h2>
         <p className="mt-1 max-w-3xl text-sm text-stone-600">
-          Paste a transcript from a call or meeting. The transcript and this relationship&apos;s existing structured
-          memory are sent to the configured inference model with provider storage disabled. Prior transcript text
-          is not resent. Only the updated structured relationship memory is saved locally.
+          Paste an email thread, chat, meeting transcript or notes about {relationship.personLabel}.
+          We learn from this material for this person only; we do not automatically import other channels
+          or create contacts from names mentioned here.
         </p>
         <form action={action} className="mt-5 space-y-4">
           <label className="block text-sm font-medium text-stone-700">
-            Interaction date
+            Where did this conversation come from?
+            <select
+              name="source"
+              required
+              defaultValue="meeting"
+              className="mt-1 block w-full max-w-md rounded-lg border border-stone-300 bg-white px-3 py-2"
+            >
+              {PASTED_CONVERSATION_SOURCES.map((source) => (
+                <option key={source.value} value={source.value}>{source.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-medium text-stone-700">
+            Conversation date (or latest date in the thread)
             <input
               type="date"
               name="interactionDate"
@@ -505,20 +519,26 @@ export default async function RelationshipDetailPage({
             />
           </label>
           <label className="block text-sm font-medium text-stone-700">
-            Transcript
+            Conversation or notes
             <textarea
               name="transcript"
               required
-              rows={14}
+              maxLength={80000}
+              rows={12}
               className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-3 font-mono text-sm"
-              placeholder="Paste the call transcript here…"
+              placeholder="Paste a conversation, selected messages, or meeting notes here…"
             />
           </label>
+          <p className="text-xs text-stone-500">
+            You choose what to paste. The text and existing structured memory are reviewed by the configured
+            AI model with provider storage disabled. We save extracted relationship memory and a dated label
+            identifying it as user-pasted material, not the original conversation. No messages are sent.
+          </p>
           <button
             type="submit"
             className="rounded-lg bg-indigo-700 px-4 py-2 font-medium text-white hover:bg-indigo-800"
           >
-            Learn from this interaction
+            Learn from this conversation
           </button>
         </form>
       </section>

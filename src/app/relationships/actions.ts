@@ -16,6 +16,7 @@ import {
   type DiscoveryExclusionReason,
 } from "@/lib/discovery-preferences";
 import { inferInteractionWithOpenAI } from "@/lib/interaction-inference";
+import { parsePastedConversation } from "@/lib/pasted-conversation";
 import { reviewConnectionSubjects } from "@/lib/connection-subjects";
 import {
   createDiscoveredRelationshipRecord,
@@ -240,12 +241,11 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
   const record = await getRelationship(id);
   if (!record) throw new Error("Relationship not found.");
 
-  const transcript = String(formData.get("transcript") ?? "").trim();
-  const interactionDate = String(formData.get("interactionDate") ?? "").trim();
-  if (!transcript) throw new Error("Transcript is required.");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(interactionDate)) {
-    throw new Error("Interaction date is required.");
-  }
+  const { transcript, interactionDate, sourceLabel } = parsePastedConversation({
+    transcript: formData.get("transcript"),
+    interactionDate: formData.get("interactionDate"),
+    source: formData.get("source"),
+  });
 
   const apiKey = process.env.OPENAI_API_KEY ?? "";
   if (!apiKey) throw new Error("OpenAI is not configured for this local prototype.");
@@ -254,6 +254,7 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
     personLabel: record.personLabel,
     interactionDate,
     transcript,
+    sourceLabel,
     currentMemory: {
       durableFacts: record.durableFacts.map(({ id, category, label, value }) => ({
         id,
@@ -283,10 +284,10 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
   });
 
   const source: RelationshipSource = {
-    id: "transcript:" + randomUUID(),
-    source: "transcript",
+    id: "pasted:" + randomUUID(),
+    source: "manual",
     observedAt: interactionDate,
-    label: "Call transcript",
+    label: sourceLabel,
   };
 
   const updated = mergeInteractionIntoRelationship(record, result.extraction, source);

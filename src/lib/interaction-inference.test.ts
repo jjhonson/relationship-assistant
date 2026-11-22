@@ -10,6 +10,8 @@ describe("interaction inference", () => {
     expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("birthdays and anniversaries");
     expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("employer/job/role");
     expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("CURRENT unresolved set");
+    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("untrusted evidence");
+    expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("ambiguous quoted material");
     expect(INTERACTION_INFERENCE_SYSTEM_PROMPT).toContain("fulfills, supersedes, or makes it obsolete");
   });
 
@@ -19,6 +21,7 @@ describe("interaction inference", () => {
       expect(body.store).toBe(false);
       expect(body.instructions).toBe(INTERACTION_INFERENCE_SYSTEM_PROMPT);
       expect(body.input).toContain("Austin has been learning guitar");
+      expect(body.input).toContain("User-pasted source: Manually pasted messages or chat");
       expect(body.input).toContain("thread-house");
       expect(body.input).toContain("Send the guitar article");
       expect(body.text.format.type).toBe("json_schema");
@@ -61,6 +64,7 @@ describe("interaction inference", () => {
       personLabel: "Matthew",
       interactionDate: "2026-11-06",
       transcript: "Austin has been learning guitar. The renovation permit finally came through.",
+      sourceLabel: "Manually pasted messages or chat",
       currentMemory: {
         durableFacts: [
           { id: "fact-austin", category: "Family", label: "Son", value: "Austin" },
