@@ -68,8 +68,9 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
   }
 
   if (input.kind === "moment") {
-    if (input.text.trim().length > 3_000) {
-      throw new Error("A personal moment can contain up to 3,000 characters.");
+    // PR #61 raises the limit, but this draft must also work independently on main.
+    if (input.text.trim().length > 1_000) {
+      throw new Error("A personal moment can contain up to 1,000 characters.");
     }
     // A personal moment is private by default, without automatic matching or outreach.
     const saved = await savePersonalMoment({ description: input.text, consideration: "private" });

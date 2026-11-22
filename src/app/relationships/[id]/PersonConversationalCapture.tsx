@@ -64,6 +64,14 @@ export default function PersonConversationalCapture({
       setError("When did this conversation happen? Add the date before saving.");
       return;
     }
+    if (kind === "moment" && text.trim().length > 1000) {
+      setError("Personal moments currently support up to 1,000 characters.");
+      return;
+    }
+    if (kind === "note" && text.trim().length > 5000) {
+      setError("Personal notes currently support up to 5,000 characters.");
+      return;
+    }
     setError(null);
     startSave(async () => {
       try {
