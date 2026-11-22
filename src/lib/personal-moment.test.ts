@@ -17,6 +17,15 @@ describe("intentional user-side moments", () => {
     expect(saved.id).toBeTruthy();
   });
 
+  it("preserves a combined account and personal reaction without demanding a second field", () => {
+    const note = "I disliked the guitar documentary, but it got me thinking about how adults learn.";
+    const saved = createPersonalMoment({ description: note }, new Date("2026-11-21T17:00:00.000Z"));
+    expect(saved.description).toBe(note);
+    expect(saved.reflection).toBe("");
+    expect(saved.consideration).toBe("private");
+    expect(createPersonalMoment({ description: "x".repeat(1500) }).description).toHaveLength(1500);
+  });
+
   it("allows one deliberate opt-in to private, on-demand connection consideration", () => {
     const saved = createPersonalMoment({
       description: "Interesting beginner guitar tutorial",
@@ -37,7 +46,7 @@ describe("intentional user-side moments", () => {
 
   it("requires a concise description and validates storage choices", () => {
     expect(() => createPersonalMoment({ description: "   " })).toThrow();
-    expect(() => createPersonalMoment({ description: "x".repeat(1001) })).toThrow();
+    expect(() => createPersonalMoment({ description: "x".repeat(3001) })).toThrow();
     expect(() => createPersonalMoment({ description: "An idea", reflection: "x".repeat(2001) })).toThrow();
     expect(() => createPersonalMoment({ description: "An idea", consideration: "everyone" as "private" })).toThrow();
   });
