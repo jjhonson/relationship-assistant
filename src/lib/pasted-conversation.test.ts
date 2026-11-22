@@ -6,7 +6,7 @@ describe("manual conversation paste", () => {
 
   it("accepts each explicit channel and labels it as user-pasted, not verified", () => {
     expect(PASTED_CONVERSATION_SOURCES.map((source) => source.value)).toEqual([
-      "meeting", "email", "messages", "notes",
+      "meeting", "email", "messages", "notes", "unspecified",
     ]);
     for (const source of PASTED_CONVERSATION_SOURCES) {
       const parsed = parsePastedConversation({ ...base, source: source.value });

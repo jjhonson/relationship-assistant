@@ -8,6 +8,7 @@ export const PASTED_CONVERSATION_SOURCES = [
   { value: "email", label: "Email thread", provenanceLabel: "Manually pasted email conversation" },
   { value: "messages", label: "Messages or chat", provenanceLabel: "Manually pasted messages or chat" },
   { value: "notes", label: "Other conversation notes", provenanceLabel: "Manually pasted conversation notes" },
+  { value: "unspecified", label: "Source unspecified", provenanceLabel: "Manually pasted conversation (source unspecified)" },
 ] as const;
 
 export type PastedConversationSource = (typeof PASTED_CONVERSATION_SOURCES)[number]["value"];
