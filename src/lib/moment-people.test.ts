@@ -66,6 +66,25 @@ describe("moment-to-person matching", () => {
     expect(JSON.stringify(input)).not.toContain("gmail body");
   });
 
+  it("keeps a combined critical note intact when explicitly reviewing possible matches", async () => {
+    const description = "I disliked this guitar documentary, but it raised thoughtful questions about adult learning.";
+    const moment = createPersonalMoment({ description, consideration: "consider-people" });
+    let sentInput = {} as Record<string, unknown>;
+    const review = await reviewPeopleForMoment(moment, [personWithGuitarInterest()], {
+      ...options,
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { input: string };
+        sentInput = JSON.parse(body.input) as Record<string, unknown>;
+        return modelResponse({ matches: [], noMatchReason: "No supported connection to the questions raised." })("https://example.test");
+      },
+    });
+    expect(review.kind).toBe("no-match");
+    expect((sentInput.moment as { description: string }).description).toBe(description);
+    expect((sentInput.moment as { reflection: string }).reflection).toBe("");
+    expect(MOMENT_MATCH_PROMPT).toContain("may contain both what happened and the user's opinion");
+    expect(MOMENT_MATCH_PROMPT).toContain("not an endorsement or recommendation");
+  });
+
   it("does not send private moments to a model, even when a relevant person exists", async () => {
     const moment = createPersonalMoment({
       description: "Private documentary notes",
