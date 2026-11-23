@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 
 export const connectionEventKinds = [
   "prepared", "sent", "reply_received", "meeting_scheduled",
@@ -54,7 +53,7 @@ export function makeConnectionJourney(
     throw new Error("Invalid suggestion reference.");
   }
   return {
-    id: randomUUID(),
+    id: crypto.randomUUID(),
     relationshipId,
     subject: title,
     basisId: options.basisId ?? "",
@@ -81,10 +80,13 @@ export function addConnectionEvent(
   if (summary.length < 4 || summary.length > 500 || outcome.length > 500) {
     throw new Error("Provide a short summary (4–500 characters) and an optional outcome (up to 500).");
   }
+  if (outcome && input.kind !== "reply_received" && input.kind !== "interaction_occurred") {
+    throw new Error("An outcome can be learned only from a reply or an interaction that actually happened.");
+  }
   // A prepared message is never inferred to be sent. A scheduled meeting
   // is an arrangement, not proof the meeting took place.
   const event: ConnectionEvent = {
-    id: randomUUID(), kind: input.kind, happenedOn: input.happenedOn,
+    id: crypto.randomUUID(), kind: input.kind, happenedOn: input.happenedOn,
     summary, outcome, recordedAt: now.toISOString(),
   };
   return { journey: { ...journey, events: [...journey.events, event] }, event };
