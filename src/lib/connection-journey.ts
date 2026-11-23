@@ -7,6 +7,8 @@ export type ConnectionEventKind = (typeof connectionEventKinds)[number];
 
 export type ConnectionEvent = {
   id: string;
+  // Optional to keep all earlier single-event JSON records compatible.
+  confirmationId?: string;
   kind: ConnectionEventKind;
   happenedOn: string;
   recordedAt: string;

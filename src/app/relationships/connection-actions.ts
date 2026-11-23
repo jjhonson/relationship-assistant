@@ -5,8 +5,10 @@ import { looksLikePastedConversation } from "@/lib/conversational-capture";
 import {
   getRelationship, listConnectionJourneys,
   saveConfirmedConnectionEvent, startConnectionJourney,
+  saveConfirmedConnectionEvents,
 } from "@/lib/relationship-store";
 import { interpretConnectionUpdate } from "@/lib/connection-update-inference";
+import { interpretMultiEventUpdate } from "@/lib/connection-multi-event";
 import { type ConfirmedConnectionEvent, type ConnectionJourney } from "@/lib/connection-journey";
 
 function ensureDevelopment() {
@@ -72,4 +74,46 @@ export async function confirmConnectionActivity(
   revalidatePath("/relationships/" + personId);
   revalidatePath("/");
   return { saved: true as const, eventId: event.id };
+}
+
+
+/** One explicit review can identify several distinct, user-reported events. Never writes. */
+export async function previewMultipleConnectionActivities(
+  personId: string, journeyId: string, text: string,
+) {
+  ensureDevelopment();
+  const { personLabel, journey } = await assertJourney(personId, journeyId);
+  return interpretMultiEventUpdate({
+    text, person: personLabel, subject: journey.subject, today: localToday(),
+  }, {
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    model: process.env.OPENAI_RELATIONSHIP_MODEL,
+  });
+}
+
+/** One confirmation atomically writes a reviewed batch, not raw source text. */
+export async function confirmMultipleConnectionActivities(
+  personId: string,
+  journeyId: string,
+  events: ConfirmedConnectionEvent[],
+  confirmationId: string,
+) {
+  ensureDevelopment();
+  if (!Array.isArray(events) || events.length < 1 || events.length > 5) {
+    throw new Error("Select one to five actual events before confirming.");
+  }
+  for (const event of events) {
+    if (!event || typeof event.kind !== "string" ||
+        typeof event.happenedOn !== "string" ||
+        typeof event.summary !== "string" || typeof event.outcome !== "string" ||
+        looksLikePastedConversation(event.summary) || looksLikePastedConversation(event.outcome)) {
+      throw new Error("Use concise original summaries, not pasted conversations.");
+    }
+  }
+  const result = await saveConfirmedConnectionEvents(
+    personId, journeyId, events, localToday(), confirmationId,
+  );
+  revalidatePath("/relationships/" + personId);
+  revalidatePath("/");
+  return { saved: true as const, recordedCount: result.events.length, duplicate: result.duplicate };
 }
