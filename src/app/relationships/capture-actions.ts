@@ -93,7 +93,10 @@ export async function saveUniversalCapture(
   redirect("/captures/" + eventId);
 }
 
-export async function saveQuickCapture(contextRelationshipId: string | null, formData: FormData) {
+/** Save without redirect so a reviewed-input caller can confirm persistence. */
+export async function saveQuickCaptureWithoutRedirect(
+  contextRelationshipId: string | null, formData: FormData,
+) {
   ensureDevelopment();
   const raw = formData.get("note");
   if (typeof raw !== "string") throw new Error("Note text is required.");
@@ -101,7 +104,13 @@ export async function saveQuickCapture(contextRelationshipId: string | null, for
   await interpretIfAvailable(event.id);
   revalidatePath("/relationships");
   if (contextRelationshipId) revalidatePath("/relationships/" + contextRelationshipId);
-  redirect("/captures/" + event.id);
+  return { captureId: event.id };
+}
+
+/** Preserve the legacy quick note form behavior. */
+export async function saveQuickCapture(contextRelationshipId: string | null, formData: FormData) {
+  const { captureId } = await saveQuickCaptureWithoutRedirect(contextRelationshipId, formData);
+  redirect("/captures/" + captureId);
 }
 
 export async function retryQuickCapture(id: string) {

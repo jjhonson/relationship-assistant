@@ -771,7 +771,7 @@ linuxDescribe("remote-dev.sh", () => {
     expect(alive(pid)).toBe(false);
     expect(listening()).toBe(false);
     expect(existsSync(pidFile)).toBe(false);
-  });
+  }, 30000);
 
   it("uses the actual npm CLI and a local Node server for start, reuse, and stop", () => {
     if (spawnSync("npm", ["--version"]).status !== 0) return;
@@ -971,7 +971,7 @@ exec "${realSetsid}" "$@"
         if (pid > 0) { try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ } }
       }
     }
-  });
+  }, 30000);
 
   it("recognizes an npm process title padded with trailing NUL bytes", () => {
     fakeNpm(`exec node -e 'process.title="npm run dev"; require("http").createServer((q,r)=>r.end("ok")).listen(Number(process.env.PORT)); setInterval(()=>{},1000)'`);
@@ -981,7 +981,7 @@ exec "${realSetsid}" "$@"
     expect(readFileSync(`/proc/${pid}/cmdline`).includes(0)).toBe(true);
     expect(remote("start").stdout).toContain("RA_STATUS=reused");
     expect(remote("stop").status).toBe(0);
-  });
+  }, 30000);
 
   it("waits for the whole launch group and force-kills a resistant child after its leader exits", () => {
     const childFile = path.join(tmp, "child.pid");

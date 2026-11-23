@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { addTranscriptInteraction, updateRelationshipIntention, updateRelationshipLabels } from "../actions";
+import { updateRelationshipIntention, updateRelationshipLabels } from "../actions";
 import { correctRelationshipName, dismissInferredConnection } from "../capture-actions";
 import {
   getRelationship,
@@ -10,6 +10,7 @@ import {
 } from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
+import PersonConversationalCapture from "./PersonConversationalCapture";
 import QuickCaptureForm from "@/components/QuickCaptureForm";
 import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
 
@@ -50,7 +51,6 @@ export default async function RelationshipDetailPage({
   const connectedPeople = await listConnectedPeopleForRelationship(id);
   const sharedHouseholdContext = await listSharedHouseholdContextForRelationship(id);
 
-  const action = addTranscriptInteraction.bind(null, relationship.id);
   const labelsAction = updateRelationshipLabels.bind(null, relationship.id);
   const intentionAction = updateRelationshipIntention.bind(null, relationship.id);
   const primaryFacts = relationship.durableFacts.slice(0, 4);
@@ -81,7 +81,7 @@ export default async function RelationshipDetailPage({
 
       {updated === "1" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          Relationship updated. The transcript itself was not saved.
+          Relationship updated. The pasted conversation itself was not saved.
         </div>
       )}
       {labels === "1" && (
@@ -243,7 +243,14 @@ export default async function RelationshipDetailPage({
 
       <ConnectionSubjectsReview relationshipId={relationship.id} />
 
-      <QuickCaptureForm contextRelationshipId={relationship.id} compact />
+      <PersonConversationalCapture relationshipId={relationship.id} personLabel={relationship.personLabel} />
+
+      <details className="rounded-2xl border border-stone-200 bg-white p-4">
+        <summary className="cursor-pointer font-medium text-indigo-700">Add a photo instead</summary>
+        <div className="mt-3">
+          <QuickCaptureForm contextRelationshipId={relationship.id} compact />
+        </div>
+      </details>
 
       {(connectedPeople.length > 0 || sharedHouseholdContext.length > 0) && (
         <section className="rounded-2xl border border-stone-200 bg-white p-6">
@@ -485,43 +492,6 @@ export default async function RelationshipDetailPage({
           </ol>
         </section>
       )}
-
-      <section className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-6">
-        <h2 className="text-lg font-semibold">Add a new conversation</h2>
-        <p className="mt-1 max-w-3xl text-sm text-stone-600">
-          Paste a transcript from a call or meeting. The transcript and this relationship&apos;s existing structured
-          memory are sent to the configured inference model with provider storage disabled. Prior transcript text
-          is not resent. Only the updated structured relationship memory is saved locally.
-        </p>
-        <form action={action} className="mt-5 space-y-4">
-          <label className="block text-sm font-medium text-stone-700">
-            Interaction date
-            <input
-              type="date"
-              name="interactionDate"
-              required
-              defaultValue={new Date().toISOString().slice(0, 10)}
-              className="mt-1 block rounded-lg border border-stone-300 bg-white px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm font-medium text-stone-700">
-            Transcript
-            <textarea
-              name="transcript"
-              required
-              rows={14}
-              className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-3 font-mono text-sm"
-              placeholder="Paste the call transcript here…"
-            />
-          </label>
-          <button
-            type="submit"
-            className="rounded-lg bg-indigo-700 px-4 py-2 font-medium text-white hover:bg-indigo-800"
-          >
-            Learn from this interaction
-          </button>
-        </form>
-      </section>
 
       <details className="rounded-2xl border border-stone-200 bg-white p-6">
         <summary className="cursor-pointer font-semibold">Sources and limits</summary>
