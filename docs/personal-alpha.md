@@ -22,7 +22,7 @@ Relationship Assistant aims to reduce that work without taking the human part ou
 - Intentional photo capture with extracted text and visual observations kept separate from user input; the original image is not retained.
 - Cumulative, source-aware relationship records, explicit identity ambiguity resolution, and limited correction.
 - Explicit connected-person links and potential household context shared across profiles with clear attribution and no fabricated interaction.
-- Fictional automated tests and an existing local-development app. The older home dashboard is still sample data.
+- Fictional automated tests and an existing local-development app. The old static sample-contact Home is being replaced with saved people and a conservative, read-only attention view in the current Home PR.
 
 These features are not a deployed, hosted product. The current relationship store is a private local JSON file in the development environment, which **is not yet suitable as a durable personal system of record**.
 
@@ -30,6 +30,7 @@ These features are not a deployed, hosted product. The current relationship stor
 
 | Workstream | Tracked work | Target outcome |
 | --- | --- | --- |
+| Alpha Home and global capture | [#65](https://github.com/jjhonson/relationship-assistant/issues/65) | Real saved people, honest attention signals, and a single text entry with identity/retention review |
 | Person-first connection | [#53](https://github.com/jjhonson/relationship-assistant/issues/53), with lessons from draft PR #42 | Open a person and identify a specific, evidenced subject or useful gesture, or no action |
 | Durable memory | [#54](https://github.com/jjhonson/relationship-assistant/issues/54) | Survive environment loss and schema upgrades with tested backup and recovery |
 | Moment-first matching | Follow-up under [#52](https://github.com/jjhonson/relationship-assistant/issues/52) | Save a meaningful experience and discover relevant people without inventing a match |
@@ -41,6 +42,10 @@ These features are not a deployed, hosted product. The current relationship stor
 Using a small curated set of real relationships, we should be able to open a person, get a credible suggestion sourced to actual history or a meaningful moment, decide to act (or not), and then record the result. At least one person-first and one moment-first experience should be live rather than scripted. We will judge success by whether the product enables a valuable human connection that might otherwise have been missed, not by the number of recommendations or messages.
 
 Before the private pilot expands beyond a few records, relationship memory must live outside the disposable Codespace environment, with a documented migration, independent backup, and verified restore.
+
+## Future idea: relationship progress, not activity scoring
+
+The owner may later explore goal progress or thoughtfully designed gamification. Do not equate relationship depth with contact frequency, gamify private information, or imply that every relationship must advance. This is deferred until the closed-loop product can distinguish proposed, sent, replied, and meaningful outcomes, and until there is actual use evidence.
 
 ## Non-goals for the alpha
 
