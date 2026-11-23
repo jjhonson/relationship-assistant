@@ -90,6 +90,49 @@ export function validateCaptureInterpretation(raw: unknown, currentDate: string)
   };
 }
 
+
+/**
+ * Conservative local retention guard. A model can misclassify pasted quoted
+ * dialogue as the user's original note. Obvious third-party material must not
+ * be stored verbatim on that basis.
+ */
+export function looksLikePastedConversation(value: string): boolean {
+  const text = value.trim();
+  const intro = text.slice(0, 600);
+  const pastedCue = /\b(?:here(?:'s| is)|pasting|pasted|copied|copy of|below is)\b[\s\S]{0,120}\b(?:transcript|email thread|chat(?:\s+log|\s+thread|\s+transcript)?|message thread|conversation)\b/i.test(intro);
+  if (pastedCue) return true;
+  const emailHeader = /^\s*From:\s*\S.+$/im.test(text) &&
+    /^\s*(?:To|Date|Subject):\s*\S.+$/im.test(text);
+  if (emailHeader) return true;
+  const speakers = [...text.matchAll(/^\s*([A-Za-z][\w .'-]{0,34})\s*:\s*\S.+$/gm)]
+    .map((match) => match[1].trim().toLowerCase())
+    .filter((label) => !["from", "to", "subject", "date", "note"].includes(label));
+  return new Set(speakers).size >= 2;
+}
+
+/** A high-confidence transcript overrides a model's unsafe note/moment label. */
+export function protectTranscriptInterpretation(
+  text: string, proposed: CaptureInterpretation, currentDate: string,
+): CaptureInterpretation {
+  if (proposed.kind === "conversation" || !looksLikePastedConversation(text)) return proposed;
+  const intro = text.slice(0, 350);
+  const source: CaptureSource =
+    /\b(?:meeting|call|granola transcript|zoom transcript)\b/i.test(intro) ? "meeting"
+    : /^\s*From:\s*\S/m.test(text) || /\bemail\s+(?:thread|conversation)\b/i.test(intro) ? "email"
+    : /\b(?:chat|messages|sms|whatsapp)\b/i.test(intro) ? "messages"
+    : "unspecified";
+  const todayMeeting = source === "meeting" &&
+    /\b(?:just finished|just got off|finished (?:a|the) call today|finished (?:a|the) meeting today)\b/i.test(intro);
+  return {
+    kind: "conversation",
+    source,
+    interactionDate: todayMeeting ? currentDate : "",
+    dateEvidence: todayMeeting ? "relative" : "unknown",
+    summary: proposed.summary,
+    question: todayMeeting ? "" : "When did this conversation happen?",
+  };
+}
+
 type OpenAIResult = { output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
 
 export async function interpretConversationalCapture(
@@ -124,5 +167,5 @@ export async function interpretConversationalCapture(
   let parsed: unknown;
   try { parsed = JSON.parse(output); }
   catch { throw new Error("The interpretation was invalid."); }
-  return validateCaptureInterpretation(parsed, input.currentDate);
+  return protectTranscriptInterpretation(text, validateCaptureInterpretation(parsed, input.currentDate), input.currentDate);
 }

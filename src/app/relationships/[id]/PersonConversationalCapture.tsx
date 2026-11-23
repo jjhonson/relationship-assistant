@@ -83,7 +83,7 @@ export default function PersonConversationalCapture({
         });
         destination = saved.destination;
       } catch (cause) {
-        setError(cause instanceof Error && /up to \d|valid conversation date/i.test(cause.message)
+        setError(cause instanceof Error && /up to \d|valid conversation date|pasted conversation/i.test(cause.message)
           ? cause.message
           : "Save could not be confirmed. Check the saved record before retrying to avoid duplicates.");
         return;

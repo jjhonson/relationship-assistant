@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { interpretConversationalCapture, validateCaptureInterpretation, CONVERSATIONAL_CAPTURE_PROMPT } from "./conversational-capture";
+import { interpretConversationalCapture, validateCaptureInterpretation, looksLikePastedConversation, protectTranscriptInterpretation, CONVERSATIONAL_CAPTURE_PROMPT } from "./conversational-capture";
 
 const today = "2026-11-22";
 const options = { apiKey: "fictional-key", model: "test-model" };
@@ -61,6 +61,42 @@ describe("single-text capture preview", () => {
     expect(() => validateCaptureInterpretation({ ...base, interactionDate: "2027-01-01" }, today)).toThrow();
     expect(() => validateCaptureInterpretation({ ...base, kind: "note" }, today)).toThrow();
     expect(() => validateCaptureInterpretation({ ...base, interactionDate: "", dateEvidence: "relative" }, today)).toThrow();
+  });
+
+
+  it("recognizes an explicit pasted call transcript even if the model labels it a user note", async () => {
+    const pasted = "I just finished a call with Tom. Here's the transcript:\n\nTom: I'm volunteering at the garden.\nMe: What are you building?\nTom: Raised beds.";
+    expect(looksLikePastedConversation(pasted)).toBe(true);
+    const mislabeled = { kind: "note", source: "unspecified", interactionDate: "",
+      dateEvidence: "unknown", summary: "Tom discussed gardening.", question: "" };
+    const result = await interpretConversationalCapture({
+      text: pasted, personLabel: "Tom (fictional)", currentDate: today,
+    }, { ...options, fetchImpl: mocked(mislabeled) });
+    expect(result).toMatchObject({
+      kind: "conversation", source: "meeting", interactionDate: today,
+      dateEvidence: "relative",
+    });
+  });
+
+  it("recognizes copied dialogue and email headers, without guessing an undated chat's date", () => {
+    const chat = "Tom: I signed up for a class.\nMe: Sounds good.";
+    expect(looksLikePastedConversation(chat)).toBe(true);
+    const note = { kind: "moment", source: "unspecified", interactionDate: "",
+      dateEvidence: "unknown", summary: "A note about music.", question: "" } as const;
+    expect(protectTranscriptInterpretation(chat, note, today)).toMatchObject({
+      kind: "conversation", source: "unspecified", interactionDate: "", dateEvidence: "unknown",
+    });
+    const email = "From: Tom <tom@example.test>\nDate: November 20, 2026\nSubject: Guitar lessons\nThanks for checking in.";
+    expect(looksLikePastedConversation(email)).toBe(true);
+    expect(protectTranscriptInterpretation(email, note, today).source).toBe("email");
+  });
+
+  it("does not misclassify genuine short author-written reflections", () => {
+    const note = "I learned a lot from a guitar lesson, but didn't like the movie.";
+    expect(looksLikePastedConversation(note)).toBe(false);
+    const proposed = { kind: "moment", source: "unspecified", interactionDate: "",
+      dateEvidence: "unknown", summary: "A mixed opinion on a movie.", question: "" } as const;
+    expect(protectTranscriptInterpretation(note, proposed, today)).toBe(proposed);
   });
 
   it("never calls the provider for blank or oversized input", async () => {

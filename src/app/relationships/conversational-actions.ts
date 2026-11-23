@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getRelationship, savePersonalMoment } from "@/lib/relationship-store";
-import { interpretConversationalCapture, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
+import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { learnFromPastedConversation } from "./actions";
 import { saveQuickCaptureWithoutRedirect } from "./capture-actions";
 
@@ -45,6 +45,12 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
   if (!input || typeof input.text !== "string" || !input.text.trim() ||
       input.text.trim().length > 80_000) {
     throw new Error("Please enter text to save.");
+  }
+
+  // Classification may be wrong even after review. Never silently retain
+  // obvious third-party transcripts as if they were original user notes.
+  if (input.kind !== "conversation" && looksLikePastedConversation(input.text)) {
+    throw new Error("This looks like a pasted conversation. Save it as a conversation so the full text is not retained.");
   }
 
   if (input.kind === "conversation") {

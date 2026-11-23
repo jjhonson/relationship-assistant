@@ -74,6 +74,19 @@ describe("reviewed capture saves without nested redirect exceptions", () => {
     expect(mocks.saveQuickCaptureWithoutRedirect).not.toHaveBeenCalled();
   });
 
+
+  it("blocks verbatim storage when a pasted transcript is misclassified as a personal note or moment", async () => {
+    const pasted = "I just finished a call with Tom. Here's the transcript:\nTom: I'm gardening.\nMe: How's it going?";
+    for (const kind of ["note", "moment"] as const) {
+      await expect(saveReviewedPersonCapture("tom", {
+        text: pasted, kind, source: "unspecified", interactionDate: "",
+      })).rejects.toThrow("pasted conversation");
+    }
+    expect(mocks.saveQuickCaptureWithoutRedirect).not.toHaveBeenCalled();
+    expect(mocks.savePersonalMoment).not.toHaveBeenCalled();
+    expect(mocks.learnFromPastedConversation).not.toHaveBeenCalled();
+  });
+
   it("rejects unreviewed/oversized input without writing", async () => {
     await expect(saveReviewedPersonCapture("tom", {
       text: "x".repeat(80_001), kind: "conversation",
