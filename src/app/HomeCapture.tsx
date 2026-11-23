@@ -121,7 +121,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
 
       {interpretation && (
         <div aria-live="polite" className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
-          <h3 className="font-semibold text-stone-900">Here's what I understood</h3>
+          <h3 className="font-semibold text-stone-900">Here&apos;s what I understood</h3>
           {interpretation.summary && <p className="mt-2 text-sm text-stone-800">{interpretation.summary}</p>}
           <p className="mt-2 text-sm text-stone-700">
             Suggested type: <strong>{kinds.find((item) => item.value === interpretation.kind)?.label ??
@@ -173,7 +173,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
               <p>Source: <strong>{PASTED_CONVERSATION_SOURCES.find((item) => item.value === source)?.label ??
                 "Source unspecified"}</strong> (inferred, not independently verified)</p>
               <p className="text-xs text-stone-500">
-                Only structured relationship memory and a source label will be saved. Other people named in the text won't be added automatically.
+                Only structured relationship memory and a source label will be saved. Other people named in the text won&apos;t be added automatically.
               </p>
             </div>
           )}
@@ -197,7 +197,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
                 What kind of material is this?
                 <select value={kind} onChange={(event) => { setKind(event.target.value as ConfirmedKind | ""); setError(null); }}
                   className="mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2">
-                  <option value="">I'm not sure</option>
+                  <option value="">I&apos;m not sure</option>
                   {kinds.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
                 </select>
               </label>
