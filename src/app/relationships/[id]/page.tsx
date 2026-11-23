@@ -4,6 +4,7 @@ import { updateRelationshipIntention, updateRelationshipLabels } from "../action
 import { correctRelationshipName, dismissInferredConnection } from "../capture-actions";
 import {
   getRelationship,
+  listConnectionJourneys,
   listCapturesForRelationship,
   listConnectedPeopleForRelationship,
   listSharedHouseholdContextForRelationship,
@@ -13,6 +14,7 @@ import { relationshipIntentionModes } from "@/lib/relationship-record";
 import PersonConversationalCapture from "./PersonConversationalCapture";
 import QuickCaptureForm from "@/components/QuickCaptureForm";
 import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
+import ConnectionJournal from "./ConnectionJournal";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +50,7 @@ export default async function RelationshipDetailPage({
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
   const capturedNotes = await listCapturesForRelationship(id);
+  const journeys = await listConnectionJourneys(id);
   const connectedPeople = await listConnectedPeopleForRelationship(id);
   const sharedHouseholdContext = await listSharedHouseholdContextForRelationship(id);
 
@@ -242,6 +245,7 @@ export default async function RelationshipDetailPage({
       </section>
 
       <ConnectionSubjectsReview relationshipId={relationship.id} />
+      <ConnectionJournal relationshipId={relationship.id} journeys={journeys} />
 
       <PersonConversationalCapture relationshipId={relationship.id} personLabel={relationship.personLabel} />
 

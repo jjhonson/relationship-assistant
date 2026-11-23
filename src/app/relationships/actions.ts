@@ -31,6 +31,7 @@ import {
 import {
   findRelationshipByIdentity,
   getRelationship,
+  listConnectionJourneys,
   saveRelationship,
 } from "@/lib/relationship-store";
 
@@ -317,10 +318,12 @@ export async function reviewRelationshipConnection(id: string) {
     timeZone, year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date());
 
+  const journeys = await listConnectionJourneys(id);
   return reviewConnectionSubjects(record, {
     apiKey: process.env.OPENAI_API_KEY ?? "",
     model: process.env.OPENAI_RELATIONSHIP_MODEL,
     userLabel: process.env.RELATIONSHIP_USER_LABEL ?? "Jason",
     reviewedAt,
+    excludedBasisIds: journeys.map((item) => item.basisId).filter(Boolean),
   });
 }
