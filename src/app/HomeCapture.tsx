@@ -9,6 +9,13 @@ import { PASTED_CONVERSATION_SOURCES } from "@/lib/pasted-conversation";
 
 type ConfirmedKind = Exclude<CaptureKind, "uncertain">;
 
+const REFLECTION_PROMPTS = [
+  "Who did you have an interesting conversation with recently?",
+  "Read anything worth remembering?",
+  "What's something new you've tried or learned?",
+  "Did something recently remind you of someone?",
+] as const;
+
 const kinds: Array<{ value: ConfirmedKind; label: string }> = [
   { value: "conversation", label: "Pasted conversation or transcript" },
   { value: "note", label: "My own note" },
@@ -18,6 +25,7 @@ const kinds: Array<{ value: ConfirmedKind; label: string }> = [
 export default function HomeCapture({ people }: { people: HomePersonChoice[] }) {
   const router = useRouter();
   const [text, setText] = useState("");
+  const [promptIndex, setPromptIndex] = useState(0);
   const [interpretation, setInterpretation] = useState<CaptureInterpretation | null>(null);
   const [kind, setKind] = useState<ConfirmedKind | "">("");
   const [source, setSource] = useState<CaptureSource>("unspecified");
@@ -97,18 +105,25 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
 
   return (
     <section className="rounded-2xl border border-indigo-200 bg-white p-5 sm:p-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-stone-900">What do you want to remember?</h1>
-      <p className="mt-1 text-sm text-stone-600">A conversation, an idea, or something from your own life.</p>
+      <p className="sr-only" role="heading" aria-level={1}>Remember something</p>
       <form onSubmit={review} className="mt-4 space-y-3">
-        <label className="sr-only" htmlFor="home-capture-input">Your text or pasted conversation</label>
+        <label className="sr-only" htmlFor="home-capture-input">What do you want to remember?</label>
         <textarea id="home-capture-input" value={text} required maxLength={80000}
           onChange={(event) => changedText(event.target.value)} rows={5}
           className="w-full rounded-xl border border-stone-300 bg-white p-4 text-sm"
-          placeholder={"Tell me about a conversation, paste a transcript, or describe something you did…"} />
-        <button type="submit" disabled={reviewPending || savePending}
-          className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:opacity-50">
-          {reviewPending ? "Interpreting…" : "Review what I understood"}
-        </button>
+          placeholder={REFLECTION_PROMPTS[promptIndex]} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button type="button"
+            onClick={() => setPromptIndex((current) => (current + 1) % REFLECTION_PROMPTS.length)}
+            disabled={reviewPending || savePending}
+            className="text-sm font-medium text-indigo-700 hover:underline disabled:opacity-50">
+            Another idea
+          </button>
+          <button type="submit" disabled={reviewPending || savePending}
+            className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:opacity-50">
+            {reviewPending ? "Interpreting…" : "Review what I understood"}
+          </button>
+        </div>
       </form>
       <p className="mt-2 text-xs text-stone-500">Nothing is saved until you confirm.</p>
       <details className="mt-2 text-xs text-stone-600">

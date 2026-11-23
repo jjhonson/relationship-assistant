@@ -49,7 +49,7 @@ export default async function HomePage() {
       <section aria-labelledby="attention-heading" className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="attention-heading" className="text-xl font-semibold text-stone-900">
-            Worth your attention
+            Attention
           </h2>
           <details className="text-xs text-stone-600">
             <summary className="cursor-pointer font-medium text-indigo-700">About these items</summary>
@@ -122,7 +122,7 @@ export default async function HomePage() {
       <section aria-labelledby="people-heading" className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 id="people-heading" className="text-xl font-semibold">Explore relationships</h2>
+            <h2 id="people-heading" className="text-xl font-semibold">Relationships</h2>
             <p className="mt-1 text-sm text-stone-500">
               {relationships.length} saved {relationships.length === 1 ? "person" : "people"} ·
               Showing recently updated records

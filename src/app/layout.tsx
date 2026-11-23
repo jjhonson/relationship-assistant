@@ -19,7 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <nav aria-label="Primary navigation" className="flex items-center gap-5 text-sm font-medium">
               <Link href="/" className="text-indigo-700 hover:underline">Home</Link>
-              <Link href="/relationships" className="text-stone-700 hover:text-indigo-700 hover:underline">People</Link>
+              <Link href="/relationships" className="text-stone-700 hover:text-indigo-700 hover:underline">Relationships</Link>
               <Link href="/moments" className="text-stone-700 hover:text-indigo-700 hover:underline">Moments</Link>
             </nav>
             <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
