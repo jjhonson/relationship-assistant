@@ -15,6 +15,12 @@ import {
 } from "./capture";
 import type { RelationshipIdentity, RelationshipRecord } from "./relationship-record";
 import { createPersonalMoment, type PersonalMoment, type PersonalMomentInput } from "./personal-moment";
+import { randomUUID } from "node:crypto";
+import { buildConnectionCandidates } from "./connection-subjects";
+import {
+  addConnectionEvent, makeConnectionJourney, type ConnectionJourney,
+  type ConfirmedConnectionEvent,
+} from "./connection-journey";
 
 type StoreFile = {
   version: 1;
@@ -23,6 +29,8 @@ type StoreFile = {
   captures: CaptureEvent[];
   // Optional in earlier version-1 files; add without rewriting old identities or memories.
   moments: PersonalMoment[];
+  // Optional on old v1 JSON stores; added without rewriting any existing data.
+  connectionJourneys: ConnectionJourney[];
 };
 
 let mutationQueue: Promise<unknown> = Promise.resolve();
@@ -46,6 +54,9 @@ async function readStore(): Promise<StoreFile> {
     return {
       ...parsed,
       captures: Array.isArray(parsed.captures) ? parsed.captures : [],
+      connectionJourneys: parsed.connectionJourneys === undefined ? [] :
+        Array.isArray(parsed.connectionJourneys) ? parsed.connectionJourneys :
+        (() => { throw new Error("Unsupported connection journal store format."); })(),
       moments: parsed.moments === undefined ? [] : Array.isArray(parsed.moments) ? parsed.moments :
         (() => { throw new Error("Unsupported personal moments store format."); })(),
       relationships: parsed.relationships.map((relationship) => ({
@@ -63,7 +74,7 @@ async function readStore(): Promise<StoreFile> {
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { version: 1, relationships: [], captures: [], moments: [] };
+      return { version: 1, relationships: [], captures: [], moments: [], connectionJourneys: [] };
     }
     throw error;
   }
@@ -267,5 +278,89 @@ export async function setPersonalMomentConsideration(
     if (index < 0) throw new Error("Saved moment not found.");
     store.moments[index] = { ...store.moments[index], consideration };
     return store.moments[index];
+  });
+}
+
+
+/**
+ * Intentionally recorded one-to-one connections. Suggested ideas are not
+ * evidence of an action, and no contact channels are queried or changed here.
+ */
+export async function listConnectionJourneys(relationshipId: string) {
+  const store = await readStore();
+  return store.connectionJourneys.filter((item) => item.relationshipId === relationshipId)
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+export async function startConnectionJourney(
+  relationshipId: string,
+  subject: string,
+  basisId: string,
+  userLabel: string,
+) {
+  return mutateStore((store) => {
+    const person = store.relationships.find((item) => item.id === relationshipId);
+    if (!person) throw new Error("Relationship not found.");
+    let sourceIds: string[] = [];
+    if (basisId) {
+      const verified = buildConnectionCandidates(person, userLabel)
+        .find((item) => item.id === basisId);
+      if (!verified) throw new Error("The proposed connection is no longer supported by saved evidence.");
+      sourceIds = verified.evidence.map((item) => item.id);
+      const existing = store.connectionJourneys.find(
+        (item) => item.relationshipId === relationshipId && item.basisId === basisId,
+      );
+      if (existing) return existing;
+    }
+    const journey = makeConnectionJourney(relationshipId, subject, {
+      basisId, basisSourceIds: sourceIds,
+    });
+    store.connectionJourneys.push(journey);
+    return journey;
+  });
+}
+
+export async function saveConfirmedConnectionEvent(
+  relationshipId: string,
+  journeyId: string,
+  input: ConfirmedConnectionEvent,
+  today: string,
+) {
+  return mutateStore((store) => {
+    const index = store.connectionJourneys.findIndex(
+      (item) => item.id === journeyId && item.relationshipId === relationshipId,
+    );
+    const recordIndex = store.relationships.findIndex((item) => item.id === relationshipId);
+    if (index < 0 || recordIndex < 0) throw new Error("Connection or person not found.");
+    const { journey, event } = addConnectionEvent(store.connectionJourneys[index], input, today);
+    store.connectionJourneys[index] = journey;
+
+    // A draft or schedule is not a completed conversation. Only an
+    // explicitly user-confirmed sent/reply/occurred event establishes contact.
+    if (["sent", "reply_received", "interaction_occurred"].includes(event.kind)) {
+      const record = store.relationships[recordIndex];
+      const lastInteractionAt = record.lastInteractionAt && record.lastInteractionAt > event.happenedOn
+        ? record.lastInteractionAt : event.happenedOn;
+      let updated = { ...record, lastInteractionAt, updatedAt: event.recordedAt };
+      if ((event.kind === "reply_received" || event.kind === "interaction_occurred") && event.outcome) {
+        const sourceId = "connection-event:" + event.id;
+        const source = {
+          id: sourceId, source: "manual" as const,
+          observedAt: event.happenedOn,
+          label: "User-confirmed connection outcome (not externally verified)",
+        };
+        updated = {
+          ...updated,
+          sources: [...updated.sources, source],
+          durableFacts: [...updated.durableFacts, {
+            id: randomUUID(), category: "Personal" as const, label: "Connection outcome",
+            value: event.outcome, sourceIds: [sourceId],
+            firstObservedAt: event.happenedOn, lastObservedAt: event.happenedOn,
+          }],
+        };
+      }
+      store.relationships[recordIndex] = updated;
+    }
+    return { journey, event };
   });
 }

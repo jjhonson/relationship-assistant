@@ -71,6 +71,20 @@ describe("person-first connection subjects", () => {
     expect(JSON.stringify(input)).not.toContain("gmail body");
   });
 
+
+  it("doesn't re-suggest the same source-backed basis after the user starts tracking it", async () => {
+    const record = relationship();
+    const used = buildConnectionCandidates(record, "Jason").map((item) => item.id);
+    const result = await reviewConnectionSubjects(record, {
+      ...options,
+      apiKey: "",
+      excludedBasisIds: used,
+      fetchImpl: async () => { throw new Error("No model call after every basis is tracked"); },
+    });
+    expect(result.kind).toBe("no-suggestion");
+    expect(result.suggestions).toEqual([]);
+  });
+
   it("returns no suggestion without requesting AI for a sparse person with no source-backed subject", async () => {
     const record = createManualRelationshipRecord("Neighbor whose name I just learned");
     const result = await reviewConnectionSubjects(record, {

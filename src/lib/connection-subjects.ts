@@ -217,9 +217,14 @@ export async function reviewConnectionSubjects(
     userLabel: string;
     model?: string;
     fetchImpl?: typeof fetch;
+    excludedBasisIds?: string[];
   },
 ): Promise<ConnectionReview> {
-  const candidates = buildConnectionCandidates(record, options.userLabel);
+  // Once the owner is actively tracking or has handled an idea, don't keep
+  // presenting the identical unchanged evidence basis as a fresh suggestion.
+  const excluded = new Set(options.excludedBasisIds ?? []);
+  const candidates = buildConnectionCandidates(record, options.userLabel)
+    .filter((item) => !excluded.has(item.id));
   if (!candidates.length) {
     return noSuggestion(options.reviewedAt,
       "There is not yet enough dated, source-backed context to suggest a meaningful subject.");

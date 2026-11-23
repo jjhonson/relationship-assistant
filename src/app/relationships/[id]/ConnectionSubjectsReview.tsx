@@ -2,13 +2,31 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { beginConnection } from "../connection-actions";
 import { reviewRelationshipConnection } from "../actions";
 import type { ConnectionReview } from "@/lib/connection-subjects";
 
 export default function ConnectionSubjectsReview({ relationshipId }: { relationshipId: string }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [tracking, startTracking] = useTransition();
+  const [tracked, setTracked] = useState<string[]>([]);
   const [review, setReview] = useState<ConnectionReview | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  function track(subject: string, basisId: string) {
+    setError(null);
+    startTracking(async () => {
+      try {
+        await beginConnection(relationshipId, subject, basisId);
+        setTracked((current) => [...current, basisId]);
+        router.refresh();
+      } catch {
+        setError("Could not start tracking this connection. No contact was made.");
+      }
+    });
+  }
 
   function requestReview() {
     setReview(null);
@@ -94,6 +112,19 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
                     })}
                   </ul>
                 </details>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button type="button"
+                    onClick={() => track(item.subject, item.basisId)}
+                    disabled={tracking || tracked.includes(item.basisId)}
+                    className="rounded-lg border border-indigo-700 px-3 py-2 text-sm font-medium text-indigo-700 disabled:opacity-50">
+                    {tracked.includes(item.basisId) ? "Tracking this idea" : tracking ? "Adding…" : "Track this idea"}
+                  </button>
+                  {tracked.includes(item.basisId) && (
+                    <a href="#connection-activity" className="text-sm font-medium text-indigo-700 underline">
+                      View connection activity
+                    </a>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
