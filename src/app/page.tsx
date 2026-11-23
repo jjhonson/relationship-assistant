@@ -112,7 +112,7 @@ export default async function HomePage() {
       <section aria-labelledby="people-heading">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 id="people-heading" className="text-xl font-semibold">Your relationships</h2>
+            <h2 id="people-heading" className="text-xl font-semibold">Explore relationships</h2>
             <p className="mt-1 text-sm text-stone-600">
               {relationships.length} saved {relationships.length === 1 ? "person" : "people"}.
               These are your current records, not the fictional demonstration contacts.
