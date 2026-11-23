@@ -97,35 +97,36 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
 
   return (
     <section className="rounded-2xl border border-indigo-200 bg-white p-5 sm:p-6">
-      <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Tell the agent something</p>
-      <h2 className="mt-1 text-xl font-semibold text-stone-900">What do you want to remember?</h2>
-      <p className="mt-2 max-w-3xl text-sm text-stone-600">
-        Paste an email, chat or meeting transcript, describe someone, or save something from your own life.
-        Start in your own words. We will ask about the source, date or person only when it matters.
-      </p>
+      <h1 className="text-2xl font-semibold tracking-tight text-stone-900">What do you want to remember?</h1>
+      <p className="mt-1 text-sm text-stone-600">A conversation, an idea, or something from your own life.</p>
       <form onSubmit={review} className="mt-4 space-y-3">
         <label className="sr-only" htmlFor="home-capture-input">Your text or pasted conversation</label>
         <textarea id="home-capture-input" value={text} required maxLength={80000}
           onChange={(event) => changedText(event.target.value)} rows={5}
           className="w-full rounded-xl border border-stone-300 bg-white p-4 text-sm"
-          placeholder={"Just finished a meeting with Tom. Here's the transcript…\n\nOr: I found an article that made me reconsider something."} />
+          placeholder={"Tell me about a conversation, paste a transcript, or describe something you did…"} />
         <button type="submit" disabled={reviewPending || savePending}
           className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:opacity-50">
           {reviewPending ? "Interpreting…" : "Review what I understood"}
         </button>
       </form>
-      <p className="mt-2 text-xs text-stone-500">
-        Interpretation happens only when you request it. Nothing is saved until you confirm.
-        Pasted third-party conversations are not retained verbatim.
-      </p>
+      <p className="mt-2 text-xs text-stone-500">Nothing is saved until you confirm.</p>
+      <details className="mt-2 text-xs text-stone-600">
+        <summary className="cursor-pointer font-medium text-indigo-700">How remembering works</summary>
+        <p className="mt-2 max-w-2xl">
+          Review begins only when you click the button. We may ask which person, source or date you mean.
+          Pasted conversations are reduced to sourced relationship memory without storing the original transcript.
+          Your own notes can retain their wording; personal moments are private by default. Nothing is sent to anyone.
+        </p>
+      </details>
 
       {interpretation && (
         <div aria-live="polite" className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
-          <h3 className="font-semibold text-stone-900">Here&apos;s what I understood</h3>
+          <h2 className="font-semibold text-stone-900">Here&apos;s what I understood</h2>
           {interpretation.summary && <p className="mt-2 text-sm text-stone-800">{interpretation.summary}</p>}
-          <p className="mt-2 text-sm text-stone-700">
-            Suggested type: <strong>{kinds.find((item) => item.value === interpretation.kind)?.label ??
-              "Needs clarification"}</strong>
+          <p className="mt-2 text-xs text-stone-600">
+            <span className="font-medium">Type:</span>{" "}
+            {kinds.find((item) => item.value === interpretation.kind)?.label ?? "Needs clarification"}
           </p>
 
           {!kind && (
@@ -159,7 +160,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
                   )}
                 </label>
               ) : (
-                <p>Person: <strong>{selectedPerson?.label}</strong> (suggested from text or selected by you)</p>
+                <p>Person: <strong>{selectedPerson?.label}</strong></p>
               )}
               {needsDate && (
                 <label className="block font-medium text-stone-800">
@@ -171,27 +172,25 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
               )}
               {interactionDate && <p>Date: <strong>{interactionDate}</strong></p>}
               <p>Source: <strong>{PASTED_CONVERSATION_SOURCES.find((item) => item.value === source)?.label ??
-                "Source unspecified"}</strong> (inferred, not independently verified)</p>
-              <p className="text-xs text-stone-500">
-                Only structured relationship memory and a source label will be saved. Other people named in the text won&apos;t be added automatically.
-              </p>
+                "Source unspecified"}</strong> <span className="text-xs text-stone-500">(inferred)</span></p>
+              <p className="text-xs text-stone-500">Only extracted context is saved, not the original transcript.</p>
             </div>
           )}
           {kind === "note" && (
             <p className="mt-3 text-sm text-stone-700">
               {selectedPerson
                 ? "Your original note will be saved about " + selectedPerson.label + "."
-                : "Your own note can begin a new relationship record. The resulting people will be available for review."}
+                : "Your own note may begin a new relationship record for review."}
             </p>
           )}
           {kind === "moment" && (
             <p className="mt-3 text-sm text-stone-700">
-              This will be saved privately as something from your own life. No match or outreach happens automatically.
+              Private by default. No automatic matching or outreach.
             </p>
           )}
 
           <details className="mt-4 border-t border-indigo-100 pt-3">
-            <summary className="cursor-pointer text-sm font-medium text-indigo-700">Correct the interpretation</summary>
+            <summary className="cursor-pointer text-sm font-medium text-indigo-700">Edit details</summary>
             <div className="mt-3 space-y-3 text-sm">
               <label className="block font-medium">
                 What kind of material is this?
