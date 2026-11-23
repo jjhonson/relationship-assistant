@@ -11,7 +11,7 @@ export type MultiEventPreview = {
 
 export const MULTI_EVENT_INSTRUCTIONS = [
   "Interpret one first-person report of events involving the specified saved relationship.",
-  "Extract 0 to 5 distinct events that the user EXPLICITLY reports actually happened. Return them in the order described.",
+  "Extract 0 to 5 distinct events that the user EXPLICITLY reports actually happened. Return in chronological order, earliest first. For events on the same date, preserve causal order.",
   "A single report can contain sent, reply received, and an actual conversation, but do not infer any unstated intermediate step.",
   "Only create a prepared event when the user explicitly says a draft was written, copied, or prepared.",
   "Only create sent when the user explicitly states they SENT a message. A reply by itself does not prove an earlier send.",
@@ -50,8 +50,7 @@ export function validateMultiEventPreview(value: unknown, today: string): MultiE
       typeof candidate.question !== "string") {
     throw new Error("Invalid activity interpretation.");
   }
-  return {
-    events: candidate.events.map((event) => {
+  const events = candidate.events.map((event) => {
       const interpreted = validateConnectionPreview(event, today);
       // Model output may be uncertain or missing dates. Preserve uncertainty
       // for the user's review, never fill it by guessing.
@@ -64,9 +63,12 @@ export function validateMultiEventPreview(value: unknown, today: string): MultiE
         throw new Error("An unsent, sent or scheduled action cannot introduce a learned outcome.");
       }
       return interpreted;
-    }),
-    question: candidate.question.trim().slice(0, 300),
-  };
+    });
+  // A reversed narrative such as "She replied today after I sent it yesterday"
+  // must not make Sent look like the latest status on the connection.
+  events.sort((a, b) => a.happenedOn && b.happenedOn ?
+    a.happenedOn.localeCompare(b.happenedOn) : 0);
+  return { events, question: candidate.question.trim().slice(0, 300) };
 }
 
 /** Explicit review only: no database write and no model request while typing. */

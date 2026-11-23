@@ -78,6 +78,15 @@ describe("atomic multi-event connection persistence", () => {
     )).rejects.toThrow(/different update/);
   });
 
+  it("rejects reversed dates atomically so the latest connection status remains meaningful", async () => {
+    const { tom, journey } = await setup();
+    const before = await disk();
+    await expect(saveConfirmedConnectionEvents(tom.id, journey.id, [
+      reply, sent,
+    ], "2026-11-23", id1)).rejects.toThrow(/earliest action first/);
+    expect(await disk()).toEqual(before);
+  });
+
   it("does not partially save a valid send followed by a future-dated reply", async () => {
     const { tom, journey } = await setup();
     const before = await disk();

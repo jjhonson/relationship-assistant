@@ -84,7 +84,10 @@ function JourneyEntry({ personId, journey }: { personId: string; journey: Connec
     });
   }
 
-  const ready = reviewed && drafts.length > 0 && !!confirmationId &&
+  const chronological = drafts.every((item, index) =>
+    index === 0 || !item.happenedOn || !drafts[index - 1].happenedOn ||
+    item.happenedOn >= drafts[index - 1].happenedOn);
+  const ready = reviewed && drafts.length > 0 && !!confirmationId && chronological &&
     drafts.every((item) => item.kind !== "uncertain" && !!item.happenedOn &&
       item.summary.trim().length >= 4 && item.summary.length <= 500 && item.outcome.length <= 500) &&
     !reviewing && !saving;
@@ -253,6 +256,11 @@ function JourneyEntry({ personId, journey }: { personId: string; journey: Connec
               This records only the actions you confirm, not a raw transcript. A reply, send or meeting
               is user-reported, not externally verified.
             </p>
+            {!chronological && (
+              <p className="text-xs font-medium text-amber-700">
+                Move the events into date order (oldest first) before confirming.
+              </p>
+            )}
             {drafts.some((item) => item.kind === "uncertain" || !item.happenedOn) && (
               <p className="text-xs font-medium text-amber-700">
                 Clarify the action and date of each remaining item before saving.

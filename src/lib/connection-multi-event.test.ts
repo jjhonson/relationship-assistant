@@ -43,6 +43,13 @@ describe("one natural-language update, several user-reported events", () => {
     expect(MULTI_EVENT_INSTRUCTIONS).toContain("not the meeting taking place");
   });
 
+  it("orders events chronologically even when the report describes the reply first", () => {
+    const result = validateMultiEventPreview({
+      events: [proposed.events[1], proposed.events[0]], question: "",
+    }, "2026-11-23");
+    expect(result.events.map((x) => x.kind)).toEqual(["sent", "reply_received"]);
+  });
+
   it("retains a prepared-but-unsent event without upgrading it to a send", () => {
     const result = validateMultiEventPreview({
       events: [{ kind: "prepared", happenedOn: "2026-11-23",

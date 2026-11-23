@@ -366,6 +366,9 @@ export async function saveConfirmedConnectionEvents(
         throw new Error("Use short original summaries, not pasted third-party conversations.");
       }
       const next = addConnectionEvent(journey, input, today);
+      if (applied.length && next.event.happenedOn < applied[applied.length - 1].happenedOn) {
+        throw new Error("Review event order: record the earliest action first.");
+      }
       const tagged = { ...next.event, confirmationId };
       journey = { ...next.journey, events: [...next.journey.events.slice(0, -1), tagged] };
       applied.push(tagged);
