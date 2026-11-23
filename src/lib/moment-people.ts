@@ -40,7 +40,7 @@ type OpenAIResponse = {
 
 export const MOMENT_MATCH_PROMPT = [
   "Help the user notice when something that happened in their own life could form a thoughtful one-to-one connection with a person they know.",
-  "Consider the moment's DESCRIPTION and the user's own REFLECTION separately. An article, film, event, or saved link is not an endorsement or recommendation.",
+  "DESCRIPTION may contain both what happened and the user's opinion in one natural-language note. REFLECTION is an optional legacy supplement and may be empty. Read all the user's words without inventing a missing reaction. An article, film, event, or saved link is not an endorsement or recommendation.",
   "Never claim the user enjoyed, admired, agreed with, recommended, or wants to send an item unless their own words expressly support that.",
   "Match the SPECIFIC insight, experience, question, useful contribution or human situation that matters, not a superficial shared keyword.",
   "The other person's interest or relationship history must be directly supported by candidate dated claims and source IDs. Do not invent affinity, closeness, current location or an event having occurred.",
