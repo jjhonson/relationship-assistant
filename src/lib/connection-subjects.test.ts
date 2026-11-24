@@ -164,6 +164,9 @@ describe("person-first connection subjects", () => {
 
   it("keeps the prompts focused on subjects rather than selecting email or telephone", () => {
     expect(CONNECTION_SYSTEM_PROMPT).toContain("SUBJECTS");
+    expect(CONNECTION_SYSTEM_PROMPT).toContain("not a task for the user to monitor");
+    expect(CONNECTION_SYSTEM_PROMPT).toContain("Did you end up running that race?");
+    expect(CONNECTION_SYSTEM_PROMPT).toContain("natural, concise question");
     expect(CONNECTION_SYSTEM_PROMPT).toContain("Do NOT recommend an email");
     expect(CONNECTION_SYSTEM_PROMPT).toContain("not manage a sales pipeline");
   });

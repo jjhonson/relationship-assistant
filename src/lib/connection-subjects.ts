@@ -52,7 +52,12 @@ export const CONNECTION_SYSTEM_PROMPT = [
   "The possible angle is an idea or genuine question, NOT a prewritten outbound message and NOT a mandatory task.",
   "A meaningful subject may be an ongoing interest or shared history and need not have an urgent deadline.",
   "Never invent the user's own interests, resources, introductions, article links, planned travel, obligations, or shared history.",
+  "A person's mentioned intention or future plan is context, not a task for the user to monitor.",
   "A recorded milestone expected in the future is not evidence that it occurred. Never claim it did without confirmation.",
+  "It is natural to ask 'Did you end up running that race?' after a planned date, without assuming the race occurred.",
+  "The user does NOT need to verify that another person's future plan happened before politely asking how it went.",
+  "If an old suggested action presumes progress or completion, reframe it as an open question that preserves uncertainty.",
+  "Prefer a natural, concise question as the possible angle, not a checklist, trigger, tracking workflow, or status request.",
   "An open commitment owned by the other person is not a reason to pressure them for follow-up.",
   "Do not pressure contact merely because time passed or a relationship is important. Do not invent intimacy.",
   "Keep suggested subjects specific rather than generic 'check in' or 'how are you' prompts.",
@@ -94,7 +99,7 @@ function sourceEvidence(sourceIds: string[], known: Map<string, RelationshipSour
   });
 }
 
-function userOwnsCommitment(owner: string, userLabel: string) {
+export function userOwnsCommitment(owner: string, userLabel: string) {
   const value = owner.trim().toLowerCase();
   const user = userLabel.trim().toLowerCase();
   const first = user.split(/\s+/)[0];
@@ -122,7 +127,7 @@ export function buildConnectionCandidates(
     candidates.push({
       id: "thread:" + thread.id, kind: "thread",
       description: [thread.topic, thread.state, thread.whyItMatters].filter(Boolean).join(" · "),
-      observedAt: thread.lastObservedAt, timing: "Next potential change: " + thread.nextChangeSignal,
+      observedAt: thread.lastObservedAt, timing: "Context mentioned, not a monitoring task: " + thread.nextChangeSignal,
       evidence: sourceEvidence(thread.sourceIds, known),
     });
   }
@@ -138,7 +143,7 @@ export function buildConnectionCandidates(
     candidates.push({
       id: "opportunity:" + opportunity.id, kind: "opportunity",
       description: opportunity.reason, observedAt: opportunity.observedAt,
-      timing: "Future/conditional trigger, NOT confirmed: " + opportunity.trigger,
+      timing: "Earlier possible timing or condition, not confirmation or a task: " + opportunity.trigger,
       evidence: sourceEvidence(opportunity.sourceIds, known),
     });
   }
@@ -153,7 +158,8 @@ export function buildConnectionCandidates(
     });
   }
   // Neither a bare manual contact nor an untraceable inference warrants AI advice.
-  return candidates.filter((item) => item.description.trim() && item.evidence.length > 0);
+  return candidates.filter((item) => item.description.trim() && item.evidence.length > 0)
+    .filter((item) => !isDismissedConnectionCandidate(record, item));
 }
 
 function noSuggestion(reviewedAt: string, reason: string): ConnectionReview {
@@ -276,4 +282,41 @@ export async function reviewConnectionSubjects(
     throw new Error("Invalid connection review output.");
   }
   return verifyModelReview(parsed, candidates, options.reviewedAt);
+}
+
+
+function normalizedSubject(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isDismissedConnectionCandidate(record: RelationshipRecord, candidate: ConnectionCandidate) {
+  return (record.dismissedConnectionSubjects ?? []).some((dismissed) =>
+    dismissed.kind === candidate.kind &&
+    normalizedSubject(dismissed.description) === normalizedSubject(candidate.description) &&
+    candidate.evidence.every((source) => dismissed.sourceIds.includes(source.id)));
+}
+
+/** Dismiss the *idea*, not the supporting fact or original correspondence. */
+export function dismissConnectionCandidate(
+  record: RelationshipRecord,
+  candidate: ConnectionCandidate,
+  now = new Date(),
+): RelationshipRecord {
+  if (!candidate.description.trim() || !candidate.evidence.length ||
+      candidate.evidence.some((source) => !record.sources.some((known) => known.id === source.id))) {
+    throw new Error("Suggestion source no longer matches this person's saved evidence.");
+  }
+  return {
+    ...record,
+    updatedAt: now.toISOString(),
+    dismissedConnectionSubjects: [
+      ...(record.dismissedConnectionSubjects ?? []),
+      {
+        kind: candidate.kind,
+        description: candidate.description,
+        sourceIds: candidate.evidence.map((source) => source.id),
+        dismissedAt: now.toISOString(),
+      },
+    ],
+  };
 }

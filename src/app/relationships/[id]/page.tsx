@@ -14,6 +14,8 @@ import { relationshipIntentionModes } from "@/lib/relationship-record";
 import PersonConversationalCapture from "./PersonConversationalCapture";
 import QuickCaptureForm from "@/components/QuickCaptureForm";
 import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
+import { userOwnsCommitment } from "@/lib/connection-subjects";
+import MemoryCorrectionForm from "./MemoryCorrectionForm";
 import ConnectionJournal from "./ConnectionJournal";
 
 export const dynamic = "force-dynamic";
@@ -244,7 +246,10 @@ export default async function RelationshipDetailPage({
         {capturedNotes[0]?.summary && <p className="mt-2 text-sm text-stone-600">Latest remembered: {capturedNotes[0].summary}</p>}
       </section>
 
-      <ConnectionSubjectsReview relationshipId={relationship.id} />
+      <ConnectionSubjectsReview
+        key={relationship.updatedAt + ":" + (relationship.actionableMemoryFeedback?.length ?? 0) +
+          ":" + (relationship.dismissedConnectionSubjects?.length ?? 0)}
+        relationshipId={relationship.id} />
       <ConnectionJournal relationshipId={relationship.id} journeys={journeys} />
 
       <PersonConversationalCapture relationshipId={relationship.id} personLabel={relationship.personLabel} />
@@ -405,7 +410,7 @@ export default async function RelationshipDetailPage({
         <div className="rounded-2xl border border-stone-200 bg-white p-6">
           <h2 className="text-lg font-semibold">Active threads</h2>
           <p className="mt-1 text-sm text-stone-600">
-            Situations that are still moving and may create a natural future reason to engage.
+            Topics mentioned previously. They may have changed since the last conversation.
           </p>
           {relationship.activeThreads.length === 0 ? (
             <p className="mt-4 text-sm text-stone-500">No active threads captured yet.</p>
@@ -417,7 +422,7 @@ export default async function RelationshipDetailPage({
                     <h3 className="font-semibold text-stone-900">{thread.topic}</h3>
                     <p className="mt-1 text-sm text-stone-700">{thread.state}</p>
                     <p className="mt-3 text-xs font-medium text-indigo-700">
-                      Watch for: {thread.nextChangeSignal}
+                      Earlier context: {thread.nextChangeSignal}
                     </p>
                   </li>
                 ))}
@@ -443,19 +448,33 @@ export default async function RelationshipDetailPage({
       </section>
 
       {relationship.stewardshipOpportunities.length > 0 && (
-        <details className="rounded-xl border border-stone-200 bg-white p-4">
+        <details id="future-signals" className="rounded-xl border border-stone-200 bg-white p-4">
           <summary className="cursor-pointer text-sm font-medium text-stone-700">
-            Previously captured future signals ({relationship.stewardshipOpportunities.length})
+            Earlier possibilities ({relationship.stewardshipOpportunities.length})
           </summary>
           <p className="mt-2 text-xs text-stone-500">
-            Historical possibilities, not evidence that the triggering event occurred. They are separate from current connection ideas above.
+            Things mentioned in earlier conversations, not events you need to monitor or verify.
           </p>
           <ul className="mt-3 space-y-2">
             {relationship.stewardshipOpportunities.map((opportunity) => (
               <li key={opportunity.id} className="rounded-lg bg-stone-50 p-3 text-sm">
                 <p className="font-medium text-stone-900">{opportunity.reason}</p>
-                <p className="mt-1 text-stone-600">Watch for: {opportunity.trigger}</p>
-                <p className="mt-1 text-xs text-stone-500">Captured {opportunity.observedAt}</p>
+                <p className="mt-1 text-stone-600">Context mentioned: {opportunity.trigger}</p>
+                <p className="mt-1 text-xs text-stone-500">Captured {opportunity.observedAt}
+                  {opportunity.userConfirmed ? " · User-confirmed correction" : ""}
+                </p>
+                <details className="mt-2 text-xs text-stone-600">
+                  <summary className="cursor-pointer">Source information</summary>
+                  <ul className="mt-1 space-y-1">
+                    {opportunity.sourceIds.map((id) => {
+                      const source = relationship.sources.find((item) => item.id === id);
+                      return <li key={id}>{source ? source.label + " · " + source.observedAt : "Source no longer available"}</li>;
+                    })}
+                  </ul>
+                </details>
+                <MemoryCorrectionForm relationshipId={relationship.id}
+                  target={{ kind: "opportunity", id: opportunity.id }}
+                  text={opportunity.reason} context={opportunity.trigger} />
               </li>
             ))}
           </ul>
@@ -463,17 +482,61 @@ export default async function RelationshipDetailPage({
       )}
 
       {relationship.openLoops.length > 0 && (
-        <section className="rounded-2xl border border-stone-200 bg-white p-6">
+        <section id="recorded-commitments" className="rounded-2xl border border-stone-200 bg-white p-6">
           <h2 className="text-lg font-semibold">Open commitments</h2>
           <ul className="mt-4 space-y-3">
             {relationship.openLoops.map((loop) => (
               <li key={loop.commitment + loop.owner} className="rounded-xl bg-amber-50 p-4">
                 <p className="font-medium text-amber-950">{loop.commitment}</p>
-                <p className="mt-1 text-sm text-amber-800">{loop.owner} · {loop.status}</p>
+                <p className="mt-1 text-sm text-amber-800">{loop.owner} · {loop.status}
+                  {loop.userConfirmed ? " · User-confirmed correction" : ""}
+                </p>
+                <details className="mt-2 text-xs text-stone-600">
+                  <summary className="cursor-pointer">Source information</summary>
+                  <ul className="mt-1 space-y-1">
+                    {loop.sourceIds.map((id) => {
+                      const source = relationship.sources.find((item) => item.id === id);
+                      return <li key={id}>{source ? source.label + " · " + source.observedAt : "Source no longer available"}</li>;
+                    })}
+                  </ul>
+                </details>
+                <MemoryCorrectionForm relationshipId={relationship.id}
+                  target={{ kind: "open-loop", commitment: loop.commitment, owner: loop.owner }}
+                  text={loop.commitment} context={loop.owner}
+                  canMarkDone={userOwnsCommitment(loop.owner, process.env.RELATIONSHIP_USER_LABEL ?? "Jason")} />
               </li>
             ))}
           </ul>
         </section>
+      )}
+
+      {(relationship.actionableMemoryFeedback?.length ?? 0) > 0 && (
+        <details className="rounded-2xl border border-stone-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-medium text-stone-800">
+            Memory corrections ({relationship.actionableMemoryFeedback?.length})
+          </summary>
+          <p className="mt-2 text-xs text-stone-600">
+            The original source remains recorded here. Retired memories no longer appear in active attention.
+          </p>
+          <ol className="mt-3 space-y-3">
+            {relationship.actionableMemoryFeedback?.map((item, index) => (
+              <li key={item.key + ":" + item.decidedAt + ":" + index} className="rounded-lg bg-stone-50 p-3 text-sm">
+                <p className="font-medium text-stone-900">{item.originalText}</p>
+                <p className="mt-1 text-xs text-stone-600">{item.disposition} · {item.decidedAt.slice(0, 10)}</p>
+                {item.replacement && (
+                  <p className="mt-1 text-sm text-stone-700">
+                    User-confirmed replacement: {item.replacement.text}
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-stone-600">
+                  Original source{item.sourceIds.length === 1 ? "" : "s"}:{" "}
+                  {item.sourceIds.map((id) => relationship.sources.find((source) => source.id === id)?.label ??
+                    "Source no longer available").join(", ")}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </details>
       )}
 
       {capturedNotes.length > 0 && (
