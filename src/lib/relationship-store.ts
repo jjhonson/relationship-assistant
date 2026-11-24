@@ -17,6 +17,7 @@ import type { RelationshipIdentity, RelationshipRecord } from "./relationship-re
 import { createPersonalMoment, type PersonalMoment, type PersonalMomentInput } from "./personal-moment";
 import { randomUUID } from "node:crypto";
 import { buildConnectionCandidates } from "./connection-subjects";
+import { looksLikePastedConversation } from "./conversational-capture";
 import {
   addConnectionEvent, makeConnectionJourney, type ConnectionJourney,
   type ConfirmedConnectionEvent,
@@ -320,47 +321,108 @@ export async function startConnectionJourney(
   });
 }
 
-export async function saveConfirmedConnectionEvent(
+/** Save a reviewed update containing several actually reported events in one atomic write. */
+export async function saveConfirmedConnectionEvents(
   relationshipId: string,
   journeyId: string,
-  input: ConfirmedConnectionEvent,
+  inputs: ConfirmedConnectionEvent[],
   today: string,
+  confirmationId: string,
 ) {
+  if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > 5) {
+    throw new Error("Choose one to five events to record.");
+  }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(confirmationId)) {
+    throw new Error("Invalid review confirmation ID.");
+  }
   return mutateStore((store) => {
     const index = store.connectionJourneys.findIndex(
       (item) => item.id === journeyId && item.relationshipId === relationshipId,
     );
     const recordIndex = store.relationships.findIndex((item) => item.id === relationshipId);
     if (index < 0 || recordIndex < 0) throw new Error("Connection or person not found.");
-    const { journey, event } = addConnectionEvent(store.connectionJourneys[index], input, today);
-    store.connectionJourneys[index] = journey;
 
-    // A draft or schedule is not a completed conversation. Only an
-    // explicitly user-confirmed sent/reply/occurred event establishes contact.
-    if (["sent", "reply_received", "interaction_occurred"].includes(event.kind)) {
-      const record = store.relationships[recordIndex];
-      const lastInteractionAt = record.lastInteractionAt && record.lastInteractionAt > event.happenedOn
-        ? record.lastInteractionAt : event.happenedOn;
-      let updated = { ...record, lastInteractionAt, updatedAt: event.recordedAt };
-      if ((event.kind === "reply_received" || event.kind === "interaction_occurred") && event.outcome) {
-        const sourceId = "connection-event:" + event.id;
-        const source = {
-          id: sourceId, source: "manual" as const,
-          observedAt: event.happenedOn,
-          label: "User-confirmed connection outcome (not externally verified)",
-        };
-        updated = {
-          ...updated,
-          sources: [...updated.sources, source],
-          durableFacts: [...updated.durableFacts, {
-            id: randomUUID(), category: "Personal" as const, label: "Connection outcome",
-            value: event.outcome, sourceIds: [sourceId],
-            firstObservedAt: event.happenedOn, lastObservedAt: event.happenedOn,
-          }],
-        };
-      }
-      store.relationships[recordIndex] = updated;
+    const existing = store.connectionJourneys[index].events
+      .filter((event) => event.confirmationId === confirmationId);
+    if (existing.length) {
+      // A retry after uncertain network feedback must not duplicate activity
+      // or relationship facts. Refuse reusing an ID for different material.
+      const same = existing.length === inputs.length && existing.every((event, i) =>
+        event.kind === inputs[i]?.kind && event.happenedOn === inputs[i]?.happenedOn &&
+        event.summary === inputs[i]?.summary.trim() &&
+        event.outcome === inputs[i]?.outcome.trim());
+      if (!same) throw new Error("This confirmation ID was already used for a different update.");
+      return { journey: store.connectionJourneys[index], events: existing, duplicate: true };
     }
-    return { journey, event };
+
+    // Build in memory before mutating the store. If a later event has an invalid
+    // date/status, no partial events or relationship context can be written.
+    let journey = store.connectionJourneys[index];
+    const applied = [];
+    for (const input of inputs) {
+      if (!input || typeof input.summary !== "string" || typeof input.outcome !== "string" ||
+          typeof input.happenedOn !== "string" || typeof input.kind !== "string" ||
+          looksLikePastedConversation(input.summary) || looksLikePastedConversation(input.outcome)) {
+        throw new Error("Use short original summaries, not pasted third-party conversations.");
+      }
+      const next = addConnectionEvent(journey, input, today);
+      if (applied.length && next.event.happenedOn < applied[applied.length - 1].happenedOn) {
+        throw new Error("Review event order: record the earliest action first.");
+      }
+      const tagged = { ...next.event, confirmationId };
+      journey = { ...next.journey, events: [...next.journey.events.slice(0, -1), tagged] };
+      applied.push(tagged);
+    }
+
+    let updated = store.relationships[recordIndex];
+    for (const event of applied) {
+      // Drafting and scheduling are not evidence of contact.
+      if (!["sent", "reply_received", "interaction_occurred"].includes(event.kind)) continue;
+      const lastInteractionAt = updated.lastInteractionAt && updated.lastInteractionAt > event.happenedOn
+        ? updated.lastInteractionAt : event.happenedOn;
+      updated = { ...updated, lastInteractionAt, updatedAt: event.recordedAt };
+
+      // Only actually reported replies or completed interactions can teach
+      // sourced person context. Preserve aspirations as stated, never upgraded.
+      if ((event.kind === "reply_received" || event.kind === "interaction_occurred") && event.outcome) {
+        const key = event.outcome.trim().toLowerCase().replace(/\s+/g, " ");
+        const alreadyLearned = updated.durableFacts.some((fact) =>
+          fact.label === "Connection outcome" &&
+          fact.value.trim().toLowerCase().replace(/\s+/g, " ") === key);
+        if (!alreadyLearned) {
+          const sourceId = "connection-event:" + event.id;
+          updated = {
+            ...updated,
+            sources: [...updated.sources, {
+              id: sourceId, source: "manual" as const,
+              observedAt: event.happenedOn,
+              label: "User-confirmed connection outcome (not externally verified)",
+            }],
+            durableFacts: [...updated.durableFacts, {
+              id: randomUUID(), category: "Personal" as const, label: "Connection outcome",
+              value: event.outcome, sourceIds: [sourceId],
+              firstObservedAt: event.happenedOn, lastObservedAt: event.happenedOn,
+            }],
+          };
+        }
+      }
+    }
+
+    store.connectionJourneys[index] = journey;
+    store.relationships[recordIndex] = updated;
+    return { journey, events: applied, duplicate: false };
   });
+}
+
+/** Existing single-event callers retain their old result shape and behavior. */
+export async function saveConfirmedConnectionEvent(
+  relationshipId: string,
+  journeyId: string,
+  input: ConfirmedConnectionEvent,
+  today: string,
+) {
+  const result = await saveConfirmedConnectionEvents(
+    relationshipId, journeyId, [input], today, randomUUID(),
+  );
+  return { journey: result.journey, event: result.events[0] };
 }

@@ -6,7 +6,7 @@
 
 We have interesting experiences, conversations and ideas. We also know people who might appreciate them. Relationship Assistant explores the missing step between remembering those things and actually connecting with someone. It should help with the work, not manufacture obligations or send messages on anyone's behalf.
 
-> **Status:** Active, public development. This is a personal-alpha prototype, not a deployed service. The proposed Home experience reads the same private local store as `/relationships`, replacing the old static demo contact list, but the store is **not yet a durable database**. No real people's data or secrets belong in this repository.
+> **Status:** Active, public development. This is a personal-alpha prototype, not a deployed service. Home reads the same private local store as `/relationships`, replacing the old static demo contact list, but the store is **not yet a durable database**. No real people's data or secrets belong in this repository.
 
 ## What's working
 
@@ -15,7 +15,8 @@ We have interesting experiences, conversations and ideas. We also know people wh
 - **Cumulative, inspectable memory:** preserve dated facts, source links, unknowns and careful identity matching.
 - **Connected people:** link evidence-backed related people and show appropriate shared household context without inventing a conversation with the other person.
 - **Control:** review and correct an inferred name or connection. No autonomous outreach.
-- **Alpha Home (in this PR):** source-backed recorded commitments and threads to review (not automatic AI advice), actual saved people, and a conversational input that asks for missing context before choosing a safe save path.
+- **Alpha Home (merged):** source-backed recorded commitments and threads to review (not automatic AI advice), actual saved people, and a conversational input that asks for missing context before choosing a safe save path.
+- **Connection history (merged):** track a user-selected or self-initiated connection; distinguish considering, prepared, sent, replied, scheduled and occurred; record a human-confirmed outcome without any outbound messages.
 
 ## What we're building next
 
@@ -65,6 +66,14 @@ For cards and group photos, the prompt distinguishes the intended relationship f
 **Conversational capture on an existing person's page (merged):** Open a saved relationship, type natural context or paste a chat, email, transcript or personal recollection into **one text field**, then click **Review what I understood**. The configured AI model (`store:false`) proposes whether this is a pasted conversation, your own note about that person, or your own private moment. It may infer the source/date from an explicit introduction or email header; when a conversation date is genuinely unknown, the interface asks instead of inventing one. You can correct the interpretation before explicitly confirming. Pasted third-party conversation text is **not stored verbatim**; only dated, source-aware structured memory is retained. Deliberate user notes can retain original wording; personal moments remain private by default. The person page supplies the identity anchor; we don't automatically merge other people. Photo capture stays available separately, and the global People page still has the earlier quick-capture experience. **This PR adds the same cautious review-first approach to Home**, using unambiguous local identity hints and explicit person selection when necessary. Conversations must be anchored to an existing person; an authored note can begin a new person through the existing global capture path, and private personal moments require no person. Home does not run a model automatically on page load. Automatic cross-channel imports and per-fact acceptance/correction are later alpha work.
 
 **Privacy boundary:** User-typed notes and text extracted from deliberately selected photos are intentionally retained in the local private JSON store. The original photo is held only for the immediate request and is not retained by this app. Selected images and/or text are sent only to the configured OpenAI Responses API with `store: false`. Raw transcripts supplied to the separate conversation-learning feature remain non-persistent. Do not commit `.data/`, `.env.local`, private notes, photos, or API keys.
+
+## Connection updates (draft personal-alpha improvement)
+
+On a saved relationship, **Connection activity** stores a dated, user-reported record of what actually happened. It is not a verified email or calendar history. A saved connection can originate from an evidence-backed suggestion or an independent subject; a suggestion alone means only **Considering**.
+
+[Issue #69](https://github.com/jjhonson/relationship-assistant/issues/69) introduces a simpler interaction in its own draft PR: one narrative such as "I sent Tom the article yesterday. He replied today, and said he hopes to try an open mic someday" can propose multiple distinct events. The user can correct, reorder or remove each proposal, then save them **atomically with one confirmation**. The prior single-event history remains readable. A confirmation ID avoids duplicating events when a network response is uncertain. Only explicit action dates and short confirmed summaries/outcomes are stored, not the original input or third-party transcripts. The model runs only on deliberate review with provider storage disabled. No actual contact is made or verified by the app.
+
+This is still local development with an independently unrecoverable JSON database. It is not a replacement for importing a third-party conversation via the existing structured-only capture path, nor does it score relationship quality. Follow-up work includes memory corrections, independent backup/recovery and a deliberate UX design pass.
 
 ## Codespaces dev start/stop (run on the Mac host)
 

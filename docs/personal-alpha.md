@@ -22,7 +22,8 @@ Relationship Assistant aims to reduce that work without taking the human part ou
 - Intentional photo capture with extracted text and visual observations kept separate from user input; the original image is not retained.
 - Cumulative, source-aware relationship records, explicit identity ambiguity resolution, and limited correction.
 - Explicit connected-person links and potential household context shared across profiles with clear attribution and no fabricated interaction.
-- Fictional automated tests and an existing local-development app. The old static sample-contact Home is being replaced with saved people and a conservative, read-only attention view in the current Home PR.
+- Fictional automated tests and an existing local-development app. Home now uses saved people and a conservative, read-only attention view.
+- A first fictional browser-tested **Connect → Learn** loop, with user-confirmed action dates and outcomes, is merged. The next draft improves the single-entry review when several events occurred together.
 
 These features are not a deployed, hosted product. The current relationship store is a private local JSON file in the development environment, which **is not yet suitable as a durable personal system of record**.
 
@@ -34,7 +35,7 @@ These features are not a deployed, hosted product. The current relationship stor
 | Person-first connection | [#53](https://github.com/jjhonson/relationship-assistant/issues/53), with lessons from draft PR #42 | Open a person and identify a specific, evidenced subject or useful gesture, or no action |
 | Durable memory | [#54](https://github.com/jjhonson/relationship-assistant/issues/54) | Survive environment loss and schema upgrades with tested backup and recovery |
 | Moment-first matching | Follow-up under [#52](https://github.com/jjhonson/relationship-assistant/issues/52) | Save a meaningful experience and discover relevant people without inventing a match |
-| Follow-through and learning | Follow-up under [#52](https://github.com/jjhonson/relationship-assistant/issues/52); memory corrections [#43](https://github.com/jjhonson/relationship-assistant/issues/43) | Preserve what was actually done and learned; do not confuse copied drafts with sent messages |
+| Follow-through and learning | [#67](https://github.com/jjhonson/relationship-assistant/issues/67), [#69](https://github.com/jjhonson/relationship-assistant/issues/69), and corrections [#43](https://github.com/jjhonson/relationship-assistant/issues/43) | One reviewed account can record several explicitly reported events without inventing intermediate steps; save source-backed outcomes, not raw transcripts |
 | Project quality | [#55](https://github.com/jjhonson/relationship-assistant/issues/55) | An approachable public project with honest status, CI and navigable decisions |
 
 ## Personal-alpha acceptance test
