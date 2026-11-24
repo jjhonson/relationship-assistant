@@ -61,6 +61,30 @@ export type StewardshipOpportunity = {
   trigger: string;
   sourceIds: string[];
   observedAt: string;
+  // A user correction outranks later inference from older sources.
+  userConfirmed?: true;
+};
+
+export type ActionableMemoryDisposition = "Done" | "Not relevant" | "Incorrect" | "Edit";
+export type ActionableMemoryKind = "open-loop" | "opportunity";
+export type ActionableMemoryFeedback = {
+  kind: ActionableMemoryKind;
+  key: string;
+  disposition: ActionableMemoryDisposition;
+  originalText: string;
+  originalContext: string;
+  sourceIds: string[];
+  decidedAt: string;
+  replacement?: { text: string; context: string };
+};
+export type ActionableMemoryTarget =
+  | { kind: "open-loop"; commitment: string; owner: string }
+  | { kind: "opportunity"; id: string };
+export type DismissedConnectionSubject = {
+  kind: "fact" | "thread" | "reason" | "opportunity" | "commitment";
+  description: string;
+  sourceIds: string[];
+  dismissedAt: string;
 };
 
 export type RelationshipLabelSuggestion<T extends string> = {
@@ -107,7 +131,11 @@ export type RelationshipRecord = {
     owner: string;
     status: "Open" | "Overdue" | "Unclear";
     sourceIds: string[];
+    userConfirmed?: true;
   }>;
+  // Missing in older local JSON records.
+  actionableMemoryFeedback?: ActionableMemoryFeedback[];
+  dismissedConnectionSubjects?: DismissedConnectionSubject[];
   reasonsToEngage: Array<{
     reason: string;
     sourceIds: string[];
@@ -181,6 +209,8 @@ export function createRelationshipRecord(
       status: loop.status,
       sourceIds: loop.evidenceIds,
     })),
+    actionableMemoryFeedback: [],
+    dismissedConnectionSubjects: [],
     reasonsToEngage: inference.reasonsToEngage.map((reason) => ({
       reason: reason.reason,
       sourceIds: reason.evidenceIds,
@@ -231,6 +261,8 @@ export function createManualRelationshipRecord(
       evidenceIds: [],
     },
     openLoops: [],
+    actionableMemoryFeedback: [],
+    dismissedConnectionSubjects: [],
     reasonsToEngage: [],
     unknowns: ["Historical relationship evidence has not been reconstructed yet."],
     confidence: "Low",
@@ -292,6 +324,8 @@ export function createDiscoveredRelationshipRecord(
       evidenceIds: [source.id],
     },
     openLoops: [],
+    actionableMemoryFeedback: [],
+    dismissedConnectionSubjects: [],
     reasonsToEngage: [],
     unknowns: [
       "Message content and full relationship history have not been reconstructed.",
@@ -361,6 +395,107 @@ export function replaceRelationshipIntention(
   };
 }
 
+/**
+ * Retire or replace an individually identified actionable memory.
+ * Original source IDs remain in the audit trail even when the active
+ * item is hidden. Corrected replacements are explicitly user-confirmed.
+ */
+export function correctActionableMemory(
+  record: RelationshipRecord,
+  target: ActionableMemoryTarget,
+  disposition: ActionableMemoryDisposition,
+  replacement: { text?: string; context?: string } = {},
+  now = new Date(),
+): RelationshipRecord {
+  if (!["Done", "Not relevant", "Incorrect", "Edit"].includes(disposition)) {
+    throw new Error("Unsupported memory correction.");
+  }
+
+  let key: string;
+  let originalText: string;
+  let originalContext: string;
+  let sourceIds: string[];
+  let status: "Open" | "Overdue" | "Unclear" = "Open";
+
+  if (target.kind === "open-loop") {
+    const current = record.openLoops.find((item) =>
+      actionableKey("open-loop", item.commitment, item.owner) ===
+      actionableKey("open-loop", target.commitment, target.owner));
+    if (!current) throw new Error("Actionable memory not found.");
+    key = actionableKey("open-loop", current.commitment, current.owner);
+    originalText = current.commitment;
+    originalContext = current.owner;
+    sourceIds = [...current.sourceIds];
+    status = current.status;
+  } else if (target.kind === "opportunity") {
+    const current = record.stewardshipOpportunities.find((item) => item.id === target.id);
+    if (!current) throw new Error("Actionable memory not found.");
+    key = actionableKey("opportunity", current.reason, current.trigger);
+    originalText = current.reason;
+    originalContext = current.trigger;
+    sourceIds = [...current.sourceIds];
+  } else {
+    throw new Error("Unknown actionable memory target.");
+  }
+
+  const text = replacement.text?.trim() ?? "";
+  const context = replacement.context?.trim() || originalContext;
+  if (disposition === "Edit" && (text.length < 4 || text.length > 500 ||
+      context.length < 1 || context.length > 240 ||
+      (normalize(text) === normalize(originalText) && normalize(context) === normalize(originalContext)))) {
+    throw new Error("Provide a meaningful corrected description (4–500 characters) or context.");
+  }
+  const timestamp = now.toISOString();
+  const feedback: ActionableMemoryFeedback = {
+    kind: target.kind, key, disposition,
+    originalText, originalContext, sourceIds,
+    decidedAt: timestamp,
+    ...(disposition === "Edit" ? { replacement: { text, context } } : {}),
+  };
+  const newSource: RelationshipSource | null = disposition === "Edit" ? {
+    id: "manual-correction:" + randomUUID(),
+    source: "manual", observedAt: timestamp.slice(0, 10),
+    label: "User-confirmed memory correction",
+  } : null;
+  const openLoops = record.openLoops.filter(
+    (item) => actionableKey("open-loop", item.commitment, item.owner) !== key);
+  const opportunities = record.stewardshipOpportunities.filter(
+    (item) => actionableKey("opportunity", item.reason, item.trigger) !== key);
+
+  if (newSource) {
+    if (target.kind === "open-loop") {
+      openLoops.push({
+        commitment: text, owner: context, status, sourceIds: [newSource.id], userConfirmed: true,
+      });
+    } else {
+      opportunities.push({
+        id: randomUUID(), reason: text, trigger: context,
+        sourceIds: [newSource.id], observedAt: timestamp.slice(0, 10), userConfirmed: true,
+      });
+    }
+  }
+  return {
+    ...record,
+    updatedAt: timestamp,
+    actionableMemoryFeedback: [...(record.actionableMemoryFeedback ?? []), feedback],
+    openLoops,
+    stewardshipOpportunities: opportunities,
+    sources: newSource ? [...record.sources, newSource] : record.sources,
+  };
+}
+
+function actionableKey(kind: ActionableMemoryKind, content: string, context: string) {
+  return JSON.stringify([kind, normalize(content), normalize(context)]);
+}
+
+function wasActionableMemoryRetired(
+  record: RelationshipRecord, key: string, sourceId: string,
+) {
+  return (record.actionableMemoryFeedback ?? []).some((feedback) =>
+    feedback.key === key &&
+    (feedback.disposition !== "Done" || feedback.sourceIds.includes(sourceId)));
+}
+
 export function mergeInteractionIntoRelationship(
   record: RelationshipRecord,
   extraction: InteractionExtraction,
@@ -382,16 +517,31 @@ export function mergeInteractionIntoRelationship(
     ),
     tags: unique([...record.tags, ...extraction.tags]),
     currentState: "Active",
-    openLoops: reconcileOpenLoops(record.openLoops, extraction.openLoops, source),
+    openLoops: [
+      ...record.openLoops.filter((item) => item.userConfirmed === true),
+      ...reconcileOpenLoops(record.openLoops.filter((item) => !item.userConfirmed), extraction.openLoops, source)
+        .filter((item) => !wasActionableMemoryRetired(
+          record, actionableKey("open-loop", item.commitment, item.owner), source.id))
+        .filter((item) => !record.openLoops.some((saved) => saved.userConfirmed &&
+          actionableKey("open-loop", saved.commitment, saved.owner) ===
+          actionableKey("open-loop", item.commitment, item.owner))),
+    ],
     unknowns: unique([...record.unknowns, ...extraction.unknowns]),
     durableFacts: mergeFacts(record.durableFacts, extraction.durableFacts, source),
     activeThreads: mergeThreads(record.activeThreads, extraction.activeThreads, source),
-    stewardshipOpportunities: extraction.stewardshipOpportunities.map((item) => ({
-      id: randomUUID(),
-      ...item,
-      sourceIds: [source.id],
-      observedAt: source.observedAt,
-    })),
+    stewardshipOpportunities: [
+      ...record.stewardshipOpportunities.filter((item) => item.userConfirmed === true),
+      ...extraction.stewardshipOpportunities
+        .filter((item) => !wasActionableMemoryRetired(
+          record, actionableKey("opportunity", item.reason, item.trigger), source.id))
+        .filter((item) => !record.stewardshipOpportunities.some((saved) => saved.userConfirmed &&
+          actionableKey("opportunity", saved.reason, saved.trigger) ===
+          actionableKey("opportunity", item.reason, item.trigger)))
+        .map((item) => ({
+          id: randomUUID(), ...item, sourceIds: [source.id],
+          observedAt: source.observedAt,
+        })),
+    ],
     sources: mergeByKey(record.sources, [source], (item) => item.id),
   };
 }

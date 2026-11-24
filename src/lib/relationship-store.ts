@@ -13,10 +13,11 @@ import {
   type CaptureEvent,
   type CaptureExtraction,
 } from "./capture";
-import type { RelationshipIdentity, RelationshipRecord } from "./relationship-record";
+import { correctActionableMemory, type ActionableMemoryTarget,
+  type ActionableMemoryDisposition, type RelationshipIdentity, type RelationshipRecord } from "./relationship-record";
 import { createPersonalMoment, type PersonalMoment, type PersonalMomentInput } from "./personal-moment";
 import { randomUUID } from "node:crypto";
-import { buildConnectionCandidates } from "./connection-subjects";
+import { buildConnectionCandidates, dismissConnectionCandidate } from "./connection-subjects";
 import { looksLikePastedConversation } from "./conversational-capture";
 import {
   addConnectionEvent, makeConnectionJourney, type ConnectionJourney,
@@ -425,4 +426,36 @@ export async function saveConfirmedConnectionEvent(
     relationshipId, journeyId, [input], today, randomUUID(),
   );
   return { journey: result.journey, event: result.events[0] };
+}
+
+
+/** Atomic, source-preserving correction, never a read-then-blind-overwrite. */
+export async function correctSavedActionableMemory(
+  relationshipId: string,
+  target: ActionableMemoryTarget,
+  decision: ActionableMemoryDisposition,
+  replacement: { text?: string; context?: string } = {},
+) {
+  return mutateStore((store) => {
+    const index = store.relationships.findIndex((record) => record.id === relationshipId);
+    if (index < 0) throw new Error("Relationship not found.");
+    const updated = correctActionableMemory(store.relationships[index], target, decision, replacement);
+    store.relationships[index] = updated;
+    return updated;
+  });
+}
+
+/** Declining a suggestion is not the same as denying its underlying memory. */
+export async function dismissSavedConnectionSuggestion(relationshipId: string, basisId: string, userLabel: string) {
+  return mutateStore((store) => {
+    const index = store.relationships.findIndex((record) => record.id === relationshipId);
+    if (index < 0) throw new Error("Relationship not found.");
+    const person = store.relationships[index];
+    const candidate = buildConnectionCandidates(person, userLabel)
+      .find((item) => item.id === basisId);
+    if (!candidate) throw new Error("The suggestion is no longer available.");
+    const updated = dismissConnectionCandidate(person, candidate);
+    store.relationships[index] = updated;
+    return updated;
+  });
 }

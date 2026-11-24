@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { beginConnection } from "../connection-actions";
+import { dismissRelationshipConnectionIdea } from "../correction-actions";
 import { reviewRelationshipConnection } from "../actions";
 import type { ConnectionReview } from "@/lib/connection-subjects";
 
@@ -12,6 +13,7 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
   const [pending, startTransition] = useTransition();
   const [tracking, startTracking] = useTransition();
   const [tracked, setTracked] = useState<string[]>([]);
+  const [dismissing, startDismiss] = useTransition();
   const [review, setReview] = useState<ConnectionReview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,6 +26,26 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
         router.refresh();
       } catch {
         setError("Could not start tracking this connection. No contact was made.");
+      }
+    });
+  }
+
+  function dismissSuggestion(basisId: string) {
+    setError(null);
+    startDismiss(async () => {
+      try {
+        await dismissRelationshipConnectionIdea(relationshipId, basisId);
+        setReview((current) => {
+          if (!current || current.kind !== "suggestions") return current;
+          const suggestions = current.suggestions.filter((item) => item.basisId !== basisId);
+          return suggestions.length ? { ...current, suggestions } : {
+            ...current, kind: "no-suggestion", suggestions: [],
+            noSuggestionReason: "No additional suggestions from this review. Dismissed ideas stay dismissed for their original evidence.",
+          };
+        });
+        router.refresh();
+      } catch {
+        setError("Could not dismiss this suggestion. Nothing was changed.");
       }
     });
   }
@@ -122,6 +144,21 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
                   {tracked.includes(item.basisId) && (
                     <a href="#connection-activity" className="text-sm font-medium text-indigo-700 underline">
                       View connection activity
+                    </a>
+                  )}
+                  <button type="button" disabled={dismissing || tracking}
+                    onClick={() => dismissSuggestion(item.basisId)}
+                    className="text-sm font-medium text-stone-600 hover:underline disabled:opacity-50">
+                    {dismissing ? "Saving…" : "Not useful"}
+                  </button>
+                  {item.basisId.startsWith("commitment:") && (
+                    <a href="#recorded-commitments" className="text-sm font-medium text-indigo-700 hover:underline">
+                      Correct saved commitment
+                    </a>
+                  )}
+                  {item.basisId.startsWith("opportunity:") && (
+                    <a href="#future-signals" className="text-sm font-medium text-indigo-700 hover:underline">
+                      Correct saved future signal
                     </a>
                   )}
                 </div>

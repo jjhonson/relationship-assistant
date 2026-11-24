@@ -153,7 +153,8 @@ export function buildConnectionCandidates(
     });
   }
   // Neither a bare manual contact nor an untraceable inference warrants AI advice.
-  return candidates.filter((item) => item.description.trim() && item.evidence.length > 0);
+  return candidates.filter((item) => item.description.trim() && item.evidence.length > 0)
+    .filter((item) => !isDismissedConnectionCandidate(record, item));
 }
 
 function noSuggestion(reviewedAt: string, reason: string): ConnectionReview {
@@ -276,4 +277,41 @@ export async function reviewConnectionSubjects(
     throw new Error("Invalid connection review output.");
   }
   return verifyModelReview(parsed, candidates, options.reviewedAt);
+}
+
+
+function normalizedSubject(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isDismissedConnectionCandidate(record: RelationshipRecord, candidate: ConnectionCandidate) {
+  return (record.dismissedConnectionSubjects ?? []).some((dismissed) =>
+    dismissed.kind === candidate.kind &&
+    normalizedSubject(dismissed.description) === normalizedSubject(candidate.description) &&
+    candidate.evidence.every((source) => dismissed.sourceIds.includes(source.id)));
+}
+
+/** Dismiss the *idea*, not the supporting fact or original correspondence. */
+export function dismissConnectionCandidate(
+  record: RelationshipRecord,
+  candidate: ConnectionCandidate,
+  now = new Date(),
+): RelationshipRecord {
+  if (!candidate.description.trim() || !candidate.evidence.length ||
+      candidate.evidence.some((source) => !record.sources.some((known) => known.id === source.id))) {
+    throw new Error("Suggestion source no longer matches this person's saved evidence.");
+  }
+  return {
+    ...record,
+    updatedAt: now.toISOString(),
+    dismissedConnectionSubjects: [
+      ...(record.dismissedConnectionSubjects ?? []),
+      {
+        kind: candidate.kind,
+        description: candidate.description,
+        sourceIds: candidate.evidence.map((source) => source.id),
+        dismissedAt: now.toISOString(),
+      },
+    ],
+  };
 }

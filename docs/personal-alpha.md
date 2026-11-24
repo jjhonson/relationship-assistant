@@ -36,6 +36,7 @@ These features are not a deployed, hosted product. The current relationship stor
 | Durable memory | [#54](https://github.com/jjhonson/relationship-assistant/issues/54) | Survive environment loss and schema upgrades with tested backup and recovery |
 | Moment-first matching | Follow-up under [#52](https://github.com/jjhonson/relationship-assistant/issues/52) | Save a meaningful experience and discover relevant people without inventing a match |
 | Follow-through and learning | [#67](https://github.com/jjhonson/relationship-assistant/issues/67), [#69](https://github.com/jjhonson/relationship-assistant/issues/69), and corrections [#43](https://github.com/jjhonson/relationship-assistant/issues/43) | One reviewed account can record several explicitly reported events without inventing intermediate steps; save source-backed outcomes, not raw transcripts |
+| Correcting actionable memories | [#43](https://github.com/jjhonson/relationship-assistant/issues/43) | Complete, dismiss, reject or correct open commitments and future signals without losing sources; prevent the same old evidence from recreating rejected prompts |
 | Project quality | [#55](https://github.com/jjhonson/relationship-assistant/issues/55) | An approachable public project with honest status, CI and navigable decisions |
 
 ## Personal-alpha acceptance test
