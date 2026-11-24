@@ -70,5 +70,22 @@ $test$;
 select 'fictional round-trip passed' as result;
 rollback;
 
+-- Invalid imported structures must fail, with no partial records left behind.
+do $test$
+declare rejected boolean := false;
+begin
+  begin
+    perform ra_private.import_store('11111111-1111-4111-8111-111111111111'::uuid,
+      '{"version":1,"relationships":{}}'::jsonb);
+  exception when raise_exception then rejected := true;
+  end;
+  if not rejected then raise exception 'Malformed document unexpectedly accepted'; end if;
+  if (select count(*) from ra_private.datasets) != 0 then
+    raise exception 'Invalid import left a dataset behind';
+  end if;
+end
+$test$;
+select 'malformed input rejected without changes' as result;
+
 -- After execution, separately verify counts are unchanged and
 -- that no test owner namespace remains. Do not run against real data.
