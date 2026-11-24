@@ -14,6 +14,7 @@ import { relationshipIntentionModes } from "@/lib/relationship-record";
 import PersonConversationalCapture from "./PersonConversationalCapture";
 import QuickCaptureForm from "@/components/QuickCaptureForm";
 import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
+import { userOwnsCommitment } from "@/lib/connection-subjects";
 import MemoryCorrectionForm from "./MemoryCorrectionForm";
 import ConnectionJournal from "./ConnectionJournal";
 
@@ -409,7 +410,7 @@ export default async function RelationshipDetailPage({
         <div className="rounded-2xl border border-stone-200 bg-white p-6">
           <h2 className="text-lg font-semibold">Active threads</h2>
           <p className="mt-1 text-sm text-stone-600">
-            Situations that are still moving and may create a natural future reason to engage.
+            Topics mentioned previously. They may have changed since the last conversation.
           </p>
           {relationship.activeThreads.length === 0 ? (
             <p className="mt-4 text-sm text-stone-500">No active threads captured yet.</p>
@@ -421,7 +422,7 @@ export default async function RelationshipDetailPage({
                     <h3 className="font-semibold text-stone-900">{thread.topic}</h3>
                     <p className="mt-1 text-sm text-stone-700">{thread.state}</p>
                     <p className="mt-3 text-xs font-medium text-indigo-700">
-                      Watch for: {thread.nextChangeSignal}
+                      Earlier context: {thread.nextChangeSignal}
                     </p>
                   </li>
                 ))}
@@ -449,16 +450,16 @@ export default async function RelationshipDetailPage({
       {relationship.stewardshipOpportunities.length > 0 && (
         <details id="future-signals" className="rounded-xl border border-stone-200 bg-white p-4">
           <summary className="cursor-pointer text-sm font-medium text-stone-700">
-            Previously captured future signals ({relationship.stewardshipOpportunities.length})
+            Earlier possibilities ({relationship.stewardshipOpportunities.length})
           </summary>
           <p className="mt-2 text-xs text-stone-500">
-            Historical possibilities, not evidence that the triggering event occurred. They are separate from current connection ideas above.
+            Things mentioned in earlier conversations, not events you need to monitor or verify.
           </p>
           <ul className="mt-3 space-y-2">
             {relationship.stewardshipOpportunities.map((opportunity) => (
               <li key={opportunity.id} className="rounded-lg bg-stone-50 p-3 text-sm">
                 <p className="font-medium text-stone-900">{opportunity.reason}</p>
-                <p className="mt-1 text-stone-600">Watch for: {opportunity.trigger}</p>
+                <p className="mt-1 text-stone-600">Context mentioned: {opportunity.trigger}</p>
                 <p className="mt-1 text-xs text-stone-500">Captured {opportunity.observedAt}
                   {opportunity.userConfirmed ? " · User-confirmed correction" : ""}
                 </p>
@@ -501,7 +502,8 @@ export default async function RelationshipDetailPage({
                 </details>
                 <MemoryCorrectionForm relationshipId={relationship.id}
                   target={{ kind: "open-loop", commitment: loop.commitment, owner: loop.owner }}
-                  text={loop.commitment} context={loop.owner} />
+                  text={loop.commitment} context={loop.owner}
+                  canMarkDone={userOwnsCommitment(loop.owner, process.env.RELATIONSHIP_USER_LABEL ?? "Jason")} />
               </li>
             ))}
           </ul>

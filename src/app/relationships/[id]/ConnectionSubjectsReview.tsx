@@ -3,86 +3,71 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { beginConnection } from "../connection-actions";
 import { dismissRelationshipConnectionIdea } from "../correction-actions";
 import { reviewRelationshipConnection } from "../actions";
 import type { ConnectionReview } from "@/lib/connection-subjects";
 
+/** Conversation context, not a queue of tasks to track. */
 export default function ConnectionSubjectsReview({ relationshipId }: { relationshipId: string }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [tracking, startTracking] = useTransition();
-  const [tracked, setTracked] = useState<string[]>([]);
-  const [dismissing, startDismiss] = useTransition();
   const [review, setReview] = useState<ConnectionReview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reviewing, beginReview] = useTransition();
+  const [dismissing, beginDismiss] = useTransition();
 
-  function track(subject: string, basisId: string) {
+  function requestReview() {
+    setReview(null);
     setError(null);
-    startTracking(async () => {
+    beginReview(async () => {
       try {
-        await beginConnection(relationshipId, subject, basisId);
-        setTracked((current) => [...current, basisId]);
-        router.refresh();
+        setReview(await reviewRelationshipConnection(relationshipId));
       } catch {
-        setError("Could not start tracking this connection. No contact was made.");
+        setError("The review could not be completed. Check the local model configuration and try again.");
       }
     });
   }
 
   function dismissSuggestion(basisId: string) {
     setError(null);
-    startDismiss(async () => {
+    beginDismiss(async () => {
       try {
         await dismissRelationshipConnectionIdea(relationshipId, basisId);
         setReview((current) => {
           if (!current || current.kind !== "suggestions") return current;
           const suggestions = current.suggestions.filter((item) => item.basisId !== basisId);
           return suggestions.length ? { ...current, suggestions } : {
-            ...current, kind: "no-suggestion", suggestions: [],
-            noSuggestionReason: "No additional suggestions from this review. Dismissed ideas stay dismissed for their original evidence.",
+            ...current,
+            kind: "no-suggestion",
+            suggestions: [],
+            noSuggestionReason: "Nothing else worth suggesting from this review.",
           };
         });
         router.refresh();
       } catch {
-        setError("Could not dismiss this suggestion. Nothing was changed.");
-      }
-    });
-  }
-
-  function requestReview() {
-    setReview(null);
-    setError(null);
-    startTransition(async () => {
-      try {
-        setReview(await reviewRelationshipConnection(relationshipId));
-      } catch {
-        // Do not surface raw provider messages or any other confidential details.
-        setError("The review couldn't be completed. Check the local model configuration and try again.");
+        setError("The suggestion could not be dismissed. Nothing was changed.");
       }
     });
   }
 
   return (
     <section className="rounded-2xl border border-indigo-200 bg-white p-6">
-      <h2 className="text-xl font-semibold text-stone-900">What could we connect over?</h2>
+      <h2 className="text-xl font-semibold text-stone-900">Conversation ideas</h2>
       <p className="mt-2 max-w-3xl text-sm text-stone-600">
-        Find a relevant subject, shared interest, or useful contribution from your saved history.
-        This is about what might matter to this person, not which channel to use. No suggestion is a valid result.
+        A few things you might naturally ask about, based on what you remember.
+        You do not have to monitor someone else&apos;s plans first.
       </p>
-      <button
-        type="button"
-        disabled={pending}
-        onClick={requestReview}
-        className="mt-4 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:cursor-wait disabled:opacity-60"
-      >
-        {pending ? "Reviewing saved context…" : review ? "Review again" : "Find a reason to connect"}
+      <button type="button" onClick={requestReview} disabled={reviewing || dismissing}
+        className="mt-4 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-50">
+        {reviewing ? "Looking through saved context…" : review ? "Refresh ideas" : "Find something worth asking"}
       </button>
-      <p className="mt-2 text-xs text-stone-500">
-        Only when clicked, this sends bounded structured relationship memory to the configured AI model
-        with provider storage disabled. It does not scan live email or a calendar, save the suggestions,
-        or send anyone a message. Existing relationship-mode settings are not required.
-      </p>
+      <details className="mt-2 text-xs text-stone-500">
+        <summary className="cursor-pointer">How suggestions are generated</summary>
+        <p className="mt-1 max-w-3xl">
+          Only when you ask, a bounded selection of saved relationship context is sent to the configured
+          model with provider storage disabled. No live messages or calendar events are checked.
+          No messages are sent and nothing is scheduled or monitored.
+        </p>
+      </details>
       {error && (
         <p role="alert" className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
           {error}
@@ -90,33 +75,33 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
       )}
       {review?.kind === "no-suggestion" && (
         <div aria-live="polite" className="mt-4 rounded-xl border border-stone-200 bg-stone-50 p-4">
-          <h3 className="font-semibold text-stone-900">Nothing compelling to suggest right now</h3>
-          <p className="mt-1 text-sm text-stone-700">{review.noSuggestionReason}</p>
-          <p className="mt-2 text-xs text-stone-500">Based on the saved evidence available on {review.reviewedAt}.</p>
+          <p className="font-medium text-stone-900">Nothing especially compelling right now</p>
+          <p className="mt-1 text-sm text-stone-600">{review.noSuggestionReason}</p>
         </div>
       )}
       {review?.kind === "suggestions" && (
         <div aria-live="polite" className="mt-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-            A few possibilities · {review.reviewedAt}
+            From your saved conversations · {review.reviewedAt}
           </p>
-          <ul className="mt-3 grid gap-3 lg:grid-cols-2">
+          <ul className="mt-3 space-y-3">
             {review.suggestions.map((item) => (
-              <li key={item.basisId} className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4">
+              <li key={item.basisId} className="rounded-xl border border-stone-200 bg-stone-50/70 p-4">
                 <h3 className="font-semibold text-stone-900">{item.subject}</h3>
                 <p className="mt-2 text-sm text-stone-700">{item.whyRelevant}</p>
                 {item.possibleAngle && (
-                  <p className="mt-2 text-sm text-stone-700">
-                    <span className="font-medium">An angle to consider:</span> {item.possibleAngle}
+                  <p className="mt-2 text-sm text-stone-800">
+                    <span className="font-medium">You might ask:</span> {item.possibleAngle}
                   </p>
                 )}
-                <details className="mt-3 border-t border-indigo-100 pt-2">
+                <details className="mt-3 border-t border-stone-200 pt-2">
                   <summary className="cursor-pointer text-xs font-medium text-indigo-700">
-                    Why did the agent suggest this?
+                    Why this came to mind
                   </summary>
                   <ul className="mt-2 space-y-1 text-xs text-stone-600">
                     {item.evidence.map((source) => {
-                      const captureId = source.id.startsWith("capture:") ? source.id.slice("capture:".length) : null;
+                      const captureId = source.id.startsWith("capture:") ?
+                        source.id.slice("capture:".length) : null;
                       return (
                         <li key={source.id}>
                           {source.label} · {source.observedAt}
@@ -125,7 +110,7 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
                               {" · "}
                               <Link href={"/captures/" + encodeURIComponent(captureId)}
                                 className="font-medium text-indigo-700 hover:underline">
-                                Review saved memory
+                                View source
                               </Link>
                             </>
                           )}
@@ -134,31 +119,20 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
                     })}
                   </ul>
                 </details>
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <button type="button"
-                    onClick={() => track(item.subject, item.basisId)}
-                    disabled={tracking || tracked.includes(item.basisId)}
-                    className="rounded-lg border border-indigo-700 px-3 py-2 text-sm font-medium text-indigo-700 disabled:opacity-50">
-                    {tracked.includes(item.basisId) ? "Tracking this idea" : tracking ? "Adding…" : "Track this idea"}
-                  </button>
-                  {tracked.includes(item.basisId) && (
-                    <a href="#connection-activity" className="text-sm font-medium text-indigo-700 underline">
-                      View connection activity
-                    </a>
-                  )}
-                  <button type="button" disabled={dismissing || tracking}
+                <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+                  <button type="button" disabled={dismissing || reviewing}
                     onClick={() => dismissSuggestion(item.basisId)}
-                    className="text-sm font-medium text-stone-600 hover:underline disabled:opacity-50">
-                    {dismissing ? "Saving…" : "Not useful"}
+                    className="font-medium text-stone-600 hover:underline disabled:opacity-50">
+                    {dismissing ? "Saving…" : "Not relevant"}
                   </button>
                   {item.basisId.startsWith("commitment:") && (
-                    <a href="#recorded-commitments" className="text-sm font-medium text-indigo-700 hover:underline">
-                      Correct saved commitment
+                    <a href="#recorded-commitments" className="font-medium text-indigo-700 hover:underline">
+                      Fix saved commitment
                     </a>
                   )}
                   {item.basisId.startsWith("opportunity:") && (
-                    <a href="#future-signals" className="text-sm font-medium text-indigo-700 hover:underline">
-                      Correct saved future signal
+                    <a href="#future-signals" className="font-medium text-indigo-700 hover:underline">
+                      Fix source memory
                     </a>
                   )}
                 </div>
@@ -166,7 +140,7 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
             ))}
           </ul>
           <p className="mt-3 text-xs text-stone-500">
-            These are ideas, not obligations. Verify older context before using it. No action has been taken.
+            Conversation possibilities, not tasks. It is fine to ask how something went when the outcome is unknown.
           </p>
         </div>
       )}

@@ -5,6 +5,7 @@ import {
   correctSavedActionableMemory, dismissSavedConnectionSuggestion,
 } from "@/lib/relationship-store";
 import type { ActionableMemoryTarget, ActionableMemoryDisposition } from "@/lib/relationship-record";
+import { userOwnsCommitment } from "@/lib/connection-subjects";
 
 function ensureDevelopment() {
   if (process.env.NODE_ENV !== "development") {
@@ -30,6 +31,10 @@ export async function correctRelationshipActionableMemory(
     throw new Error("Choose how to correct the memory.");
   }
   const decision: ActionableMemoryDisposition = raw;
+  if (decision === "Done" && (target.kind !== "open-loop" ||
+      !userOwnsCommitment(target.owner, process.env.RELATIONSHIP_USER_LABEL ?? "Jason"))) {
+    throw new Error("Only a commitment you made can be marked done here.");
+  }
   const originalText = formData.get("replacementText");
   const originalContext = formData.get("replacementContext");
   if (decision === "Edit" && (typeof originalText !== "string" ||

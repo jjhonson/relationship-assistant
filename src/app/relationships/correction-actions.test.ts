@@ -31,6 +31,15 @@ describe("memory-correction server actions", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/");
   });
 
+  it("does not let the user mark another person's promise as done", async () => {
+    const data = new FormData();
+    data.set("decision", "Done");
+    await expect(correctRelationshipActionableMemory("judy", {
+      kind: "open-loop", commitment: "Judy might run a 5K.", owner: "Judy",
+    }, data)).rejects.toThrow(/Only a commitment you made/);
+    expect(mocks.correctSavedActionableMemory).not.toHaveBeenCalled();
+  });
+
   it("passes user corrections with explicit text and context", async () => {
     const data = new FormData();
     data.set("decision", "Edit");
