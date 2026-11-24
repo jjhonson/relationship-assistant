@@ -63,6 +63,22 @@ export type StewardshipOpportunity = {
   observedAt: string;
 };
 
+export type ActionableMemoryDisposition = "Done" | "Not relevant" | "Incorrect";
+
+export type ActionableMemoryFeedback = {
+  kind: "open-loop" | "opportunity";
+  // Stable across re-extraction, whose generated IDs are not stable.
+  key: string;
+  disposition: ActionableMemoryDisposition;
+  originalText: string;
+  sourceIds: string[];
+  decidedAt: string;
+};
+
+export type ActionableMemoryTarget =
+  | { kind: "open-loop"; commitment: string; owner: string }
+  | { kind: "opportunity"; id: string };
+
 export type RelationshipLabelSuggestion<T extends string> = {
   value: T;
   sourceIds: string[];
@@ -118,6 +134,8 @@ export type RelationshipRecord = {
   durableFacts: DurableRelationshipFact[];
   activeThreads: ActiveRelationshipThread[];
   stewardshipOpportunities: StewardshipOpportunity[];
+  // Optional so relationships saved before feedback support remain readable.
+  actionableMemoryFeedback?: ActionableMemoryFeedback[];
   sources: RelationshipSource[];
 };
 
@@ -191,6 +209,7 @@ export function createRelationshipRecord(
     durableFacts: [],
     activeThreads: [],
     stewardshipOpportunities: [],
+    actionableMemoryFeedback: [],
     sources,
   };
 }
@@ -238,6 +257,7 @@ export function createManualRelationshipRecord(
     durableFacts: [],
     activeThreads: [],
     stewardshipOpportunities: [],
+    actionableMemoryFeedback: [],
     sources: [{
       id: "manual:" + randomUUID(),
       source: "manual",
@@ -310,6 +330,7 @@ export function createDiscoveredRelationshipRecord(
     durableFacts: [],
     activeThreads: [],
     stewardshipOpportunities: [],
+    actionableMemoryFeedback: [],
     sources: [source],
   };
 }
@@ -361,6 +382,64 @@ export function replaceRelationshipIntention(
   };
 }
 
+/**
+ * Retire an actionable memory without erasing why it was ever suggested.
+ * The saved decision blocks its original evidence from being replayed.
+ * A genuinely new source can establish a new instance of a completed promise;
+ * incorrect or irrelevant memories remain blocked pending explicit review.
+ */
+export function recordActionableMemoryFeedback(
+  record: RelationshipRecord,
+  target: ActionableMemoryTarget,
+  disposition: ActionableMemoryDisposition,
+  now = new Date(),
+): RelationshipRecord {
+  if (!["Done", "Not relevant", "Incorrect"].includes(disposition)) {
+    throw new Error("Unsupported actionable memory disposition.");
+  }
+
+  let key: string;
+  let originalText: string;
+  let sourceIds: string[];
+  if (target.kind === "open-loop") {
+    const current = record.openLoops.find((item) =>
+      actionKey("open-loop", item.commitment, item.owner) ===
+      actionKey("open-loop", target.commitment, target.owner));
+    if (!current) throw new Error("Actionable memory not found.");
+    key = actionKey("open-loop", current.commitment, current.owner);
+    originalText = current.commitment;
+    sourceIds = [...current.sourceIds];
+  } else {
+    const current = record.stewardshipOpportunities.find((item) => item.id === target.id);
+    if (!current) throw new Error("Actionable memory not found.");
+    key = actionKey("opportunity", current.reason, current.trigger);
+    originalText = current.reason;
+    sourceIds = [...current.sourceIds];
+  }
+
+  const feedback: ActionableMemoryFeedback = {
+    kind: target.kind,
+    key,
+    disposition,
+    originalText,
+    sourceIds,
+    decidedAt: now.toISOString(),
+  };
+
+  return {
+    ...record,
+    updatedAt: now.toISOString(),
+    actionableMemoryFeedback: [
+      ...(record.actionableMemoryFeedback ?? []).filter((item) => item.key !== key),
+      feedback,
+    ],
+    openLoops: record.openLoops.filter((item) =>
+      target.kind !== "open-loop" || actionKey("open-loop", item.commitment, item.owner) !== key),
+    stewardshipOpportunities: record.stewardshipOpportunities.filter((item) =>
+      target.kind !== "opportunity" || item.id !== target.id),
+  };
+}
+
 export function mergeInteractionIntoRelationship(
   record: RelationshipRecord,
   extraction: InteractionExtraction,
@@ -382,16 +461,20 @@ export function mergeInteractionIntoRelationship(
     ),
     tags: unique([...record.tags, ...extraction.tags]),
     currentState: "Active",
-    openLoops: reconcileOpenLoops(record.openLoops, extraction.openLoops, source),
+    openLoops: reconcileOpenLoops(record.openLoops, extraction.openLoops, source)
+      .filter((item) => !hasActionableMemoryFeedback(
+        record, actionKey("open-loop", item.commitment, item.owner), source.id)),
     unknowns: unique([...record.unknowns, ...extraction.unknowns]),
     durableFacts: mergeFacts(record.durableFacts, extraction.durableFacts, source),
     activeThreads: mergeThreads(record.activeThreads, extraction.activeThreads, source),
-    stewardshipOpportunities: extraction.stewardshipOpportunities.map((item) => ({
-      id: randomUUID(),
-      ...item,
-      sourceIds: [source.id],
-      observedAt: source.observedAt,
-    })),
+    stewardshipOpportunities: extraction.stewardshipOpportunities.filter((item) =>
+      !hasActionableMemoryFeedback(record, actionKey("opportunity", item.reason, item.trigger), source.id))
+      .map((item) => ({
+        id: randomUUID(),
+        ...item,
+        sourceIds: [source.id],
+        observedAt: source.observedAt,
+      })),
     sources: mergeByKey(record.sources, [source], (item) => item.id),
   };
 }
@@ -577,6 +660,15 @@ function unique<T extends string>(items: T[]): T[] {
 
 function normalize(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function actionKey(kind: "open-loop" | "opportunity", content: string, context: string) {
+  return JSON.stringify([kind, normalize(content), normalize(context)]);
+}
+
+function hasActionableMemoryFeedback(record: RelationshipRecord, key: string, sourceId: string) {
+  return (record.actionableMemoryFeedback ?? []).some((item) =>
+    item.key === key && (item.disposition !== "Done" || item.sourceIds.includes(sourceId)));
 }
 
 function maxDate(current: string | null, candidate: string) {
