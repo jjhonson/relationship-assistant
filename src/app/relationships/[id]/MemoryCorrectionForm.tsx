@@ -21,7 +21,7 @@ export default function MemoryCorrectionForm({
             className="mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2">
             <option value="">Choose an action</option>
             {target.kind === "open-loop" && <option value="Done">Done (actually completed)</option>}
-            <option value="Not relevant">Not relevant, don't prompt me</option>
+            <option value="Not relevant">Not relevant, don&apos;t prompt me</option>
             <option value="Incorrect">Incorrect, this did not happen</option>
             <option value="Edit">Edit the memory</option>
           </select>

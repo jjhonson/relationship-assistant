@@ -245,7 +245,10 @@ export default async function RelationshipDetailPage({
         {capturedNotes[0]?.summary && <p className="mt-2 text-sm text-stone-600">Latest remembered: {capturedNotes[0].summary}</p>}
       </section>
 
-      <ConnectionSubjectsReview relationshipId={relationship.id} />
+      <ConnectionSubjectsReview
+        key={relationship.updatedAt + ":" + (relationship.actionableMemoryFeedback?.length ?? 0) +
+          ":" + (relationship.dismissedConnectionSubjects?.length ?? 0)}
+        relationshipId={relationship.id} />
       <ConnectionJournal relationshipId={relationship.id} journeys={journeys} />
 
       <PersonConversationalCapture relationshipId={relationship.id} personLabel={relationship.personLabel} />

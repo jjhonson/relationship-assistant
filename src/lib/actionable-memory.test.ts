@@ -50,6 +50,11 @@ describe("source-aware actionable memory correction", () => {
     }, from("fictional-call:new", "2027-03-01"));
     expect(newer.openLoops).toHaveLength(1);
     expect(newer.openLoops[0].sourceIds).toEqual(["fictional-call:new"]);
+    const replayOld = mergeInteractionIntoRelationship(newer, {
+      ...emptyExtraction, openLoops: [loop],
+    }, source);
+    expect(replayOld.openLoops).toHaveLength(1);
+    expect(replayOld.openLoops[0].sourceIds).toEqual(["fictional-call:new"]);
   });
 
   it("keeps Incorrect blocked from both old and new extracted source evidence", () => {

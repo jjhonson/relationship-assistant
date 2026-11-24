@@ -496,6 +496,37 @@ function wasActionableMemoryRetired(
     (feedback.disposition !== "Done" || feedback.sourceIds.includes(sourceId)));
 }
 
+/**
+ * A Done decision retires the original observed commitment, but later
+ * independent evidence may establish a genuinely new obligation. Replaying
+ * the old source must not then discard that newer, still-active instance.
+ */
+function mergeActiveOpenLoops(
+  record: RelationshipRecord,
+  incoming: InteractionExtraction["openLoops"],
+  source: RelationshipSource,
+): RelationshipRecord["openLoops"] {
+  const confirmed = record.openLoops.filter((item) => item.userConfirmed === true);
+  const earlierInferred = record.openLoops.filter((item) => !item.userConfirmed);
+  const inferred = reconcileOpenLoops(earlierInferred, incoming, source)
+    .filter((item) => !wasActionableMemoryRetired(
+      record, actionableKey("open-loop", item.commitment, item.owner), source.id))
+    .filter((item) => !confirmed.some((saved) =>
+      actionableKey("open-loop", saved.commitment, saved.owner) ===
+      actionableKey("open-loop", item.commitment, item.owner)));
+
+  const reestablishedAfterCompletion = earlierInferred.filter((item) =>
+    (record.actionableMemoryFeedback ?? []).some((feedback) =>
+      feedback.disposition === "Done" &&
+      feedback.key === actionableKey("open-loop", item.commitment, item.owner) &&
+      item.sourceIds.some((id) => !feedback.sourceIds.includes(id))) &&
+    !inferred.some((candidate) =>
+      actionableKey("open-loop", candidate.commitment, candidate.owner) ===
+      actionableKey("open-loop", item.commitment, item.owner)));
+
+  return [...confirmed, ...reestablishedAfterCompletion, ...inferred];
+}
+
 export function mergeInteractionIntoRelationship(
   record: RelationshipRecord,
   extraction: InteractionExtraction,
@@ -517,15 +548,7 @@ export function mergeInteractionIntoRelationship(
     ),
     tags: unique([...record.tags, ...extraction.tags]),
     currentState: "Active",
-    openLoops: [
-      ...record.openLoops.filter((item) => item.userConfirmed === true),
-      ...reconcileOpenLoops(record.openLoops.filter((item) => !item.userConfirmed), extraction.openLoops, source)
-        .filter((item) => !wasActionableMemoryRetired(
-          record, actionableKey("open-loop", item.commitment, item.owner), source.id))
-        .filter((item) => !record.openLoops.some((saved) => saved.userConfirmed &&
-          actionableKey("open-loop", saved.commitment, saved.owner) ===
-          actionableKey("open-loop", item.commitment, item.owner))),
-    ],
+    openLoops: mergeActiveOpenLoops(record, extraction.openLoops, source),
     unknowns: unique([...record.unknowns, ...extraction.unknowns]),
     durableFacts: mergeFacts(record.durableFacts, extraction.durableFacts, source),
     activeThreads: mergeThreads(record.activeThreads, extraction.activeThreads, source),
