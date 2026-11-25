@@ -47,7 +47,9 @@ export async function saveUniversalCapture(
   formData: FormData,
 ): Promise<CaptureFormState> {
   const result = await saveUniversalCaptureWithoutRedirect(contextRelationshipId, formData);
-  if (result.error) return { error: result.error };
+  if (result.error || !result.captureId) {
+    return { error: result.error ?? "Capture save could not be confirmed." };
+  }
   redirect("/captures/" + result.captureId);
 }
 
