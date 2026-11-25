@@ -39,6 +39,26 @@ describe("server-only Supabase relationship document adapter", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
+
+  it("accepts a URL-safe server secret containing hyphens", async () => {
+    configure();
+    vi.stubEnv("RA_SUPABASE_SECRET_KEY", "sb_secret_sample-secret_part-123");
+    const mock = vi.fn().mockResolvedValue(reply(null));
+    vi.stubGlobal("fetch", mock);
+    await expect(readSupabaseDocument()).resolves.toBeNull();
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0][1].headers.apikey).toBe("sb_secret_sample-secret_part-123");
+  });
+
+  it("rejects a publishable key before accessing any private records", async () => {
+    configure();
+    vi.stubEnv("RA_SUPABASE_SECRET_KEY", "sb_publishable_sample-key");
+    const mock = vi.fn();
+    vi.stubGlobal("fetch", mock);
+    await expect(readSupabaseDocument()).rejects.toThrow("server-only Supabase secret key");
+    expect(mock).not.toHaveBeenCalled();
+  });
+
   it("reads through the named RPC with a backend-only API key", async () => {
     configure();
     const mock = vi.fn().mockResolvedValue(reply({ revision: 7, document: { version: 1, relationships: [] } }));
