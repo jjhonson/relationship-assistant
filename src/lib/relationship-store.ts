@@ -108,7 +108,7 @@ function mutateStore<T>(update: (store: StoreFile) => T | Promise<T>): Promise<T
   // Serialize local, single-process writes so two quick saves do not overwrite each other.
   const result = mutationQueue.then(async () => {
     if (isSupabaseStorageEnabled()) {
-      return mutateSupabaseDocument(normalizeStore, update);
+      return mutateSupabaseDocument((raw) => normalizeStore(raw ?? emptyStore()), update);
     }
     const store = await readStore();
     const value = await update(store);
