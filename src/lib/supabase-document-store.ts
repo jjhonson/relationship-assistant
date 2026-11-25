@@ -2,7 +2,7 @@ import "server-only";
 
 type Snapshot = { revision: number; document: unknown };
 class Conflict extends Error {}
-export function useSupabaseStorage(): boolean {
+export function isSupabaseStorageEnabled(): boolean {
   const mode = process.env.RA_STORAGE_BACKEND;
   if (!mode || mode === "json") return false;
   if (mode === "supabase") return true;

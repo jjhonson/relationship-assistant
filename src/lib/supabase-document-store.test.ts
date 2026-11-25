@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  mutateSupabaseDocument, readSupabaseDocument, useSupabaseStorage,
+  mutateSupabaseDocument, readSupabaseDocument, isSupabaseStorageEnabled,
 } from "./supabase-document-store";
 
 const owner = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -21,11 +21,11 @@ afterEach(() => {
 
 describe("server-only Supabase relationship document adapter", () => {
   it("defaults to the unchanged private JSON store unless explicitly enabled", () => {
-    expect(useSupabaseStorage()).toBe(false);
+    expect(isSupabaseStorageEnabled()).toBe(false);
     configure();
-    expect(useSupabaseStorage()).toBe(true);
+    expect(isSupabaseStorageEnabled()).toBe(true);
     vi.stubEnv("RA_STORAGE_BACKEND", "invalid");
-    expect(() => useSupabaseStorage()).toThrow("Unsupported");
+    expect(() => isSupabaseStorageEnabled()).toThrow("Unsupported");
   });
 
   it("fails closed if enabled without server-only configuration", async () => {

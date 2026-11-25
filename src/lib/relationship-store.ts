@@ -1,5 +1,5 @@
 import "server-only";
-import { useSupabaseStorage, readSupabaseDocument, mutateSupabaseDocument } from "./supabase-document-store";
+import { isSupabaseStorageEnabled, readSupabaseDocument, mutateSupabaseDocument } from "./supabase-document-store";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -79,7 +79,7 @@ function normalizeStore(raw: unknown): StoreFile {
 }
 
 async function readStore(): Promise<StoreFile> {
-  if (useSupabaseStorage()) {
+  if (isSupabaseStorageEnabled()) {
     const snapshot = await readSupabaseDocument();
     return normalizeStore(snapshot?.document ?? emptyStore());
   }
@@ -107,7 +107,7 @@ async function writeStore(store: StoreFile) {
 function mutateStore<T>(update: (store: StoreFile) => T | Promise<T>): Promise<T> {
   // Serialize local, single-process writes so two quick saves do not overwrite each other.
   const result = mutationQueue.then(async () => {
-    if (useSupabaseStorage()) {
+    if (isSupabaseStorageEnabled()) {
       return mutateSupabaseDocument(normalizeStore, update);
     }
     const store = await readStore();
