@@ -61,6 +61,9 @@ export async function readRemoteSnapshot(config, ownerId, send = fetch) {
 }
 
 export async function restoreToEmptyDataset(config, targetOwnerId, backup, send = fetch) {
+  if (config.base === backup.sourceProjectUrl) {
+    throw new Error("Independent recovery requires a different Supabase project.");
+  }
   if (!isUuid(targetOwnerId) || targetOwnerId === backup.sourceOwnerId) {
     throw new Error("A distinct, valid destination dataset UUID is required.");
   }
