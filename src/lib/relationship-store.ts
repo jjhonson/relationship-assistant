@@ -1,4 +1,5 @@
 import "server-only";
+import { isSupabaseStorageEnabled, readSupabaseDocument, mutateSupabaseDocument } from "./supabase-document-store";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -45,39 +46,49 @@ function storePath() {
   };
 }
 
+function emptyStore(): StoreFile {
+  return { version: 1, relationships: [], captures: [], moments: [], connectionJourneys: [] };
+}
+
+function normalizeStore(raw: unknown): StoreFile {
+  if (!raw || typeof raw !== "object") throw new Error("Unsupported relationship store format.");
+  const parsed = raw as StoreFile;
+  if (parsed.version !== 1 || !Array.isArray(parsed.relationships)) {
+    throw new Error("Unsupported relationship store format.");
+  }
+  return {
+    ...parsed,
+    captures: Array.isArray(parsed.captures) ? parsed.captures : [],
+    connectionJourneys: parsed.connectionJourneys === undefined ? [] :
+      Array.isArray(parsed.connectionJourneys) ? parsed.connectionJourneys :
+      (() => { throw new Error("Unsupported connection journal store format."); })(),
+    moments: parsed.moments === undefined ? [] : Array.isArray(parsed.moments) ? parsed.moments :
+      (() => { throw new Error("Unsupported personal moments store format."); })(),
+    relationships: parsed.relationships.map((relationship) => ({
+      ...relationship,
+      identities: Array.isArray(relationship.identities) ? relationship.identities : [],
+      relationshipContexts: Array.isArray(relationship.relationshipContexts) ? relationship.relationshipContexts : [],
+      relationshipRoles: Array.isArray(relationship.relationshipRoles) ? relationship.relationshipRoles : [],
+      labelAuthority: relationship.labelAuthority ?? "legacy-unverified",
+      inferredRelationshipContexts: Array.isArray(relationship.inferredRelationshipContexts)
+        ? relationship.inferredRelationshipContexts : [],
+      inferredRelationshipRoles: Array.isArray(relationship.inferredRelationshipRoles)
+        ? relationship.inferredRelationshipRoles : [],
+    })),
+  };
+}
+
 async function readStore(): Promise<StoreFile> {
+  if (isSupabaseStorageEnabled()) {
+    const snapshot = await readSupabaseDocument();
+    return normalizeStore(snapshot?.document ?? emptyStore());
+  }
   const target = storePath();
   try {
     const raw = await readFile(/* turbopackIgnore: true */ target.file, "utf8");
-    const parsed = JSON.parse(raw) as StoreFile;
-    if (parsed.version !== 1 || !Array.isArray(parsed.relationships)) {
-      throw new Error("Unsupported relationship store format.");
-    }
-    return {
-      ...parsed,
-      captures: Array.isArray(parsed.captures) ? parsed.captures : [],
-      connectionJourneys: parsed.connectionJourneys === undefined ? [] :
-        Array.isArray(parsed.connectionJourneys) ? parsed.connectionJourneys :
-        (() => { throw new Error("Unsupported connection journal store format."); })(),
-      moments: parsed.moments === undefined ? [] : Array.isArray(parsed.moments) ? parsed.moments :
-        (() => { throw new Error("Unsupported personal moments store format."); })(),
-      relationships: parsed.relationships.map((relationship) => ({
-        ...relationship,
-        identities: Array.isArray(relationship.identities) ? relationship.identities : [],
-        relationshipContexts: Array.isArray(relationship.relationshipContexts) ? relationship.relationshipContexts : [],
-        relationshipRoles: Array.isArray(relationship.relationshipRoles) ? relationship.relationshipRoles : [],
-        // Older saved records mixed user and model labels, so provenance cannot be backfilled.
-        labelAuthority: relationship.labelAuthority ?? "legacy-unverified",
-        inferredRelationshipContexts: Array.isArray(relationship.inferredRelationshipContexts)
-          ? relationship.inferredRelationshipContexts : [],
-        inferredRelationshipRoles: Array.isArray(relationship.inferredRelationshipRoles)
-          ? relationship.inferredRelationshipRoles : [],
-      })),
-    };
+    return normalizeStore(JSON.parse(raw));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { version: 1, relationships: [], captures: [], moments: [], connectionJourneys: [] };
-    }
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyStore();
     throw error;
   }
 }
@@ -96,6 +107,9 @@ async function writeStore(store: StoreFile) {
 function mutateStore<T>(update: (store: StoreFile) => T | Promise<T>): Promise<T> {
   // Serialize local, single-process writes so two quick saves do not overwrite each other.
   const result = mutationQueue.then(async () => {
+    if (isSupabaseStorageEnabled()) {
+      return mutateSupabaseDocument((raw) => normalizeStore(raw ?? emptyStore()), update);
+    }
     const store = await readStore();
     const value = await update(store);
     await writeStore(store);
