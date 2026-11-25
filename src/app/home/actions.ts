@@ -103,7 +103,9 @@ export async function saveHomePhotoInput(formData: FormData) {
     throw new Error("Choose a photo to save.");
   }
   const result = await saveUniversalCaptureWithoutRedirect(null, formData);
-  if (result.error) throw new Error(result.error);
+  if (result.error || !result.captureId) {
+    throw new Error(result.error ?? "Photo save could not be confirmed.");
+  }
   revalidatePath("/");
   return { destination: "/captures/" + encodeURIComponent(result.captureId) };
 }
