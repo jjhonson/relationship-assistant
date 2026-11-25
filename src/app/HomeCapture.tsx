@@ -102,7 +102,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
         const result = await saveHomePhotoInput(form);
         router.push(result.destination);
       } catch {
-        setError("Photo capture could not be confirmed. Nothing was saved. Check your photo or local model configuration.");
+        setError("Photo save could not be confirmed. Check saved captures before trying again.");
       }
     });
   }
