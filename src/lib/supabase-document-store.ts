@@ -17,7 +17,7 @@ function settings() {
   if (url.protocol !== "https:" || !/^[a-z0-9-]+\.supabase\.co$/.test(url.hostname) ||
       url.username || url.password || url.pathname !== "/")
     throw new Error("Invalid Supabase project URL.");
-  if (!/^sb_secret_[A-Za-z0-9_]+$/.test(secret))
+  if (!/^sb_secret_[A-Za-z0-9_-]+$/.test(secret))
     throw new Error("A server-only Supabase secret key is required.");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ownerId))
     throw new Error("Invalid dataset identifier.");
