@@ -57,7 +57,7 @@ export async function readRemoteSnapshot(config, ownerId, send = fetch) {
   }
   // Validates supported collection shapes before backup.
   documentDigest(response.document);
-  return { ownerId, revision: response.revision, document: response.document };
+  return { ownerId, sourceProjectUrl: config.base, revision: response.revision, document: response.document };
 }
 
 export async function restoreToEmptyDataset(config, targetOwnerId, backup, send = fetch) {
@@ -188,8 +188,7 @@ export async function main(command = process.argv[2], rest = process.argv.slice(
   // A distinct project is required: a new namespace in the *same* project
   // does not count as independent environmental recovery.
   const target = endpoint(process.env.RA_RECOVERY_TARGET_URL, process.env.RA_RECOVERY_TARGET_SECRET_KEY);
-  const original = endpoint(process.env.RA_SUPABASE_URL, process.env.RA_SUPABASE_SECRET_KEY);
-  if (target.base === original.base) {
+  if (target.base === snapshot.sourceProjectUrl) {
     throw new Error("Independent recovery requires a different Supabase project, not a second namespace in the source project.");
   }
   await restoreToEmptyDataset(target, args["--target-owner"], snapshot);
