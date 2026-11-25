@@ -46,6 +46,16 @@ export async function saveUniversalCapture(
   _previous: CaptureFormState,
   formData: FormData,
 ): Promise<CaptureFormState> {
+  const result = await saveUniversalCaptureWithoutRedirect(contextRelationshipId, formData);
+  if (result.error) return { error: result.error };
+  redirect("/captures/" + result.captureId);
+}
+
+/** Reuse the existing tested photo/note retention path from the Home composer. */
+export async function saveUniversalCaptureWithoutRedirect(
+  contextRelationshipId: string | null,
+  formData: FormData,
+) {
   ensureDevelopment();
   const rawNote = formData.get("note");
   const rawPhoto = formData.get("photo");
@@ -90,7 +100,7 @@ export async function saveUniversalCapture(
   await interpretIfAvailable(eventId);
   revalidatePath("/relationships");
   if (contextRelationshipId) revalidatePath("/relationships/" + contextRelationshipId);
-  redirect("/captures/" + eventId);
+  return { error: null, captureId: eventId };
 }
 
 /** Save without redirect so a reviewed-input caller can confirm persistence. */
