@@ -14,14 +14,21 @@ export type HomeOpportunity = {
   evidence: ConnectionEvidence[];
 };
 
+/** Treat malformed or impossible interaction dates as unknown. */
+function knownInteractionDate(value: string | null): string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+  const date = new Date(value + "T00:00:00.000Z");
+  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value ? value : "";
+}
+
 /**
  * Oldest *known* meaningful interaction first. Unknown is never interpreted
  * as old, recent or proof that an interaction occurred.
  */
 export function orderHomeRelationships(people: RelationshipRecord[]) {
   return [...people].sort((a, b) => {
-    const ad = a.lastInteractionAt || "";
-    const bd = b.lastInteractionAt || "";
+    const ad = knownInteractionDate(a.lastInteractionAt);
+    const bd = knownInteractionDate(b.lastInteractionAt);
     if (!ad && bd) return 1;
     if (ad && !bd) return -1;
     if (ad !== bd) return ad.localeCompare(bd);
@@ -44,9 +51,9 @@ export function homeRelationshipDetail(person: RelationshipRecord): string | nul
 }
 
 export function homeInteractionDate(value: string | null): string {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "Not recorded";
-  const date = new Date(value + "T00:00:00.000Z");
-  if (Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== value) return "Not recorded";
+  const known = knownInteractionDate(value);
+  if (!known) return "Not recorded";
+  const date = new Date(known + "T00:00:00.000Z");
   return new Intl.DateTimeFormat("en-US", {
     month: "short", day: "numeric", year: "numeric", timeZone: "UTC",
   }).format(date);
