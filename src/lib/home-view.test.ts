@@ -82,6 +82,29 @@ describe("evidence-backed Home conversation opportunities", () => {
     expect(dismissed.activeThreads).toEqual(p.activeThreads);
   });
 
+  it("does not replace a dismissed thread with an old interest from identical evidence", () => {
+    const p = sourcedThread("Judy", "2026-11-20");
+    p.durableFacts.push({
+      id: "running", category: "Interest", label: "Running",
+      value: "Considering her first 5K", sourceIds: ["source:Judy"],
+      firstObservedAt: "2026-11-20", lastObservedAt: "2026-11-20",
+    });
+    const candidate = buildConnectionCandidates(p, "Jason").find((c) => c.kind === "thread");
+    if (!candidate) throw new Error("Expected original fictional thread");
+    const dismissed = dismissConnectionCandidate(p, candidate);
+    expect(selectHomeOpportunities([dismissed], "Jason")).toEqual([]);
+
+    dismissed.sources.push({ id: "source:new", source: "capture",
+      observedAt: "2026-12-01", label: "A genuinely new fictional discussion" });
+    dismissed.durableFacts.unshift({
+      id: "new-training", category: "Interest", label: "Training",
+      value: "Interested in training with a group", sourceIds: ["source:new"],
+      firstObservedAt: "2026-12-01", lastObservedAt: "2026-12-01",
+    });
+    expect(selectHomeOpportunities([dismissed], "Jason")[0].topic)
+      .toBe("Interested in training with a group");
+  });
+
   it("uses at most one sourced idea per person, at most three, and newest evidence first", () => {
     const people = ["A", "B", "C", "D"].map((name, i) =>
       sourcedThread(name, "2026-11-" + String(i + 1).padStart(2,"0")));
