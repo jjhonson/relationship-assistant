@@ -75,7 +75,12 @@ export function selectHomeOpportunities(
 ): HomeOpportunity[] {
   const opportunities: HomeOpportunity[] = [];
   for (const person of people) {
-    const candidates = buildConnectionCandidates(person, userLabel);
+    // A dismissed idea must not reappear as another label for the same
+    // unchanged evidence. A genuinely new source can still qualify later.
+    const dismissed = person.dismissedConnectionSubjects ?? [];
+    const candidates = buildConnectionCandidates(person, userLabel).filter((item) =>
+      !dismissed.some((decision) => item.evidence.length > 0 &&
+        item.evidence.every((source) => decision.sourceIds.includes(source.id))));
     const thread = candidates.find((item) => item.kind === "thread");
     const interest = candidates.find((item) => item.kind === "fact" &&
       (person.durableFacts ?? []).some((fact) => "fact:" + fact.id === item.id &&
