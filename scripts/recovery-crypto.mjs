@@ -87,8 +87,13 @@ function derive(passphrase, salt) {
   });
 }
 
-export function encryptSnapshot({ ownerId, revision, document }, passphrase) {
-  if (!isUuid(ownerId) || !Number.isSafeInteger(revision) || revision < 0) {
+function isProjectUrl(value) {
+  return typeof value === "string" &&
+    /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(value);
+}
+
+export function encryptSnapshot({ ownerId, revision, document, sourceProjectUrl }, passphrase) {
+  if (!isUuid(ownerId) || !Number.isSafeInteger(revision) || revision < 0 || !isProjectUrl(sourceProjectUrl)) {
     throw new Error("Invalid source dataset identity or revision.");
   }
   const digest = documentDigest(document);
@@ -96,6 +101,7 @@ export function encryptSnapshot({ ownerId, revision, document }, passphrase) {
     formatVersion: 1,
     exportedAt: new Date().toISOString(),
     sourceOwnerId: ownerId,
+    sourceProjectUrl,
     revision,
     documentSha256: digest,
     document,
@@ -159,7 +165,7 @@ export function decryptSnapshot(raw, passphrase) {
     if (clear.length > MAX_DOCUMENT_BYTES) throw new Error("Decrypted backup is oversized.");
     const snapshot = JSON.parse(clear.toString("utf8"));
     if (!snapshot || snapshot.formatVersion !== 1 ||
-        !isUuid(snapshot.sourceOwnerId) ||
+        !isUuid(snapshot.sourceOwnerId) || !isProjectUrl(snapshot.sourceProjectUrl) ||
         !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0 ||
         typeof snapshot.exportedAt !== "string" ||
         !/^[a-f0-9]{64}$/.test(snapshot.documentSha256)) {
