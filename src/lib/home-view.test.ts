@@ -33,6 +33,9 @@ describe("quiet Home relationship list", () => {
     expect(homeInteractionDate(null)).toBe("Not recorded");
     expect(homeInteractionDate("2026-11-24")).toBe("Nov 24, 2026");
     expect(homeInteractionDate("2026-02-30")).toBe("Not recorded");
+    const invalid = person("Invalid", "2026-02-30");
+    expect(orderHomeRelationships([invalid, older]).map((x) => x.personLabel))
+      .toEqual(["Older", "Invalid"]);
   });
 
   it("does not invent relationship details for unsourced profiles", () => {
