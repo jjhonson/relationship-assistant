@@ -16,14 +16,11 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-14 pb-16 sm:space-y-16">
-      <section aria-labelledby="home-heading" className="mx-auto max-w-3xl pt-5 sm:pt-12">
-        <div className="mb-7 space-y-3 text-center sm:mb-8">
+      <section aria-labelledby="home-heading" className="mx-auto max-w-4xl pt-4 sm:pt-10">
+        <div className="mb-7 text-center sm:mb-8">
           <h1 id="home-heading" className="text-3xl font-semibold tracking-tight text-stone-950 sm:text-4xl">
             What would you like to remember?
           </h1>
-          <p className="text-sm leading-relaxed text-stone-500 sm:text-base">
-            A conversation, something you read, or a thought worth keeping.
-          </p>
         </div>
         <HomeCapture people={people.map((person) => ({
           id: person.id, label: person.personLabel,
@@ -31,15 +28,10 @@ export default async function HomePage() {
       </section>
 
       <section aria-labelledby="opportunities-heading" className="mx-auto max-w-4xl space-y-5">
-        <div>
-          <h2 id="opportunities-heading"
-            className="text-lg font-semibold tracking-tight text-stone-900">
-            Opportunities to connect
-          </h2>
-          <p className="mt-1 text-sm text-stone-500">
-            A few possibilities from what you&apos;ve remembered. Not a list of obligations.
-          </p>
-        </div>
+        <h2 id="opportunities-heading"
+          className="text-lg font-semibold tracking-tight text-stone-900">
+          Opportunities to connect
+        </h2>
 
         {opportunities.length ? (
           <ul className="grid gap-3 sm:grid-cols-2">
@@ -93,9 +85,7 @@ export default async function HomePage() {
             ))}
           </ul>
         ) : (
-          <p className="rounded-2xl border border-stone-200 bg-stone-50 px-5 py-4 text-sm text-stone-500">
-            Nothing particularly compelling from saved conversations yet. It&apos;s fine to have no suggestions.
-          </p>
+          <p className="text-sm text-stone-500">Nothing worth suggesting yet.</p>
         )}
       </section>
 
@@ -107,8 +97,7 @@ export default async function HomePage() {
               Your relationships
             </h2>
             <p className="mt-1 text-sm text-stone-500">
-              {relationships.length} saved {relationships.length === 1 ? "person" : "people"}
-              {" · "}Oldest known conversation first
+              {relationships.length} {relationships.length === 1 ? "person" : "people"}
             </p>
           </div>
           <Link href="/relationships"
@@ -129,10 +118,11 @@ export default async function HomePage() {
                       {detail && (
                         <span className="mt-0.5 block truncate text-xs text-stone-500">{detail}</span>
                       )}
-                      <span className="mt-1 block text-xs text-stone-400">
-                        {person.lastInteractionAt ? "Last recorded conversation: " : "Last conversation: "}
-                        {homeInteractionDate(person.lastInteractionAt)}
-                      </span>
+                      {person.lastInteractionAt && (
+                        <span className="mt-1 block text-xs text-stone-400">
+                          Last spoke {homeInteractionDate(person.lastInteractionAt)}
+                        </span>
+                      )}
                     </span>
                     <span aria-hidden="true" className="shrink-0 text-stone-400 group-hover:text-stone-800">↗</span>
                   </Link>
