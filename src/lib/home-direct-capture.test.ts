@@ -63,6 +63,46 @@ describe("one-step Home capture planning", () => {
     });
   });
 
+  it("uses the relationship-page person when the note does not name anyone", () => {
+    const text = "She is thinking about joining a running group.";
+    expect(planHomeCapture({ text, interpretation: note, people, today,
+      contextRelationshipId: "judy" })).toMatchObject({
+        state: "ready", kind: "note", relationshipId: "judy",
+      });
+    expect(planHomeCapture({ text, interpretation: { ...note, kind: "conversation",
+      source: "messages" }, people, today, contextRelationshipId: "judy" }))
+      .toMatchObject({ state: "clarify", field: "date", kind: "conversation" });
+  });
+
+  it("asks instead of assigning a different named person to the open profile", () => {
+    const text = "I met Tom Wilson yesterday.";
+    const result = planHomeCapture({ text, interpretation: note, people, today,
+      contextRelationshipId: "judy" });
+    expect(result).toMatchObject({ state: "clarify", field: "person", kind: "note" });
+    expect(planHomeCapture({ text, interpretation: note, people, today,
+      contextRelationshipId: "judy", choices: { relationshipId: "tom-1" } }))
+      .toMatchObject({ state: "ready", relationshipId: "tom-1",
+        interactionDate: "2026-11-24" });
+    expect(planHomeCapture({ text, interpretation: note, people, today,
+      contextRelationshipId: "judy", choices: { relationshipId: "judy" } }))
+      .toMatchObject({ state: "ready", relationshipId: "judy" });
+  });
+
+  it("handles explicit names and invalid page context without silent identity merging", () => {
+    const text = "I spoke with Fictional Judy Test yesterday.";
+    expect(planHomeCapture({ text, interpretation: note, people, today,
+      contextRelationshipId: "judy" })).toMatchObject({ state: "ready",
+      relationshipId: "judy", interactionDate: "2026-11-24" });
+    expect(() => planHomeCapture({ text, interpretation: note, people, today,
+      contextRelationshipId: "missing" })).toThrow("open relationship");
+    expect(planHomeCapture({ text: "I met Tom yesterday.", interpretation: note, people,
+      today, contextRelationshipId: "judy" }))
+      .toMatchObject({ state: "clarify", field: "person" });
+    expect(planHomeCapture({ text: "I read a book yesterday.", people, today,
+      interpretation: { ...note, kind: "moment" }, contextRelationshipId: "judy" }))
+      .toMatchObject({ state: "ready", kind: "moment", relationshipId: "" });
+  });
+
   it("asks only which Tom for ambiguous names and accepts a valid explicit choice", () => {
     const text = "I met Tom yesterday at a conference.";
     expect(planHomeCapture({ text, interpretation: note, people, today }))
