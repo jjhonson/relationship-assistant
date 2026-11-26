@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   listRelationships: vi.fn(),
   savePersonalMoment: vi.fn(),
   saveReviewedPersonCapture: vi.fn(),
+  learnFromNewPastedConversation: vi.fn(),
   saveQuickCaptureWithoutRedirect: vi.fn(),
   interpretConversationalCapture: vi.fn(),
   revalidatePath: vi.fn(),
@@ -16,6 +17,9 @@ vi.mock("@/lib/conversational-capture", async (importOriginal) => {
 });
 vi.mock("@/app/relationships/conversational-actions", () => ({
   saveReviewedPersonCapture: mocks.saveReviewedPersonCapture,
+}));
+vi.mock("@/app/relationships/actions", () => ({
+  learnFromNewPastedConversation: mocks.learnFromNewPastedConversation,
 }));
 vi.mock("@/app/relationships/capture-actions", () => ({
   saveQuickCaptureWithoutRedirect: mocks.saveQuickCaptureWithoutRedirect,
@@ -42,6 +46,7 @@ describe("Home review/save privacy and identity boundaries", () => {
     mocks.saveReviewedPersonCapture.mockResolvedValue({
       saved: true, destination: "/relationships/tom?updated=1",
     });
+    mocks.learnFromNewPastedConversation.mockResolvedValue({ relationshipId: "new-person" });
     mocks.saveQuickCaptureWithoutRedirect.mockResolvedValue({ captureId: "capture-1" });
     mocks.savePersonalMoment.mockResolvedValue({ id: "moment-1" });
   });
@@ -58,14 +63,31 @@ describe("Home review/save privacy and identity boundaries", () => {
     expect(mocks.saveReviewedPersonCapture).not.toHaveBeenCalled();
   });
 
-  it("requires an existing person to store a conversation without raw persistence", async () => {
-    await expect(saveHomeInput({ ...base, relationshipId: "" })).rejects.toThrow("existing person");
+  it("requires a selected or explicitly named person and never saves a conversation as a raw note", async () => {
+    await expect(saveHomeInput({ ...base, relationshipId: "" })).rejects.toThrow("Choose or name the person");
+    expect(mocks.learnFromNewPastedConversation).not.toHaveBeenCalled();
+    expect(mocks.saveReviewedPersonCapture).not.toHaveBeenCalled();
     expect(mocks.saveQuickCaptureWithoutRedirect).not.toHaveBeenCalled();
     const result = await saveHomeInput(base);
     expect(result).toEqual({ saved: true, destination: "/relationships/tom?updated=1" });
     expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("tom", {
       text: base.text, kind: "conversation", source: "meeting", interactionDate: "2026-11-23",
     });
+  });
+
+  it("routes an explicitly named new person through structured conversation extraction", async () => {
+    const submissionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const result = await saveHomeInput({ ...base, relationshipId: "", newPersonLabel: "Fictional Tom", submissionId });
+    expect(result).toEqual({ saved: true, destination: "/relationships/new-person?updated=1" });
+    expect(mocks.learnFromNewPastedConversation).toHaveBeenCalledOnce();
+    const [name, form] = mocks.learnFromNewPastedConversation.mock.calls[0];
+    expect(name).toBe("Fictional Tom");
+    expect(form.get("transcript")).toBe(base.text);
+    expect(form.get("source")).toBe("meeting");
+    expect(form.get("interactionDate")).toBe(base.interactionDate);
+    expect(form.get("submissionId")).toBe(submissionId);
+    expect(mocks.saveReviewedPersonCapture).not.toHaveBeenCalled();
+    expect(mocks.saveQuickCaptureWithoutRedirect).not.toHaveBeenCalled();
   });
 
   it("protects original notes against obvious copied transcripts", async () => {

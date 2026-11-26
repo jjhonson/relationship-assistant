@@ -506,9 +506,12 @@ export async function saveConfirmedConnectionEvents(
  */
 export async function saveInferredConversation(
   relationshipId: string, extraction: InteractionExtraction, source: RelationshipSource,
-  requestId?: string,
+  requestId?: string, initialRecord?: RelationshipRecord,
 ) {
   validateSubmissionId(requestId);
+  if (initialRecord && (!requestId || initialRecord.id !== requestId ||
+      relationshipId !== initialRecord.id || source.id !== "pasted:" + requestId ||
+      !source.submissionDigest)) throw new Error("Invalid new-person save request.");
   return mutateStore((store) => {
     if (requestId &&
         (store.captures.some((capture) => capture.requestId === requestId) ||
@@ -520,7 +523,15 @@ export async function saveInferredConversation(
       throw new Error("This save request belongs to another relationship.");
     }
     const index = store.relationships.findIndex((item) => item.id === relationshipId);
-    if (index < 0) throw new Error("Relationship not found.");
+    if (index < 0) {
+      if (!initialRecord) throw new Error("Relationship not found.");
+      if (store.relationships.some((person) =>
+          person.personLabel.trim().toLowerCase() === initialRecord.personLabel.trim().toLowerCase())) {
+        throw new Error("A person with that name already exists. Select the existing relationship or distinguish the name.");
+      }
+      store.relationships.push(mergeInteractionIntoRelationship(initialRecord, extraction, source));
+      return { relationshipId, duplicate: false as const };
+    }
     const existing = store.relationships[index].sources.find((item) => item.id === source.id);
     if (existing) {
       if (!requestId || !source.submissionDigest ||
@@ -529,6 +540,7 @@ export async function saveInferredConversation(
       }
       return { relationshipId, duplicate: true as const };
     }
+    if (initialRecord) throw new Error("This new-person save request conflicts with an existing relationship.");
     store.relationships[index] = mergeInteractionIntoRelationship(
       store.relationships[index], extraction, source,
     );

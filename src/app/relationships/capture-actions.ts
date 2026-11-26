@@ -1,5 +1,7 @@
 "use server";
 
+import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { captureInterpretationText } from "@/lib/capture";
@@ -16,9 +18,6 @@ import {
   saveRelationship,
 } from "@/lib/relationship-store";
 
-function ensureDevelopment() {
-  if (process.env.NODE_ENV !== "development") throw new Error("Capture is only enabled in local development.");
-}
 
 async function interpretIfAvailable(id: string) {
   const apiKey = process.env.OPENAI_API_KEY ?? "";
@@ -58,7 +57,7 @@ export async function saveUniversalCaptureWithoutRedirect(
   contextRelationshipId: string | null,
   formData: FormData,
 ) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const rawNote = formData.get("note");
   const rawPhoto = formData.get("photo");
   if (typeof rawNote !== "string") return { error: "Write a note or choose a photo." };
@@ -109,7 +108,7 @@ export async function saveUniversalCaptureWithoutRedirect(
 export async function saveQuickCaptureWithoutRedirect(
   contextRelationshipId: string | null, formData: FormData,
 ) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const raw = formData.get("note");
   if (typeof raw !== "string") throw new Error("Note text is required.");
   const requestId = formData.get("submissionId");
@@ -132,7 +131,7 @@ export async function saveQuickCapture(contextRelationshipId: string | null, for
 }
 
 export async function retryQuickCapture(id: string) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   await interpretIfAvailable(id);
   revalidatePath("/relationships");
   revalidatePath("/captures/" + id);
@@ -140,7 +139,7 @@ export async function retryQuickCapture(id: string) {
 }
 
 export async function linkCapturedPerson(id: string, formData: FormData) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const rawIndex = formData.get("personIndex");
   const rawChoice = formData.get("relationshipId");
   if (typeof rawIndex !== "string" || !/^\d{1,2}$/.test(rawIndex) || typeof rawChoice !== "string") {
@@ -156,7 +155,7 @@ export async function linkCapturedPerson(id: string, formData: FormData) {
 }
 
 export async function correctRelationshipName(id: string, formData: FormData) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const record = await getRelationship(id);
   if (!record) throw new Error("Relationship not found.");
   const rawName = formData.get("personLabel");
@@ -175,7 +174,7 @@ export async function correctRelationshipName(id: string, formData: FormData) {
 }
 
 export async function dismissInferredConnection(relationshipId: string, captureId: string, connectionId: string) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   await saveConnectionDismissal(captureId, connectionId, relationshipId);
   revalidatePath("/relationships/" + relationshipId);
   revalidatePath("/captures/" + captureId);

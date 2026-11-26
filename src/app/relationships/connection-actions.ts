@@ -1,5 +1,7 @@
 "use server";
 
+import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
+
 import { revalidatePath } from "next/cache";
 import { looksLikePastedConversation } from "@/lib/conversational-capture";
 import {
@@ -11,11 +13,6 @@ import { interpretConnectionUpdate } from "@/lib/connection-update-inference";
 import { interpretMultiEventUpdate } from "@/lib/connection-multi-event";
 import { type ConfirmedConnectionEvent, type ConnectionJourney } from "@/lib/connection-journey";
 
-function ensureDevelopment() {
-  if (process.env.NODE_ENV !== "development") {
-    throw new Error("Connection activity is available only in local development.");
-  }
-}
 
 function localToday() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -38,7 +35,7 @@ async function assertJourney(personId: string, journeyId: string): Promise<{
 
 /** A tracked possibility is not itself evidence that contact occurred. */
 export async function beginConnection(personId: string, subject: string, basisId = "") {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const journey = await startConnectionJourney(
     personId, subject, basisId, process.env.RELATIONSHIP_USER_LABEL ?? "Jason",
   );
@@ -48,7 +45,7 @@ export async function beginConnection(personId: string, subject: string, basisId
 
 /** Deliberate model call to help classify a first-person update; never writes. */
 export async function previewConnectionActivity(personId: string, journeyId: string, text: string) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const { personLabel, journey } = await assertJourney(personId, journeyId);
   return interpretConnectionUpdate({
     text, person: personLabel, subject: journey.subject, today: localToday(),
@@ -62,7 +59,7 @@ export async function previewConnectionActivity(personId: string, journeyId: str
 export async function confirmConnectionActivity(
   personId: string, journeyId: string, input: ConfirmedConnectionEvent,
 ) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   if (!input || typeof input.summary !== "string" || typeof input.outcome !== "string" ||
       typeof input.happenedOn !== "string" || typeof input.kind !== "string") {
     throw new Error("Review and confirm the action, date, and summary.");
@@ -81,7 +78,7 @@ export async function confirmConnectionActivity(
 export async function previewMultipleConnectionActivities(
   personId: string, journeyId: string, text: string,
 ) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const { personLabel, journey } = await assertJourney(personId, journeyId);
   return interpretMultiEventUpdate({
     text, person: personLabel, subject: journey.subject, today: localToday(),
@@ -98,7 +95,7 @@ export async function confirmMultipleConnectionActivities(
   events: ConfirmedConnectionEvent[],
   confirmationId: string,
 ) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   if (!Array.isArray(events) || events.length < 1 || events.length > 5) {
     throw new Error("Select one to five actual events before confirming.");
   }
