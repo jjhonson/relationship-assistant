@@ -515,6 +515,10 @@ export async function saveInferredConversation(
          store.moments.some((moment) => moment.requestId === requestId))) {
       throw new Error("This save request was already used for different material.");
     }
+    if (requestId && store.relationships.some((person) =>
+      person.id !== relationshipId && person.sources.some((item) => item.id === source.id))) {
+      throw new Error("This save request belongs to another relationship.");
+    }
     const index = store.relationships.findIndex((item) => item.id === relationshipId);
     if (index < 0) throw new Error("Relationship not found.");
     const existing = store.relationships[index].sources.find((item) => item.id === source.id);
