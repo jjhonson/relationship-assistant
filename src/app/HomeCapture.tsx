@@ -212,10 +212,9 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
           </button>
         </div>
       </form>
-      <div className="px-3 pb-1 pt-3 text-xs leading-relaxed text-stone-500">
-        <span>Paste conversations or use device dictation. Text is reviewed before saving.</span>
-        <details className="mt-1">
-          <summary className="cursor-pointer hover:text-stone-800">How memory is handled</summary>
+      <div className="px-3 pb-1 pt-2 text-xs leading-relaxed text-stone-500">
+        <details>
+          <summary className="cursor-pointer hover:text-stone-800">Privacy &amp; sources</summary>
           <p className="mt-1 max-w-2xl">
             Nothing is stored until you confirm. Pasted conversations are reduced to sourced memory
             without retaining the transcript. Photo capture sends the image to the configured model
