@@ -66,6 +66,7 @@ export function planHomeCapture(input: {
   people: HomePersonChoice[];
   today: string;
   choices?: HomeCaptureChoices;
+  importedTextFile?: boolean;
 }): HomeCapturePlan {
   const { text, interpretation, people, today } = input;
   const choices = input.choices ?? {};
@@ -75,6 +76,13 @@ export function planHomeCapture(input: {
   // recognizable pasted third-party dialogue to be retained as a user note.
   const pasted = looksLikePastedConversation(text);
   const kind = pasted ? "conversation" : type;
+  if (input.importedTextFile && !choices.kind && kind !== "conversation") {
+    return {
+      state: "clarify", field: "kind",
+      question: "Is this your own writing or copied conversation material?",
+      choices,
+    };
+  }
   if (kind === "uncertain") return {
     state: "clarify", field: "kind",
     question: "Is this your own note, a private thought, or a pasted conversation?",
