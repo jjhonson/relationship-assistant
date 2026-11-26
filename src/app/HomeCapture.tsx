@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRef, useState, useTransition, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { saveHomePhotoInput, submitHomeText } from "./home/actions";
@@ -40,7 +39,7 @@ export default function HomeCapture({
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const currentPersonLabel = choices.relationshipId && choices.relationshipId !== contextRelationshipId
-    ? choices.relationshipId === "__new__" ? "Someone new" :
+    ? choices.relationshipId === "__new__" ? choices.newPersonLabel?.trim() || "Someone new" :
       people.find((person) => person.id === choices.relationshipId)?.label ?? contextPersonLabel
     : contextPersonLabel;
   // Reuse this key after network uncertainty; never create another record on retry.
@@ -104,9 +103,14 @@ export default function HomeCapture({
       setError("Write something or choose a photo.");
       return;
     }
+    if (!photo && text.trim().length > 80_000) {
+      setError("This input is longer than 80,000 characters. Your full text is still here; nothing was submitted.");
+      return;
+    }
     if (clarification &&
         ((clarification.field === "kind" && !choices.kind) ||
-         (clarification.field === "person" && !choices.relationshipId) ||
+         (clarification.field === "person" && (!choices.relationshipId ||
+           (clarification.kind === "conversation" && choices.relationshipId === "__new__" && !choices.newPersonLabel?.trim()))) ||
          (clarification.field === "date" && !choices.interactionDate))) {
       setError("Answer the question before saving.");
       return;
@@ -153,11 +157,17 @@ export default function HomeCapture({
         <textarea
           id="home-capture-input" value={text}
           onChange={(event) => changeText(event.target.value)}
-          maxLength={80_000} rows={6} disabled={saving}
+          rows={6} disabled={saving}
           placeholder={contextPersonLabel ? "Remember a conversation or something about " + contextPersonLabel + "…" :
             PROMPTS[promptIndex]}
           className="min-h-44 w-full resize-y rounded-2xl bg-white px-3 py-3 text-base leading-relaxed text-stone-900 outline-none placeholder:text-stone-400 focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-70 sm:min-h-52 sm:px-4"
         />
+
+        {!photo && text.length > 80_000 && (
+          <p role="status" className="mx-3 mb-3 text-xs text-stone-600">
+            {text.length.toLocaleString()} characters; the current limit is 80,000. Your text has not been shortened.
+          </p>
+        )}
 
         {photo && (
           <div className="mx-2 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs sm:mx-3">
@@ -199,16 +209,18 @@ export default function HomeCapture({
                     <option value="">Choose a person</option>
                     {people.map((person) =>
                       <option key={person.id} value={person.id}>{person.label}</option>)}
-                    {clarification.kind !== "conversation" && (
-                      <option value="__new__">Someone new (review the new record afterward)</option>
-                    )}
+                    <option value="__new__">{clarification.kind === "conversation"
+                      ? "Someone new" : "Someone new (review the new record afterward)"}</option>
                   </select>
                 </label>
-                {people.length === 0 && clarification.kind === "conversation" && (
-                  <p className="text-xs text-stone-600">
-                    Save the person first in <Link href="/relationships"
-                      className="underline underline-offset-2">Relationships</Link>.
-                  </p>
+                {clarification.kind === "conversation" && choices.relationshipId === "__new__" && (
+                  <label className="block text-sm text-stone-700">
+                    Name
+                    <input type="text" value={choices.newPersonLabel ?? ""} maxLength={120} disabled={saving}
+                      onChange={(event) => setChoices((previous) => ({ ...previous, newPersonLabel: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
+                      placeholder="Name of the person in this conversation" />
+                  </label>
                 )}
               </>
             )}

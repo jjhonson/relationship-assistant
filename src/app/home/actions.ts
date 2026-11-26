@@ -1,18 +1,16 @@
 "use server";
 
+import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
+
 import { revalidatePath } from "next/cache";
 import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { suggestHomePerson } from "@/lib/home-identity";
 import { planHomeCapture, type HomeCaptureChoices } from "@/lib/home-direct-capture";
 import { getRelationship, listRelationships, savePersonalMoment } from "@/lib/relationship-store";
 import { saveReviewedPersonCapture } from "@/app/relationships/conversational-actions";
+import { learnFromNewPastedConversation } from "@/app/relationships/actions";
 import { saveQuickCaptureWithoutRedirect, saveUniversalCaptureWithoutRedirect } from "@/app/relationships/capture-actions";
 
-function requireDevelopment() {
-  if (process.env.NODE_ENV !== "development") {
-    throw new Error("Home capture is available only in local development.");
-  }
-}
 function localToday() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver",
@@ -22,7 +20,7 @@ function localToday() {
 
 /** Explicit user-requested interpretation. No database mutation or automatic AI scan on load. */
 export async function previewHomeInput(text: string) {
-  requireDevelopment();
+  requirePrivateAlphaRuntime();
   if (typeof text !== "string" || !text.trim() || text.trim().length > 80_000) {
     throw new Error("Enter up to 80,000 characters to review.");
   }
@@ -46,12 +44,13 @@ export type ReviewedHomeInput = {
   source: CaptureSource;
   interactionDate: string;
   relationshipId: string;
+  newPersonLabel?: string;
   submissionId?: string;
 };
 
 /** A confirmed input uses one existing retention path, never an automatic relationship merge. */
 export async function saveHomeInput(input: ReviewedHomeInput) {
-  requireDevelopment();
+  requirePrivateAlphaRuntime();
   if (!input || typeof input.text !== "string" || !input.text.trim() ||
       input.text.trim().length > 80_000) {
     throw new Error("Please enter text to save.");
@@ -73,10 +72,20 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
     return { saved: true as const, destination: "/moments?saved=" + encodeURIComponent(saved.id) };
   }
   if (input.kind === "conversation") {
-    if (!input.relationshipId) throw new Error("Choose an existing person for this conversation.");
+    if (!input.relationshipId && !input.newPersonLabel?.trim()) throw new Error("Choose or name the person in this conversation.");
     if (!input.interactionDate || input.interactionDate > localToday()) {
       throw new Error("Provide the actual conversation date before saving.");
     }
+  }
+  if (input.kind === "conversation" && !input.relationshipId && input.newPersonLabel) {
+    const form = new FormData();
+    form.set("source", input.source);
+    form.set("interactionDate", input.interactionDate);
+    form.set("transcript", input.text);
+    if (input.submissionId) form.set("submissionId", input.submissionId);
+    const saved = await learnFromNewPastedConversation(input.newPersonLabel, form);
+    revalidatePath("/");
+    return { saved: true as const, destination: "/relationships/" + encodeURIComponent(saved.relationshipId) + "?updated=1" };
   }
   if (input.kind === "note" && !input.relationshipId) {
     // Only user-authored notes use the older global person-discovery path.
@@ -104,7 +113,7 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
 
 /** Same one-input Home, existing photo pipeline; nothing is stored until the user clicks Save. */
 export async function saveHomePhotoInput(formData: FormData, contextRelationshipId?: string) {
-  requireDevelopment();
+  requirePrivateAlphaRuntime();
   if (contextRelationshipId && !(await getRelationship(contextRelationshipId))) {
     throw new Error("The selected relationship is no longer available.");
   }
@@ -132,7 +141,7 @@ export async function submitHomeText(input: {
   importedTextFile?: boolean;
   contextRelationshipId?: string;
 }) {
-  requireDevelopment();
+  requirePrivateAlphaRuntime();
   if (!input || typeof input.text !== "string" || !input.text.trim() ||
       input.text.trim().length > 80_000 ||
       typeof input.submissionId !== "string" ||
@@ -178,6 +187,7 @@ export async function submitHomeText(input: {
     kind: plan.kind,
     source: plan.source,
     relationshipId: plan.relationshipId,
+    newPersonLabel: plan.kind === "conversation" && !plan.relationshipId ? plan.choices.newPersonLabel : undefined,
     interactionDate: plan.interactionDate,
     submissionId: input.submissionId,
   });

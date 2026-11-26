@@ -1,5 +1,7 @@
 "use server";
 
+import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
+
 import { createHash, randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -26,6 +28,7 @@ import {
   replaceRelationshipIntention,
   replaceRelationshipLabels,
   type RelationshipSource,
+  type RelationshipRecord,
 } from "@/lib/relationship-record";
 import {
   findRelationshipByIdentity,
@@ -169,7 +172,7 @@ export async function saveDiscoveredRelationship(
 }
 
 export async function updateRelationshipLabels(id: string, formData: FormData) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const record = await getRelationship(id);
   if (!record) throw new Error("Relationship not found.");
 
@@ -192,7 +195,7 @@ export async function updateRelationshipLabels(id: string, formData: FormData) {
 }
 
 export async function updateRelationshipIntention(id: string, formData: FormData) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const record = await getRelationship(id);
   if (!record) throw new Error("Relationship not found.");
 
@@ -218,7 +221,7 @@ export async function updateRelationshipIntention(id: string, formData: FormData
 }
 
 export async function createManualRelationship(formData: FormData) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const personLabel = String(formData.get("personLabel") ?? "").trim();
   if (!personLabel) throw new Error("Name is required.");
 
@@ -239,10 +242,28 @@ export async function createManualRelationship(formData: FormData) {
 
 /** Shared persistence path; callers choose their navigation after success. */
 export async function learnFromPastedConversation(id: string, formData: FormData) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const record = await getRelationship(id);
   if (!record) throw new Error("Relationship not found.");
+  return learnConversation(record, formData);
+}
 
+/** Explicitly named new person; do not create a placeholder if extraction fails. */
+export async function learnFromNewPastedConversation(personLabel: string, formData: FormData) {
+  requirePrivateAlphaRuntime();
+  if (typeof personLabel !== "string" || !personLabel.trim() || personLabel.trim().length > 120 ||
+      /[\x00-\x1f\x7f]/.test(personLabel)) throw new Error("Enter a valid name for the new person.");
+  const requestId = formData.get("submissionId");
+  if (typeof requestId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw new Error("A private save request identifier is required.");
+  }
+  const record: RelationshipRecord = { ...createManualRelationshipRecord(personLabel.trim()),
+    id: requestId, personLabelAuthority: "user-confirmed" };
+  return learnConversation(record, formData, true);
+}
+
+async function learnConversation(record: RelationshipRecord, formData: FormData, createNew = false) {
+  const id = record.id;
   const { transcript, interactionDate, sourceLabel } = parsePastedConversation({
     transcript: formData.get("transcript"),
     interactionDate: formData.get("interactionDate"),
@@ -296,13 +317,14 @@ export async function learnFromPastedConversation(id: string, formData: FormData
     observedAt: interactionDate,
     label: sourceLabel,
     ...(requestId ? { submissionDigest: createHash("sha256")
-      .update(JSON.stringify({ interactionDate, sourceLabel, transcript }))
+      .update(JSON.stringify({ interactionDate, sourceLabel, transcript,
+        ...(createNew ? { newPersonLabel: record.personLabel } : {}) }))
       .digest("hex") } : {}),
   };
 
   // A replay with this same request ID never recreates sourced memory, and
   // the merge uses the freshest committed relationship record.
-  await saveInferredConversation(id, result.extraction, source, requestId);
+  await saveInferredConversation(id, result.extraction, source, requestId, createNew ? record : undefined);
 
   revalidatePath("/relationships");
   revalidatePath("/relationships/" + id);
@@ -318,7 +340,7 @@ export async function addTranscriptInteraction(id: string, formData: FormData) {
 
 /** On-demand ideas only. No raw transcripts, sent messages, or saved recommendations. */
 export async function reviewRelationshipConnection(id: string) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const record = await getRelationship(id);
   if (!record) throw new Error("Relationship not found.");
 

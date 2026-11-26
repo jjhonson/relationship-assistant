@@ -7,6 +7,7 @@ type KnownKind = Exclude<CaptureKind, "uncertain">;
 export type HomeCaptureChoices = {
   kind?: KnownKind;
   relationshipId?: string;
+  newPersonLabel?: string;
   interactionDate?: string;
 };
 export type HomeCapturePlan =
@@ -122,7 +123,7 @@ export function planHomeCapture(input: {
       question: needsChoice
         ? "Which saved person is this about?"
         : kind === "conversation"
-          ? "Which saved person is in this conversation?"
+          ? "Who was this conversation with?"
           : "Who is this note about?",
       choices,
     };
@@ -131,7 +132,11 @@ export function planHomeCapture(input: {
     throw new Error("The selected relationship is no longer available.");
   }
   if (kind === "conversation" && selected === "__new__") {
-    throw new Error("Pasted conversations need an existing relationship.");
+    const name = choices.newPersonLabel?.trim() ?? "";
+    if (!name || name.length > 120 || /[\x00-\x1f\x7f]/.test(name)) {
+      return { state: "clarify", field: "person", kind,
+        question: "What is the name of the person in this conversation?", choices };
+    }
   }
 
   const textDay = reportedConversationDay(text, today);

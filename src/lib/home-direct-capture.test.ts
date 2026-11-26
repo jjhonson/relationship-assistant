@@ -184,3 +184,20 @@ describe("one-step Home capture planning", () => {
     })).toMatchObject({ state: "ready", kind: "note", relationshipId: "" });
   });
 });
+
+
+describe("conversation with a new person", () => {
+  const input = { text: "Morgan: I have started a fictional project.\nMe: Interesting.",
+    interpretation: { ...note, kind: "conversation" as const, source: "meeting" as const },
+    people: [], today };
+  it("asks for a person, then the actual date, without requiring a separate profile", () => {
+    expect(planHomeCapture(input)).toMatchObject({ state: "clarify", field: "person" });
+    expect(planHomeCapture({ ...input, choices: { relationshipId: "__new__" } }))
+      .toMatchObject({ state: "clarify", field: "person" });
+    expect(planHomeCapture({ ...input, choices: { relationshipId: "__new__", newPersonLabel: "Fictional Morgan" } }))
+      .toMatchObject({ state: "clarify", field: "date" });
+    expect(planHomeCapture({ ...input, choices: { relationshipId: "__new__", newPersonLabel: "Fictional Morgan",
+      interactionDate: "2026-11-24" } }))
+      .toMatchObject({ state: "ready", kind: "conversation", relationshipId: "", interactionDate: "2026-11-24" });
+  });
+});

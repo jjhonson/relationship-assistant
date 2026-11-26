@@ -1,16 +1,13 @@
 "use server";
 
+import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
+
 import { revalidatePath } from "next/cache";
 import { getRelationship, savePersonalMoment } from "@/lib/relationship-store";
 import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { learnFromPastedConversation } from "./actions";
 import { saveQuickCaptureWithoutRedirect } from "./capture-actions";
 
-function ensureDevelopment() {
-  if (process.env.NODE_ENV !== "development") {
-    throw new Error("Conversational capture is available only in local development.");
-  }
-}
 
 function localToday() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -21,7 +18,7 @@ function localToday() {
 
 /** Interpret on explicit request. Does not write notes, third-party text or model results. */
 export async function previewPersonCapture(relationshipId: string, text: string) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const person = await getRelationship(relationshipId);
   if (!person) throw new Error("Relationship not found.");
   return interpretConversationalCapture({ text, personLabel: person.personLabel, currentDate: localToday() }, {
@@ -40,7 +37,7 @@ type ReviewedInput = {
 
 /** Explicit human approval picks a retention path. Pasted conversations are NEVER saved raw. */
 export async function saveReviewedPersonCapture(relationshipId: string, input: ReviewedInput) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const person = await getRelationship(relationshipId);
   if (!person) throw new Error("Relationship not found.");
   if (!input || typeof input.text !== "string" || !input.text.trim() ||

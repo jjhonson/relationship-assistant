@@ -1,5 +1,7 @@
 "use server";
 
+import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
+
 import { revalidatePath } from "next/cache";
 import {
   correctSavedActionableMemory, dismissSavedConnectionSuggestion,
@@ -7,11 +9,6 @@ import {
 import type { ActionableMemoryTarget, ActionableMemoryDisposition } from "@/lib/relationship-record";
 import { userOwnsCommitment } from "@/lib/connection-subjects";
 
-function ensureDevelopment() {
-  if (process.env.NODE_ENV !== "development") {
-    throw new Error("Memory corrections are available only in local development.");
-  }
-}
 
 function revalidateRelationship(personId: string) {
   revalidatePath("/relationships/" + personId);
@@ -25,7 +22,7 @@ export async function correctRelationshipActionableMemory(
   target: ActionableMemoryTarget,
   formData: FormData,
 ) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   const raw = formData.get("decision");
   if (raw !== "Done" && raw !== "Not relevant" && raw !== "Incorrect" && raw !== "Edit") {
     throw new Error("Choose how to correct the memory.");
@@ -49,7 +46,7 @@ export async function correctRelationshipActionableMemory(
 }
 
 export async function dismissRelationshipConnectionIdea(personId: string, basisId: string) {
-  ensureDevelopment();
+  requirePrivateAlphaRuntime();
   await dismissSavedConnectionSuggestion(
     personId, basisId, process.env.RELATIONSHIP_USER_LABEL ?? "Jason",
   );
