@@ -134,15 +134,20 @@ export async function submitHomeText(input: {
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.submissionId)) {
     throw new Error("Invalid private save request.");
   }
-  const [preview, known] = await Promise.all([
-    previewHomeInput(input.text),
-    listRelationships(),
-  ]);
+  const today = localToday();
+  const known = await listRelationships();
+  // Do not send the contact list to the model; resolve names locally.
+  const interpretation = await interpretConversationalCapture({
+    text: input.text, personLabel: "No existing person selected", currentDate: today,
+  }, {
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    model: process.env.OPENAI_RELATIONSHIP_MODEL,
+  });
   const plan = planHomeCapture({
     text: input.text,
-    interpretation: preview.interpretation,
+    interpretation,
     people: known.map((person) => ({ id: person.id, label: person.personLabel })),
-    today: localToday(),
+    today,
     choices: input.choices,
   });
   if (plan.state === "clarify") return plan;
