@@ -35,6 +35,8 @@ These examples are for a trusted administrator in an existing, private server en
 
 ## Evidence so far
 
+- **Nov 26 independent real-PostgreSQL drill PASSED:** [GitHub Actions run 45870155564](https://github.com/jjhonson/relationship-assistant/actions/runs/45870155564) provisioned two independent clean PostgreSQL 17 server containers, applied the two production schema migrations to each, wrote a synthetic source dataset, encrypted it with the actual AES-256-GCM/scrypt backup module, decrypted it, restored into the second database using the real SQL gateway, and re-read it with matching canonical SHA-256 digest. Stable source IDs, correction history, capture, moment, connection journey, and unknown forward-compatible fields survived. Wrong-passphrase, altered ciphertext, occupied destination, orphaned relationship and unauthorized browser roles were rejected. **This test uses invented fixtures only**, not the live Codespace Supabase dataset or an offsite snapshot; it does not by itself complete the personal-alpha recovery gate.
+
 - Live private development database currently contains only synthetic `Fictional Judy Test` and one fictional 5K article moment, dataset revision 2; existing source and corrected relationship labels have been verified.
 - SQL exercise on November 25 imported the complete current fictional document into another empty owner namespace in the same Supabase project, proved **JSONB equality** and record counts, and rolled the transaction back. This confirms transactional logical restoration but **does not** satisfy separate-project recovery.
 - Automated recovery checks cover encryption/decryption, authenticated tamper and wrong-passphrase rejection, exact provenance/correction/unknown-field preservation, destination collision refusal, separate-project simulated RPC restoration and re-read, and file permission/no-overwrite behavior.
@@ -42,7 +44,7 @@ These examples are for a trusted administrator in an existing, private server en
 
 ## Remaining acceptance gate
 
-1. CI green on this draft branch.
+1. Independent fictional PostgreSQL restoration CI green (completed Nov 26); rerun after changing recovery code.
 2. Perform real encrypted export from the current fictional Supabase dataset using protected server credentials, and move the file outside Codespace/Supabase.
 3. Restore the file to a separate **fresh database project**, not merely a new owner namespace. Compare IDs, sources, corrections, moments, captures and journeys.
 4. Demonstrate bad-passphrase, corrupt-file and occupied-destination refusal against the actual infrastructure; no unintended write.
