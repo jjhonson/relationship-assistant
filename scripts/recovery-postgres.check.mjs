@@ -8,6 +8,10 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { decryptSnapshot, documentDigest, encryptSnapshot } from "./recovery-crypto.mjs";
+import { restoreIntoDisposablePostgres, writeNewPrivateFile } from "./relationship-recovery.mjs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const sourcePort = 5432;
 const targetPort = 5433;
@@ -131,4 +135,25 @@ test("encrypted export restores into a different fresh PostgreSQL instance", () 
     "invalid restoration must not leave a partial dataset");
   assert.deepEqual(read(sourcePort, sourceOwner).document, source.document,
     "source remains unchanged after all recovery operations");
+});
+
+
+test("private-file recovery path restores an actual encrypted fixture file in isolated Docker", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "ra-recovery-fixture-"));
+  try {
+    const backup = encryptSnapshot({
+      ownerId: sourceOwner, revision: 9, document: fixture,
+      sourceProjectUrl: "https://fictional-original.supabase.co",
+    }, passphrase);
+    const file = await writeNewPrivateFile(join(folder, "synthetic.raenc"), backup);
+    const downloaded = await readFile(file);
+    assert.throws(() => decryptSnapshot(downloaded, "incorrect-synthetic-passphrase"),
+      /authentication failed/i);
+    const verified = await restoreIntoDisposablePostgres(decryptSnapshot(downloaded, passphrase));
+    assert.deepEqual(verified, {
+      verified: true, sourceRevision: 9, documentSha256: documentDigest(fixture),
+    });
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
 });
