@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { createManualRelationship } from "./actions";
-import QuickCaptureForm from "@/components/QuickCaptureForm";
 import { listRecentCaptures, listRelationships } from "@/lib/relationship-store";
 
 export const dynamic = "force-dynamic";
@@ -32,18 +31,17 @@ export default async function RelationshipsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
-          Relationship memory
-        </p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight">Relationship memory</h1>
-        <p className="mt-2 max-w-3xl text-stone-600">
-          Remember the people and moments that matter. A short note can start a new relationship
-          or add to one you already know. Call transcripts are handled separately and are not retained.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Relationships</h1>
+          <p className="mt-2 text-sm text-stone-600">
+            The people and memories you&apos;ve saved.
+          </p>
+        </div>
+        <Link href="/" className="text-sm font-medium text-stone-800 underline-offset-4 hover:underline">
+          Remember something ↗
+        </Link>
       </div>
-
-      <QuickCaptureForm />
 
       {recentCaptures.length > 0 && (
         <section>
@@ -69,7 +67,7 @@ export default async function RelationshipsPage() {
 
       <details className="rounded-2xl border border-stone-200 bg-white p-6">
         <summary className="cursor-pointer text-sm font-medium text-indigo-700">Or create a record using fields</summary>
-        <p className="mt-2 text-sm text-stone-600">Optional legacy form. Quick capture above needs none of these fields.</p>
+        <p className="mt-2 text-sm text-stone-600">Optional way to add a person without writing a memory first.</p>
         <form action={createManualRelationship} className="mt-4 grid gap-4 sm:grid-cols-3">
           <label className="text-sm font-medium text-stone-700">
             Name
