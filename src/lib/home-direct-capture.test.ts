@@ -29,6 +29,11 @@ describe("one-step Home capture planning", () => {
       .toBe("2026-11-25");
     expect(reportedConversationDay("I spoke with Judy yesterday. Her race may happen tomorrow.", today))
       .toBe("2026-11-24");
+    expect(reportedConversationDay("Yesterday, I spoke with Judy about the race.", today))
+      .toBe("2026-11-24");
+    expect(reportedConversationDay("I spoke with Judy about her race today.", today)).toBe("");
+    expect(reportedConversationDay("I spoke with Judy because she raced yesterday.", today)).toBe("");
+    expect(reportedConversationDay("I spoke with Judy; she ran yesterday.", today)).toBe("");
   });
 
   it("rolls over at month and year boundaries using local calendar day", () => {
