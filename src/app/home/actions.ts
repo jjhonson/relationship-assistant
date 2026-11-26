@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { suggestHomePerson } from "@/lib/home-identity";
-import { listRelationships, savePersonalMoment } from "@/lib/relationship-store";
+import { planHomeCapture, type HomeCaptureChoices } from "@/lib/home-direct-capture";
+import { getRelationship, listRelationships, savePersonalMoment } from "@/lib/relationship-store";
 import { saveReviewedPersonCapture } from "@/app/relationships/conversational-actions";
 import { saveQuickCaptureWithoutRedirect, saveUniversalCaptureWithoutRedirect } from "@/app/relationships/capture-actions";
 
@@ -45,6 +46,7 @@ export type ReviewedHomeInput = {
   source: CaptureSource;
   interactionDate: string;
   relationshipId: string;
+  submissionId?: string;
 };
 
 /** A confirmed input uses one existing retention path, never an automatic relationship merge. */
@@ -63,7 +65,9 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
 
   if (input.kind === "moment") {
     if (input.text.trim().length > 3_000) throw new Error("A moment can contain up to 3,000 characters.");
-    const saved = await savePersonalMoment({ description: input.text, consideration: "private" });
+    const saved = await savePersonalMoment({
+      description: input.text, consideration: "private", requestId: input.submissionId,
+    });
     revalidatePath("/");
     revalidatePath("/moments");
     return { saved: true as const, destination: "/moments?saved=" + encodeURIComponent(saved.id) };
@@ -80,6 +84,8 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
     if (input.text.trim().length > 5_000) throw new Error("A note can contain up to 5,000 characters.");
     const form = new FormData();
     form.set("note", input.text);
+    if (input.submissionId) form.set("submissionId", input.submissionId);
+    if (input.interactionDate) form.set("reportedInteractionAt", input.interactionDate);
     const { captureId } = await saveQuickCaptureWithoutRedirect(null, form);
     revalidatePath("/");
     return { saved: true as const, destination: "/captures/" + encodeURIComponent(captureId) };
@@ -90,22 +96,90 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
     kind: input.kind,
     source: input.source,
     interactionDate: input.interactionDate,
+    submissionId: input.submissionId,
   });
   revalidatePath("/");
   return result;
 }
 
 /** Same one-input Home, existing photo pipeline; nothing is stored until the user clicks Save. */
-export async function saveHomePhotoInput(formData: FormData) {
+export async function saveHomePhotoInput(formData: FormData, contextRelationshipId?: string) {
   requireDevelopment();
+  if (contextRelationshipId && !(await getRelationship(contextRelationshipId))) {
+    throw new Error("The selected relationship is no longer available.");
+  }
   const file = formData.get("photo");
   if (!(file instanceof File) || file.size === 0) {
     throw new Error("Choose a photo to save.");
   }
-  const result = await saveUniversalCaptureWithoutRedirect(null, formData);
+  const result = await saveUniversalCaptureWithoutRedirect(contextRelationshipId ?? null, formData);
   if (result.error || !result.captureId) {
     throw new Error(result.error ?? "Photo save could not be confirmed.");
   }
   revalidatePath("/");
   return { destination: "/captures/" + encodeURIComponent(result.captureId) };
+}
+
+/**
+ * One explicit Save request. Model classification is interpretation only;
+ * writes use the same established, source-aware retention paths. On uncertainty
+ * we return one narrow question and do not mutate any store.
+ */
+export async function submitHomeText(input: {
+  text: string;
+  submissionId: string;
+  choices?: HomeCaptureChoices;
+  importedTextFile?: boolean;
+  contextRelationshipId?: string;
+}) {
+  requireDevelopment();
+  if (!input || typeof input.text !== "string" || !input.text.trim() ||
+      input.text.trim().length > 80_000 ||
+      typeof input.submissionId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.submissionId)) {
+    throw new Error("Invalid private save request.");
+  }
+  const today = localToday();
+  const known = await listRelationships();
+  const pageContext = input.contextRelationshipId
+    ? known.find((person) => person.id === input.contextRelationshipId) : undefined;
+  if (input.contextRelationshipId && !pageContext) {
+    throw new Error("The open relationship is no longer available.");
+  }
+  const chosenId = input.choices?.relationshipId;
+  const chosenPerson = chosenId && chosenId !== "__new__"
+    ? known.find((person) => person.id === chosenId) : undefined;
+  if (chosenId && chosenId !== "__new__" && !chosenPerson) {
+    throw new Error("The selected relationship is no longer available.");
+  }
+  // The page context (or an explicit corrected selection) may help interpret
+  // pronouns. Send one label only, never the full private contact list.
+  const interpretation = await interpretConversationalCapture({
+    text: input.text, personLabel: chosenPerson?.personLabel ??
+      (chosenId === "__new__" ? "No existing person selected" :
+        pageContext?.personLabel ?? "No existing person selected"),
+    currentDate: today,
+  }, {
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    model: process.env.OPENAI_RELATIONSHIP_MODEL,
+  });
+  const plan = planHomeCapture({
+    text: input.text,
+    interpretation,
+    people: known.map((person) => ({ id: person.id, label: person.personLabel })),
+    today,
+    choices: input.choices,
+    importedTextFile: input.importedTextFile === true,
+    contextRelationshipId: input.contextRelationshipId,
+  });
+  if (plan.state === "clarify") return plan;
+  const saved = await saveHomeInput({
+    text: input.text,
+    kind: plan.kind,
+    source: plan.source,
+    relationshipId: plan.relationshipId,
+    interactionDate: plan.interactionDate,
+    submissionId: input.submissionId,
+  });
+  return { state: "saved" as const, destination: saved.destination };
 }

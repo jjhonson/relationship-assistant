@@ -58,6 +58,10 @@ export type CapturedPerson = CaptureParticipant & {
 export type CaptureEvent = {
   id: string;
   capturedAt: string;
+  // Present only for an explicit, user-initiated Home save. Supports atomic retry.
+  requestId?: string;
+  // Date of a user-reported conversation, distinct from the ingestion timestamp.
+  reportedInteractionAt?: string;
   source: "user-text" | "user-image";
   // Text notes are user-authored. Image captures preserve the user's optional note separately
   // from the text and visual details extracted from the intentionally supplied image.
@@ -75,12 +79,17 @@ export type CaptureEvent = {
   commitments: CaptureExtraction["commitments"];
 };
 
-export function newCaptureEvent(note: string, contextRelationshipId: string | null, now = new Date()): CaptureEvent {
+export function newCaptureEvent(
+  note: string, contextRelationshipId: string | null, now = new Date(),
+  options: { requestId?: string; reportedInteractionAt?: string } = {},
+): CaptureEvent {
   const value = note.trim();
   if (!value || value.length > 5_000) throw new Error("A note of up to 5,000 characters is required.");
   return {
     id: randomUUID(),
     capturedAt: now.toISOString(),
+    ...(options.requestId ? { requestId: options.requestId } : {}),
+    ...(options.reportedInteractionAt ? { reportedInteractionAt: options.reportedInteractionAt } : {}),
     source: "user-text",
     note: value,
     contextRelationshipId,
@@ -152,8 +161,9 @@ function capturedSource(event: CaptureEvent): RelationshipSource {
   return {
     id: "capture:" + event.id,
     source: "capture",
-    observedAt: event.capturedAt.slice(0, 10),
-    label: event.source === "user-image" ? "Photo you chose (image not retained)" : "Your saved note",
+    observedAt: event.reportedInteractionAt ?? event.capturedAt.slice(0, 10),
+    label: event.source === "user-image" ? "Photo you chose (image not retained)" :
+      event.reportedInteractionAt ? "Your note about a reported conversation" : "Your saved note",
   };
 }
 
@@ -206,6 +216,7 @@ function addParticipantMemory(
   person: CaptureParticipant,
   source: RelationshipSource,
   now: Date,
+  reportedInteractionAt?: string,
 ): RelationshipRecord {
   const durableFacts = [...record.durableFacts];
   for (const fact of participantFacts(person)) {
@@ -252,7 +263,11 @@ function addParticipantMemory(
   return {
     ...record,
     updatedAt: now.toISOString(),
-    // Capture time is *not* an inferred meeting date. Do not alter lastInteractionAt.
+    // Only a date explicitly established by the user's own report can update
+    // the known interaction. An ordinary capture timestamp never does.
+    lastInteractionAt: reportedInteractionAt &&
+      (!record.lastInteractionAt || reportedInteractionAt > record.lastInteractionAt)
+        ? reportedInteractionAt : record.lastInteractionAt,
     durableFacts,
     identities,
     history: {
@@ -308,7 +323,13 @@ export function applyCaptureExtraction(
 
     if (chosen) {
       const index = relationships.findIndex((record) => record.id === chosen!.id);
-      relationships[index] = addParticipantMemory(chosen, person, source, now);
+      relationships[index] = addParticipantMemory(
+        chosen, person, source, now,
+        (chosen.id === event.contextRelationshipId ||
+          (!event.contextRelationshipId &&
+            extraction.participants.filter((item) => item.name.trim()).length === 1))
+          ? event.reportedInteractionAt : undefined,
+      );
     }
     people.push({
       ...person,

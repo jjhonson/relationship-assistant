@@ -10,6 +10,8 @@ export type RelationshipSource = {
   source: "gmail" | "transcript" | "manual" | "capture";
   observedAt: string;
   label: string;
+  // Hash of unsaved pasted transcript + dated/source metadata, solely for retry identity.
+  submissionDigest?: string;
 };
 
 export type RelationshipIdentity = {

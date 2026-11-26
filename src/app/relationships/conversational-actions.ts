@@ -35,6 +35,7 @@ type ReviewedInput = {
   kind: Exclude<CaptureKind, "uncertain">;
   source: CaptureSource;
   interactionDate: string;
+  submissionId?: string;
 };
 
 /** Explicit human approval picks a retention path. Pasted conversations are NEVER saved raw. */
@@ -58,6 +59,7 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
     form.set("source", input.source);
     form.set("interactionDate", input.interactionDate);
     form.set("transcript", input.text);
+    if (input.submissionId) form.set("submissionId", input.submissionId);
     // Existing safe inference path retains only structured memory and sourced metadata.
     const { relationshipId: savedId } = await learnFromPastedConversation(relationshipId, form);
     return { saved: true as const, destination: "/relationships/" + encodeURIComponent(savedId) + "?updated=1" };
@@ -69,6 +71,8 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
     }
     const form = new FormData();
     form.set("note", input.text);
+    if (input.submissionId) form.set("submissionId", input.submissionId);
+    if (input.interactionDate) form.set("reportedInteractionAt", input.interactionDate);
     // Explicitly user-authored notes preserve their wording as an intentional memory.
     const { captureId } = await saveQuickCaptureWithoutRedirect(relationshipId, form);
     return { saved: true as const, destination: "/captures/" + encodeURIComponent(captureId) };
@@ -80,7 +84,9 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
       throw new Error("A personal moment can contain up to 1,000 characters.");
     }
     // A personal moment is private by default, without automatic matching or outreach.
-    const saved = await savePersonalMoment({ description: input.text, consideration: "private" });
+    const saved = await savePersonalMoment({
+      description: input.text, consideration: "private", requestId: input.submissionId,
+    });
     revalidatePath("/moments");
     return { saved: true as const, destination: "/moments?saved=" + encodeURIComponent(saved.id) };
   }

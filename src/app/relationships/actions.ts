@@ -1,6 +1,6 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { PilotAnalysisResult } from "@/app/real-pilot/actions";
@@ -22,7 +22,6 @@ import {
   createDiscoveredRelationshipRecord,
   createManualRelationshipRecord,
   createRelationshipRecord,
-  mergeInteractionIntoRelationship,
   relationshipIntentionModes,
   replaceRelationshipIntention,
   replaceRelationshipLabels,
@@ -32,6 +31,7 @@ import {
   findRelationshipByIdentity,
   getRelationship,
   listConnectionJourneys,
+  saveInferredConversation,
   saveRelationship,
 } from "@/lib/relationship-store";
 
@@ -285,15 +285,24 @@ export async function learnFromPastedConversation(id: string, formData: FormData
     model: process.env.OPENAI_RELATIONSHIP_MODEL,
   });
 
+  const rawRequestId = formData.get("submissionId");
+  const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : undefined;
+  if (requestId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw new Error("Invalid private save request identifier.");
+  }
   const source: RelationshipSource = {
-    id: "pasted:" + randomUUID(),
+    id: "pasted:" + (requestId ?? randomUUID()),
     source: "manual",
     observedAt: interactionDate,
     label: sourceLabel,
+    ...(requestId ? { submissionDigest: createHash("sha256")
+      .update(JSON.stringify({ interactionDate, sourceLabel, transcript }))
+      .digest("hex") } : {}),
   };
 
-  const updated = mergeInteractionIntoRelationship(record, result.extraction, source);
-  await saveRelationship(updated);
+  // A replay with this same request ID never recreates sourced memory, and
+  // the merge uses the freshest committed relationship record.
+  await saveInferredConversation(id, result.extraction, source, requestId);
 
   revalidatePath("/relationships");
   revalidatePath("/relationships/" + id);

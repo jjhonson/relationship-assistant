@@ -7,6 +7,8 @@ import { randomUUID } from "node:crypto";
 export type PersonalMoment = {
   id: string;
   createdAt: string;
+  // An opt-in immutable key for retry-safe Home submission.
+  requestId?: string;
   description: string;
   reflection: string;
   url: string;
@@ -16,6 +18,7 @@ export type PersonalMoment = {
 
 export type PersonalMomentInput = {
   description: string;
+  requestId?: string;
   reflection?: string;
   url?: string;
   consideration?: PersonalMoment["consideration"];
@@ -57,6 +60,7 @@ export function createPersonalMoment(
   return {
     id: randomUUID(),
     createdAt: now.toISOString(),
+    ...(input.requestId ? { requestId: input.requestId } : {}),
     description,
     reflection,
     url,
