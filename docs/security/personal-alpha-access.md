@@ -1,6 +1,6 @@
 # Personal-alpha access and privacy gate
 
-**Status:** database permission audit passed; live Codespace port visibility and real-data authorization remain unverified. This does not authorize real data.
+**Status:** database permission audit passed; owner confirmed forwarded port 3000 is Private on Nov 26. Signed-out access test, data isolation acceptance, backup cadence and real-data authorization remain outstanding. This does not authorize real data.
 
 ## Trust boundaries
 
@@ -12,10 +12,29 @@
 
 ## Gate before any real contacts
 
-- [ ] On the live Codespace PORTS tab, verify port 3000 says Private, not Public or Organization. Check that a new browser session requires GitHub authentication.
+- [x] Owner confirms forwarded port 3000 visibility is Private (Nov 26). Repository connector cannot independently inspect live forwarding.
+- [ ] Check that a signed-out browser cannot load the forwarded app without GitHub authentication.
 - [ ] Confirm there is no public deployment and server-only secrets remain protected, without pasting them.
-- [ ] Encrypted backup has left the Codespace and Supabase to owner-controlled storage, and has been restored into an independent clean Postgres environment with ID/source/digest reconciliation and refusal tests.
+- [x] Actual encrypted fictional backup left the Codespace and Supabase; the downloaded offsite file was restored into an isolated fresh PostgreSQL environment with exact digest, private access and occupied-destination checks (Nov 26, PR #77). This does not certify a full platform cutover.
 - [ ] Create a distinct real-data owner namespace separate from fictional test data, with an independently restorable recovery plan.
 - [ ] Obtain explicit owner authorization before entering real contacts. No passive ingestion or automatic communications.
 
 **Reference:** GitHub Codespaces Security, https://docs.github.com/en/codespaces/reference/security-in-github-codespaces ; Supabase Securing Your Data, https://supabase.com/docs/guides/database/secure-data.
+## Guarded application profiles
+
+Fictional development remains the default and uses the existing `RA_DB_OWNER_ID` and configuration. Do not modify or delete its records. Personal alpha is a separate, explicitly enabled, production-runtime profile. After review and owner opt-in, use an ignored mode-0600 `.data/personal.env` containing the following **placeholders**, not real values:
+
+```
+RA_DATASET_MODE=personal
+RA_STORAGE_BACKEND=supabase
+RA_PERSONAL_DATA_ENABLED=yes
+RA_PERSONAL_SUPABASE_URL=https://<approved-project>.supabase.co
+RA_PERSONAL_SUPABASE_SECRET_KEY=<private-server-secret>
+RA_PERSONAL_DB_OWNER_ID=<new-distinct-UUID>
+```
+
+Keep existing `.env.local` for fictional development. Never put personal activation variables into it or export them globally. Use a reviewed build (built with fictional configuration), stop the fictional runtime, and explicitly launch the personal runtime with `npm run personal` in the private Codespace. Normal `npm run dev` stays fictional; it refuses personal storage. Do not run simultaneous servers on the same forwarded port. The header identifies the active mode. No browser mode toggle. After stopping the personal runtime, resume ordinary fictional development. Verify the new namespace is empty before activating it.
+
+The server selects distinct owner IDs and profile credentials, refuses matching UUIDs and mode mismatches, and marks a newly initialized personal document. Existing unmarked snapshots are fictional-only; a personal snapshot is never relabeled as fictional by the adapter. Automated tests clear inherited dataset settings, permit only fixture endpoints in the adapter, and refuse unmocked Supabase network requests. The backup CLI uses the same profile selection and checks the snapshot marker before export. To back up the selected personal dataset, explicitly load both private files with `node --env-file=.env.local --env-file=.data/personal.env scripts/relationship-recovery.mjs backup --output FILE`. Continue storing the passphrase separately and copying the encrypted backup offsite.
+
+**Limits:** These are application-level accident-prevention controls, not database-enforced credential isolation. A shared service-role key can still directly address all owners, and older code or manual SQL could bypass this guard. The private port, no public deployment, owner-controlled credentials and reviewed builds remain mandatory. Separate hosted projects or scoped database identities would provide stronger separation; neither is provisioned here. Live profile activation, fictional-only end-to-end acceptance, signed-out access verification and explicit permission to use real contacts remain outstanding.

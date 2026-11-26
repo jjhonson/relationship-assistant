@@ -1,30 +1,23 @@
 import "server-only";
+import { assertDatasetPurpose, getDatasetMode, prepareDatasetForWrite, resolveDatasetProfile, type DatasetProfile } from "../../scripts/dataset-profile.mjs";
 
 type Snapshot = { revision: number; document: unknown };
 class Conflict extends Error {}
 export function isSupabaseStorageEnabled(): boolean {
+  const purpose = getDatasetMode();
+  if (purpose === "personal" && process.env.NODE_ENV !== "production")
+    throw new Error("Personal storage is available only in the reviewed production runtime.");
   const mode = process.env.RA_STORAGE_BACKEND;
   if (!mode || mode === "json") return false;
   if (mode === "supabase") return true;
   throw new Error("Unsupported relationship storage backend.");
 }
-function settings() {
-  const raw = process.env.RA_SUPABASE_URL;
-  const secret = process.env.RA_SUPABASE_SECRET_KEY;
-  const ownerId = process.env.RA_DB_OWNER_ID;
-  if (!raw || !secret || !ownerId) throw new Error("Private database is not configured.");
-  const url = new URL(raw);
-  if (url.protocol !== "https:" || !/^[a-z0-9-]+\.supabase\.co$/.test(url.hostname) ||
-      url.username || url.password || url.pathname !== "/")
-    throw new Error("Invalid Supabase project URL.");
-  if (!/^sb_secret_[A-Za-z0-9_-]+$/.test(secret))
-    throw new Error("A server-only Supabase secret key is required.");
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ownerId))
-    throw new Error("Invalid dataset identifier.");
-  return { base: url.origin, secret, ownerId };
+function settings(): DatasetProfile {
+  if (!isSupabaseStorageEnabled()) throw new Error("Private database is not configured.");
+  return resolveDatasetProfile();
 }
-async function rpc(name: "ra_store_read" | "ra_store_write", body: object): Promise<unknown> {
-  const { base, secret } = settings();
+async function rpc(profile: DatasetProfile, name: "ra_store_read" | "ra_store_write", body: object): Promise<unknown> {
+  const { base, secret } = profile;
   let response: Response;
   try {
     response = await fetch(base + "/rest/v1/rpc/" + name, {
@@ -46,21 +39,24 @@ async function rpc(name: "ra_store_read" | "ra_store_write", body: object): Prom
   try { return await response.json() as unknown; }
   catch { throw new Error("Invalid private database response."); }
 }
-export async function readSupabaseDocument(): Promise<Snapshot | null> {
-  const { ownerId } = settings();
-  const result = await rpc("ra_store_read", { p_owner_id: ownerId });
+async function read(profile: DatasetProfile): Promise<Snapshot | null> {
+  const result = await rpc(profile, "ra_store_read", { p_owner_id: profile.ownerId });
   if (result === null) return null;
   if (!result || typeof result !== "object" ||
       !("revision" in result) || !("document" in result) ||
       typeof result.revision !== "number" ||
       !Number.isSafeInteger(result.revision) || result.revision < 0)
     throw new Error("Invalid private database revision.");
+  assertDatasetPurpose(result.document, profile.mode);
   return { revision: result.revision, document: result.document };
 }
-async function write(document: unknown, previous: number) {
-  const { ownerId } = settings();
-  const result = await rpc("ra_store_write", {
-    p_owner_id: ownerId, p_expected_revision: previous, p_document: document,
+export async function readSupabaseDocument(): Promise<Snapshot | null> {
+  return read(settings());
+}
+async function write(profile: DatasetProfile, document: unknown, previous: number) {
+  const prepared = prepareDatasetForWrite(document, profile.mode, previous);
+  const result = await rpc(profile, "ra_store_write", {
+    p_owner_id: profile.ownerId, p_expected_revision: previous, p_document: prepared,
   });
   if (typeof result !== "number" || !Number.isSafeInteger(result) || result !== previous + 1)
     throw new Error("Invalid committed database revision.");
@@ -70,12 +66,13 @@ export async function mutateSupabaseDocument<TDoc, TResult>(
   normalize: (source: unknown) => TDoc,
   mutate: (document: TDoc) => TResult | Promise<TResult>,
 ): Promise<TResult> {
+  const profile = settings();
   for (let attempt = 0; attempt < 4; attempt++) {
-    const snapshot = await readSupabaseDocument();
+    const snapshot = await read(profile);
     const document = normalize(snapshot?.document);
     const result = await mutate(document);
     try {
-      await write(document, snapshot?.revision ?? -1);
+      await write(profile, document, snapshot?.revision ?? -1);
       return result;
     } catch (error) {
       if (error instanceof Conflict && attempt < 3) continue;

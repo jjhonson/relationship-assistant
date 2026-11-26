@@ -5,9 +5,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "personal": "node --env-file=.env.local --env-file=.data/personal.env node_modules/next/dist/bin/next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node --test scripts/recovery.check.mjs"
+    "test": "vitest run && node --test scripts/recovery.check.mjs scripts/dataset-profile.check.mjs"
   },
   "repository": {
     "type": "git",

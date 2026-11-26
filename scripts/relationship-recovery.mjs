@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { decryptSnapshot, documentDigest, encryptSnapshot, isUuid } from "./recovery-crypto.mjs";
+import { assertDatasetPurpose, resolveDatasetProfile } from "./dataset-profile.mjs";
 
 function endpoint(url, secret) {
   if (typeof url !== "string" || typeof secret !== "string" ||
@@ -283,8 +284,10 @@ function argsFor(command, list) {
 export async function main(command = process.argv[2], rest = process.argv.slice(3)) {
   const args = argsFor(command, rest);
   if (command === "backup") {
-    const source = endpoint(process.env.RA_SUPABASE_URL, process.env.RA_SUPABASE_SECRET_KEY);
-    const snapshot = await readRemoteSnapshot(source, process.env.RA_DB_OWNER_ID);
+    const profile = resolveDatasetProfile();
+    const source = endpoint(profile.base, profile.secret);
+    const snapshot = await readRemoteSnapshot(source, profile.ownerId);
+    assertDatasetPurpose(snapshot.document, profile.mode);
     const passphrase = await hiddenPassphrase("New backup passphrase (not echoed): ");
     const confirmation = await hiddenPassphrase("Confirm backup passphrase (not echoed): ");
     if (passphrase !== confirmation) throw new Error("Backup passphrase confirmation did not match.");

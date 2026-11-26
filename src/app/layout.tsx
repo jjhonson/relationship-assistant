@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { getDatasetMode } from "../../scripts/dataset-profile.mjs";
+
+// Mode is runtime configuration, not a label baked into the build.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Relationship Agent",
@@ -29,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </Link>
             </nav>
             <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs text-stone-500">
-              Development alpha
+              {getDatasetMode() === "personal" ? "Personal alpha" : "Fictional development"}
             </span>
           </div>
         </header>
