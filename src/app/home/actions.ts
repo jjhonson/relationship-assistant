@@ -141,9 +141,16 @@ export async function submitHomeText(input: {
   }
   const today = localToday();
   const known = await listRelationships();
-  // Do not send the contact list to the model; resolve names locally.
+  const context = input.contextRelationshipId
+    ? known.find((person) => person.id === input.contextRelationshipId) : undefined;
+  if (input.contextRelationshipId && !context) {
+    throw new Error("The selected relationship is no longer available.");
+  }
+  // The person-page context helps interpret pronouns, but never authorizes an
+  // identity merge. Send only that one label, never the contact list.
   const interpretation = await interpretConversationalCapture({
-    text: input.text, personLabel: "No existing person selected", currentDate: today,
+    text: input.text, personLabel: context?.personLabel ?? "No existing person selected",
+    currentDate: today,
   }, {
     apiKey: process.env.OPENAI_API_KEY ?? "",
     model: process.env.OPENAI_RELATIONSHIP_MODEL,
