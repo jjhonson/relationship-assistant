@@ -7,7 +7,7 @@ const personal = {
   RA_PERSONAL_DB_OWNER_ID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   RA_PERSONAL_SUPABASE_URL: "https://fictional.supabase.co",
   RA_PERSONAL_SUPABASE_SECRET_KEY: "sb_secret_fixture_only",
-};
+} as const;
 describe("manual capture runtime gate", () => {
   it("allows fictional development and explicitly enabled Codespaces personal production only", () => {
     expect(() => requirePrivateAlphaRuntime({ NODE_ENV: "development" })).not.toThrow();
