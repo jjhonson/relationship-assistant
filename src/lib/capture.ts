@@ -325,7 +325,10 @@ export function applyCaptureExtraction(
       const index = relationships.findIndex((record) => record.id === chosen!.id);
       relationships[index] = addParticipantMemory(
         chosen, person, source, now,
-        chosen.id === event.contextRelationshipId ? event.reportedInteractionAt : undefined,
+        (chosen.id === event.contextRelationshipId ||
+          (!event.contextRelationshipId &&
+            extraction.participants.filter((item) => item.name.trim()).length === 1))
+          ? event.reportedInteractionAt : undefined,
       );
     }
     people.push({
