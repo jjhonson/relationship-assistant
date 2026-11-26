@@ -27,6 +27,8 @@ These examples are for a trusted administrator in an existing, private server en
 
 **Independence requires off-site possession.** Download the resulting encrypted `.raenc` file using the VS Code Codespaces file Explorer, then store it in at least one user-controlled location **outside both Supabase and the Codespace**, preferably with a second copy. Only then is it an independent backup. Files left in a Codespace or only in the same Supabase project do not count.
 
+**Private independent restore drill:** After obtaining the downloaded encrypted file, use `node scripts/relationship-recovery.mjs drill --input /path/to/downloaded-backup.raenc` in a trusted environment with a local Docker engine. The command authenticates the file using the hidden passphrase prompt, starts an isolated disposable PostgreSQL 17 container with no network or published ports, uses tmpfs for database storage, applies the two production migrations, restores via the real SQL gateway, checks private-role permissions, verifies canonical SHA-256 equality and occupied-destination refusal, and removes the test container. No Supabase credentials are needed; no existing database is changed. The Docker image may need to be pulled. The command fails closed if local Docker is unavailable. Test the actual offsite copy, not just the source file. This verifies application-data recovery, not full Supabase platform recovery or an app cutover.
+
 **Offline integrity check:** `node scripts/relationship-recovery.mjs verify --input /path/to/backup.raenc`. It needs the file and passphrase only, not access to the original project.
 
 **Restore after original project loss:** Create a genuinely separate Supabase project, apply the two reviewed schema migrations, then configure `RA_RECOVERY_TARGET_URL` and `RA_RECOVERY_TARGET_SECRET_KEY` privately for that project. Use `node --env-file=.env.local scripts/relationship-recovery.mjs restore --input /path/to/backup.raenc --target-owner NEW_UUID`. The source project credentials need not work or even exist. The tool refuses to write unless the destination is empty and in another Supabase project. Verify the fresh app manually before redirecting any use to it.
@@ -35,16 +37,18 @@ These examples are for a trusted administrator in an existing, private server en
 
 ## Evidence so far
 
-- Live private development database currently contains only synthetic `Fictional Judy Test` and one fictional 5K article moment, dataset revision 2; existing source and corrected relationship labels have been verified.
+- **Nov 26 independent real-PostgreSQL drill PASSED:** [GitHub Actions run 45870155564](https://github.com/jjhonson/relationship-assistant/actions/runs/45870155564) provisioned two independent clean PostgreSQL 17 server containers, applied the two production schema migrations to each, wrote a synthetic source dataset, encrypted it with the actual AES-256-GCM/scrypt backup module, decrypted it, restored into the second database using the real SQL gateway, and re-read it with matching canonical SHA-256 digest. Stable source IDs, correction history, capture, moment, connection journey, and unknown forward-compatible fields survived. Wrong-passphrase, altered ciphertext, occupied destination, orphaned relationship and unauthorized browser roles were rejected. **This test uses invented fixtures only**, not the live Codespace Supabase dataset or an offsite snapshot; it does not by itself complete the personal-alpha recovery gate.
+
+- The live private development database contains only fictional test records. The latest observed checkpoint was revision 9 (one relationship, three authored captures, one private moment).
 - SQL exercise on November 25 imported the complete current fictional document into another empty owner namespace in the same Supabase project, proved **JSONB equality** and record counts, and rolled the transaction back. This confirms transactional logical restoration but **does not** satisfy separate-project recovery.
 - Automated recovery checks cover encryption/decryption, authenticated tamper and wrong-passphrase rejection, exact provenance/correction/unknown-field preservation, destination collision refusal, separate-project simulated RPC restoration and re-read, and file permission/no-overwrite behavior.
-- The actual CLI has **not yet exported the Codespace dataset into an off-site file or restored into a separately provisioned PostgreSQL instance**. No separate project has been created, and no real personal data has been imported. Do not check Issue #54's independent recovery acceptance box until that test succeeds.
+- On Nov 26 the owner confirmed that the CLI created an encrypted backup of the actual fictional dataset, saved the passphrase separately in a password manager and downloaded the backup to their Mac. **Restoring that offsite copy remains outstanding.** No separate managed project has been created and no real data has been imported. Do not check Issue #54's independent recovery acceptance box until the actual-file drill succeeds.
 
 ## Remaining acceptance gate
 
-1. CI green on this draft branch.
-2. Perform real encrypted export from the current fictional Supabase dataset using protected server credentials, and move the file outside Codespace/Supabase.
-3. Restore the file to a separate **fresh database project**, not merely a new owner namespace. Compare IDs, sources, corrections, moments, captures and journeys.
+1. Independent fictional PostgreSQL restoration CI green (completed Nov 26); rerun after changing recovery code.
+2. Real encrypted export of the current fictional Supabase dataset and offsite download: completed by owner report on Nov 26; actual downloaded file has not yet been verified.
+3. Restore the offsite file to a separate **fresh PostgreSQL database or Supabase project**, not merely a new owner namespace. Compare IDs, sources, corrections, moments, captures and journeys.
 4. Demonstrate bad-passphrase, corrupt-file and occupied-destination refusal against the actual infrastructure; no unintended write.
 5. Decide backup frequency and secure off-site storage for the real-data pilot. Test restore after a simulated loss of access to the source project.
 6. Review restricted server identity/authentication before any real-contact use, and obtain explicit owner authorization for merges and private real-data migration.
