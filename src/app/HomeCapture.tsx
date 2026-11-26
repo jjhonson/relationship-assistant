@@ -28,6 +28,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
   const [promptIndex, setPromptIndex] = useState(0);
   const [photo, setPhoto] = useState<File | null>(null);
   const [importNotice, setImportNotice] = useState("");
+  const [importedTextFile, setImportedTextFile] = useState(false);
   const [clarification, setClarification] = useState<Clarify | null>(null);
   const [choices, setChoices] = useState<HomeCaptureChoices>({});
   const [saving, startSave] = useTransition();
@@ -37,6 +38,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
 
   function changeText(next: string) {
     setText(next);
+    if (!next.trim()) setImportedTextFile(false);
     setClarification(null);
     setChoices({});
     setImportNotice("");
@@ -60,6 +62,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
       changeText(text ? text + "\n\n" + imported : imported);
       setPhoto(null);
       setImportNotice("Added text from " + file.name + ". The original file was not saved.");
+      setImportedTextFile(true);
     } catch {
       setError("Couldn't read that text file. Nothing was saved.");
     }
@@ -112,7 +115,7 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
         }
         if (!submissionRef.current) submissionRef.current = crypto.randomUUID();
         const result = await submitHomeText({
-          text, submissionId: submissionRef.current, choices,
+          text, submissionId: submissionRef.current, choices, importedTextFile,
         });
         if (result.state === "clarify") {
           setClarification(result);
