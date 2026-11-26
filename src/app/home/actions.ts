@@ -141,15 +141,23 @@ export async function submitHomeText(input: {
   }
   const today = localToday();
   const known = await listRelationships();
-  const context = input.contextRelationshipId
+  const pageContext = input.contextRelationshipId
     ? known.find((person) => person.id === input.contextRelationshipId) : undefined;
-  if (input.contextRelationshipId && !context) {
+  if (input.contextRelationshipId && !pageContext) {
+    throw new Error("The open relationship is no longer available.");
+  }
+  const chosenId = input.choices?.relationshipId;
+  const chosenPerson = chosenId && chosenId !== "__new__"
+    ? known.find((person) => person.id === chosenId) : undefined;
+  if (chosenId && chosenId !== "__new__" && !chosenPerson) {
     throw new Error("The selected relationship is no longer available.");
   }
-  // The person-page context helps interpret pronouns, but never authorizes an
-  // identity merge. Send only that one label, never the contact list.
+  // The page context (or an explicit corrected selection) may help interpret
+  // pronouns. Send one label only, never the full private contact list.
   const interpretation = await interpretConversationalCapture({
-    text: input.text, personLabel: context?.personLabel ?? "No existing person selected",
+    text: input.text, personLabel: chosenPerson?.personLabel ??
+      (chosenId === "__new__" ? "No existing person selected" :
+        pageContext?.personLabel ?? "No existing person selected"),
     currentDate: today,
   }, {
     apiKey: process.env.OPENAI_API_KEY ?? "",
