@@ -55,7 +55,7 @@ export default async function SavedCapturePage({ params }: { params: Promise<{ i
         <p className="mt-3 text-xs text-stone-500">
           {capture.source === "user-image"
             ? "The original image was not retained. Text and visual details were extracted by AI and may be inaccurate; check them before relying on them."
-            : "This user-authored note is saved in the local app. Unknown details stay unknown, and the original wording remains available."}
+            : "Your words are saved with this memory. Unknown details stay unknown, and you can return to the original note."}
         </p>
       </header>
 
