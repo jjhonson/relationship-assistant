@@ -10,7 +10,8 @@ export type HomeCaptureChoices = {
   interactionDate?: string;
 };
 export type HomeCapturePlan =
-  | { state: "clarify"; field: "kind" | "person" | "date"; question: string; choices: HomeCaptureChoices }
+  | { state: "clarify"; field: "kind" | "person" | "date"; question: string;
+      kind?: KnownKind; choices: HomeCaptureChoices }
   | { state: "ready"; kind: KnownKind; source: CaptureSource;
       relationshipId: string; interactionDate: string; choices: HomeCaptureChoices };
 
@@ -73,7 +74,7 @@ export function planHomeCapture(input: {
   const selected = choices.relationshipId ?? hint.id ?? "";
   if (!selected || (hint.ambiguous && !choices.relationshipId)) {
     return {
-      state: "clarify", field: "person",
+      state: "clarify", field: "person", kind,
       question: hint.ambiguous
         ? "Which saved person is this about?"
         : kind === "conversation"
@@ -95,7 +96,7 @@ export function planHomeCapture(input: {
   );
   if (date && !validDay(date, today)) throw new Error("Enter a valid past conversation date.");
   if (kind === "conversation" && !date) return {
-    state: "clarify", field: "date",
+    state: "clarify", field: "date", kind,
     question: interpretation.question || "When did this conversation happen?",
     choices,
   };
