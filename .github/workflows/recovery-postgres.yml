@@ -1,0 +1,66 @@
+name: Independent PostgreSQL recovery drill
+
+on:
+  pull_request:
+    paths:
+      - "scripts/recovery-crypto.mjs"
+      - "scripts/relationship-recovery.mjs"
+      - "scripts/recovery-postgres.check.mjs"
+      - "supabase/migrations/**"
+      - ".github/workflows/recovery-postgres.yml"
+  workflow_dispatch:
+
+# Two disposable PostgreSQL service containers, entirely synthetic records.
+# No Supabase project, production key, user data, or paid database is used.
+permissions:
+  contents: read
+
+jobs:
+  recovery:
+    name: Encrypt, restore, verify across two PostgreSQL 17 servers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      original:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-fixture-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 6
+      recovered:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-fixture-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Ensure PostgreSQL client is available
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
+      - name: Test encrypted recovery against two independent PostgreSQL servers
+        env:
+          POSTGRES_TEST_PASSWORD: ci-fixture-only
+        run: node scripts/recovery-postgres.check.mjs
