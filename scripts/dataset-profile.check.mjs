@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertDatasetPurpose, getDatasetMode, prepareDatasetForWrite, resolveDatasetProfile } from "./dataset-profile.mjs";
+import { assertDatasetPurpose, getDatasetMode, prepareDatasetForWrite, resolveDatasetProfile, requirePersonalDatasetProfile } from "./dataset-profile.mjs";
 const fictional = { RA_STORAGE_BACKEND: "supabase", RA_SUPABASE_URL: "https://fictional.supabase.co",
   RA_SUPABASE_SECRET_KEY: "sb_secret_fictional_fixture", RA_DB_OWNER_ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
 const personal = { ...fictional, RA_DATASET_MODE: "personal", RA_PERSONAL_DATA_ENABLED: "yes",
@@ -28,4 +28,10 @@ test("only a new personal dataset can be initialized with the personal marker", 
   assert.throws(() => assertDatasetPurpose(marked, "fictional"), /different or unverified/);
   assert.throws(() => prepareDatasetForWrite(legacy, "personal", 2), /different or unverified/);
   assert.throws(() => assertDatasetPurpose({...legacy, raDatasetPurpose: "other"}, "fictional"), /different or unverified/);
+});
+
+test("explicit personal commands cannot fall back to fictional or incomplete configuration", () => {
+  assert.throws(() => requirePersonalDatasetProfile(fictional), /explicit personal/);
+  assert.throws(() => requirePersonalDatasetProfile({...personal, RA_PERSONAL_DB_OWNER_ID: ""}), /not configured/);
+  assert.equal(requirePersonalDatasetProfile(personal).ownerId, personal.RA_PERSONAL_DB_OWNER_ID);
 });

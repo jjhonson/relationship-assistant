@@ -62,3 +62,9 @@ export function prepareDatasetForWrite(document, mode, previousRevision) {
   assertDatasetPurpose(document, mode);
   return document;
 }
+
+/** Explicit personal commands must not silently select the fictional profile. */
+export function requirePersonalDatasetProfile(env = process.env) {
+  if (getDatasetMode(env) !== "personal") throw new Error("This command requires the explicit personal dataset profile.");
+  return resolveDatasetProfile(env);
+}
