@@ -112,7 +112,13 @@ export async function saveQuickCaptureWithoutRedirect(
   ensureDevelopment();
   const raw = formData.get("note");
   if (typeof raw !== "string") throw new Error("Note text is required.");
-  const event = await saveNewCapture(raw, contextRelationshipId);
+  const requestId = formData.get("submissionId");
+  const reportedInteractionAt = formData.get("reportedInteractionAt");
+  const event = await saveNewCapture(raw, contextRelationshipId, {
+    requestId: typeof requestId === "string" && requestId ? requestId : undefined,
+    reportedInteractionAt: typeof reportedInteractionAt === "string" && reportedInteractionAt
+      ? reportedInteractionAt : undefined,
+  });
   await interpretIfAvailable(event.id);
   revalidatePath("/relationships");
   if (contextRelationshipId) revalidatePath("/relationships/" + contextRelationshipId);
