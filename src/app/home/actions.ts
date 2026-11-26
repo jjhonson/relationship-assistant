@@ -126,6 +126,7 @@ export async function submitHomeText(input: {
   text: string;
   submissionId: string;
   choices?: HomeCaptureChoices;
+  importedTextFile?: boolean;
 }) {
   requireDevelopment();
   if (!input || typeof input.text !== "string" || !input.text.trim() ||
@@ -149,6 +150,7 @@ export async function submitHomeText(input: {
     people: known.map((person) => ({ id: person.id, label: person.personLabel })),
     today,
     choices: input.choices,
+    importedTextFile: input.importedTextFile === true,
   });
   if (plan.state === "clarify") return plan;
   const saved = await saveHomeInput({
