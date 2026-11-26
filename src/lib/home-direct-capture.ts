@@ -67,6 +67,8 @@ export function planHomeCapture(input: {
   today: string;
   choices?: HomeCaptureChoices;
   importedTextFile?: boolean;
+  // Optional relationship-page context, not an instruction to merge identities.
+  contextRelationshipId?: string;
 }): HomeCapturePlan {
   const { text, interpretation, people, today } = input;
   const choices = input.choices ?? {};
@@ -105,11 +107,19 @@ export function planHomeCapture(input: {
   };
 
   const hint = suggestHomePerson(text, people);
-  const selected = choices.relationshipId ?? hint.id ?? "";
-  if (!selected || (hint.ambiguous && !choices.relationshipId)) {
+  const contextId = input.contextRelationshipId ?? "";
+  if (contextId && !people.some((person) => person.id === contextId)) {
+    throw new Error("The open relationship is no longer available.");
+  }
+  // An explicit mention of another saved person or multiple possible
+  // people overrides the implicit context and must be clarified.
+  const conflictingPerson = Boolean(contextId && hint.id && hint.id !== contextId);
+  const needsChoice = (hint.ambiguous || conflictingPerson) && !choices.relationshipId;
+  const selected = choices.relationshipId ?? hint.id ?? contextId;
+  if (!selected || needsChoice) {
     return {
       state: "clarify", field: "person", kind,
-      question: hint.ambiguous
+      question: needsChoice
         ? "Which saved person is this about?"
         : kind === "conversation"
           ? "Which saved person is in this conversation?"
