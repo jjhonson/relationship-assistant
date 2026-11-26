@@ -143,7 +143,7 @@ export default function HomeCapture({
   }
 
   return (
-    <section aria-label={contextPersonLabel ? "Remember something about " + contextPersonLabel : "Remember something"}
+    <section aria-label={currentPersonLabel ? "Remember something about " + currentPersonLabel : "Remember something"}
       className="rounded-3xl border border-stone-300 bg-white p-3 shadow-[0_8px_32px_rgba(28,25,23,0.05)] sm:p-4">
       {contextPersonLabel && (
         <p className="px-3 pt-1 text-xs font-medium text-stone-500">About {currentPersonLabel}</p>
