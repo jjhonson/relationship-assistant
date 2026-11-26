@@ -1,6 +1,6 @@
 # Relationship Agent: private backup and recovery
 
-**Stage:** draft recovery engineering for [Issue #54](https://github.com/jjhonson/relationship-assistant/issues/54). This is not yet an approved real-person pilot or a completed disaster-recovery drill.
+**Stage:** Independent fictional application-data recovery passed November 26 (PR #77). Not a full platform restoration or an approved real-person pilot. See [Issue #54](https://github.com/jjhonson/relationship-assistant/issues/54).
 
 ## Recovery objective
 
@@ -42,14 +42,14 @@ These examples are for a trusted administrator in an existing, private server en
 - The live private development database contains only fictional test records. The latest observed checkpoint was revision 9 (one relationship, three authored captures, one private moment).
 - SQL exercise on November 25 imported the complete current fictional document into another empty owner namespace in the same Supabase project, proved **JSONB equality** and record counts, and rolled the transaction back. This confirms transactional logical restoration but **does not** satisfy separate-project recovery.
 - Automated recovery checks cover encryption/decryption, authenticated tamper and wrong-passphrase rejection, exact provenance/correction/unknown-field preservation, destination collision refusal, separate-project simulated RPC restoration and re-read, and file permission/no-overwrite behavior.
-- On Nov 26 the owner confirmed that the CLI created an encrypted backup of the actual fictional dataset, saved the passphrase separately in a password manager and downloaded the backup to their Mac. **Restoring that offsite copy remains outstanding.** No separate managed project has been created and no real data has been imported. Do not check Issue #54's independent recovery acceptance box until the actual-file drill succeeds.
+- On Nov 26 the owner confirmed that the CLI created an encrypted backup of the actual fictional dataset, saved the passphrase separately in a password manager and downloaded the backup to their Mac. **Actual offsite copy restoration passed November 26** (PR #77): authenticated encrypted file, restored into fresh network-isolated PostgreSQL, canonical SHA-256 match, private-role and occupied-destination checks, disposable container removed. No separate managed project was created and no real data was imported.
 
 ## Remaining acceptance gate
 
 1. Independent fictional PostgreSQL restoration CI green (completed Nov 26); rerun after changing recovery code.
-2. Real encrypted export of the current fictional Supabase dataset and offsite download: completed by owner report on Nov 26; actual downloaded file has not yet been verified.
-3. Restore the offsite file to a separate **fresh PostgreSQL database or Supabase project**, not merely a new owner namespace. Compare IDs, sources, corrections, moments, captures and journeys.
-4. Demonstrate bad-passphrase, corrupt-file and occupied-destination refusal against the actual infrastructure; no unintended write.
+2. Real encrypted export of the current fictional Supabase dataset and offsite download: completed by owner report on Nov 26; actual downloaded file verified by the independent drill.
+3. Completed Nov 26: restored the actual offsite file into a separate fresh PostgreSQL database and verified exact canonical content.
+4. Wrong-passphrase and corrupt-file refusal covered by automated tests; occupied-destination refusal verified in the private actual-file drill.
 5. Decide backup frequency and secure off-site storage for the real-data pilot. Test restore after a simulated loss of access to the source project.
 6. Review restricted server identity/authentication before any real-contact use, and obtain explicit owner authorization for merges and private real-data migration.
 
