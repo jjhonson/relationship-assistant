@@ -39,6 +39,10 @@ export default function HomeCapture({
   const [choices, setChoices] = useState<HomeCaptureChoices>({});
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const currentPersonLabel = choices.relationshipId && choices.relationshipId !== contextRelationshipId
+    ? choices.relationshipId === "__new__" ? "Someone new" :
+      people.find((person) => person.id === choices.relationshipId)?.label ?? contextPersonLabel
+    : contextPersonLabel;
   // Reuse this key after network uncertainty; never create another record on retry.
   const submissionRef = useRef<string | null>(null);
 
@@ -142,7 +146,7 @@ export default function HomeCapture({
     <section aria-label={contextPersonLabel ? "Remember something about " + contextPersonLabel : "Remember something"}
       className="rounded-3xl border border-stone-300 bg-white p-3 shadow-[0_8px_32px_rgba(28,25,23,0.05)] sm:p-4">
       {contextPersonLabel && (
-        <p className="px-3 pt-1 text-xs font-medium text-stone-500">About {contextPersonLabel}</p>
+        <p className="px-3 pt-1 text-xs font-medium text-stone-500">About {currentPersonLabel}</p>
       )}
       <form onSubmit={submit}>
         <label className="sr-only" htmlFor="home-capture-input">What do you want to remember?</label>
