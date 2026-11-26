@@ -27,6 +27,40 @@ function extraction(participants: CaptureParticipant[], other: Partial<CaptureEx
   return { summary: "A remembered conversation.", participants, sharedDetails: [], otherPeople: [], commitments: [], ...other };
 }
 
+describe("explicit user-reported conversation dates", () => {
+  it("distinguishes the reported encounter day from the actual time the note was captured", () => {
+    const captured = new Date("2026-11-26T01:35:00.000Z"); // Nov 25 in Denver
+    const judy = createManualRelationshipRecord("Fictional Judy Test");
+    const event = newCaptureEvent(
+      "I spoke with Fictional Judy Test yesterday. She is considering a 5K.",
+      judy.id, captured, {
+        reportedInteractionAt: "2026-11-24",
+        requestId: "11111111-1111-4111-8111-111111111111",
+      },
+    );
+    expect(event.capturedAt).toBe("2026-11-26T01:35:00.000Z");
+    expect(event.reportedInteractionAt).toBe("2026-11-24");
+    const applied = applyCaptureExtraction(event, extraction([person("Fictional Judy Test")]), [judy], captured);
+    expect(applied.relationships[0].lastInteractionAt).toBe("2026-11-24");
+    expect(applied.relationships[0].sources[1].observedAt).toBe("2026-11-24");
+    expect(applied.event.capturedAt).toBe("2026-11-26T01:35:00.000Z");
+  });
+
+  it("dates an explicitly new single-person encounter but not incidental people in a group note", () => {
+    const single = newCaptureEvent("I met Alex yesterday.", null, now, {
+      reportedInteractionAt: "2026-11-16",
+    });
+    const applied = applyCaptureExtraction(single, extraction([person("Alex")]), [], now);
+    expect(applied.relationships[0].lastInteractionAt).toBe("2026-11-16");
+
+    const group = newCaptureEvent("I heard about Tom and Judy yesterday.", null, now, {
+      reportedInteractionAt: "2026-11-16",
+    });
+    const twoPeople = applyCaptureExtraction(group, extraction([person("Tom"), person("Judy")]), [], now);
+    expect(twoPeople.relationships.every((person) => person.lastInteractionAt === null)).toBe(true);
+  });
+});
+
 describe("universal text capture", () => {
   it("keeps explicit household connections source-backed and shares later household context without inventing a Judy interaction", () => {
     const first = applyCaptureExtraction(newCaptureEvent(
