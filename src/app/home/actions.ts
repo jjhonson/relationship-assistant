@@ -85,6 +85,7 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
     const form = new FormData();
     form.set("note", input.text);
     if (input.submissionId) form.set("submissionId", input.submissionId);
+    if (input.interactionDate) form.set("reportedInteractionAt", input.interactionDate);
     const { captureId } = await saveQuickCaptureWithoutRedirect(null, form);
     revalidatePath("/");
     return { saved: true as const, destination: "/captures/" + encodeURIComponent(captureId) };
