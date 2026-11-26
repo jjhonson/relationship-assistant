@@ -5,7 +5,7 @@ import { interpretConversationalCapture, looksLikePastedConversation, type Captu
 import { suggestHomePerson } from "@/lib/home-identity";
 import { listRelationships, savePersonalMoment } from "@/lib/relationship-store";
 import { saveReviewedPersonCapture } from "@/app/relationships/conversational-actions";
-import { saveQuickCaptureWithoutRedirect } from "@/app/relationships/capture-actions";
+import { saveQuickCaptureWithoutRedirect, saveUniversalCaptureWithoutRedirect } from "@/app/relationships/capture-actions";
 
 function requireDevelopment() {
   if (process.env.NODE_ENV !== "development") {
@@ -93,4 +93,19 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
   });
   revalidatePath("/");
   return result;
+}
+
+/** Same one-input Home, existing photo pipeline; nothing is stored until the user clicks Save. */
+export async function saveHomePhotoInput(formData: FormData) {
+  requireDevelopment();
+  const file = formData.get("photo");
+  if (!(file instanceof File) || file.size === 0) {
+    throw new Error("Choose a photo to save.");
+  }
+  const result = await saveUniversalCaptureWithoutRedirect(null, formData);
+  if (result.error || !result.captureId) {
+    throw new Error(result.error ?? "Photo save could not be confirmed.");
+  }
+  revalidatePath("/");
+  return { destination: "/captures/" + encodeURIComponent(result.captureId) };
 }
