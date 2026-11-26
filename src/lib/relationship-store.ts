@@ -14,7 +14,8 @@ import {
   type CaptureEvent,
   type CaptureExtraction,
 } from "./capture";
-import { correctActionableMemory, type ActionableMemoryTarget,
+import { correctActionableMemory, mergeInteractionIntoRelationship, type InteractionExtraction,
+  type RelationshipSource, type ActionableMemoryTarget,
   type ActionableMemoryDisposition, type RelationshipIdentity, type RelationshipRecord } from "./relationship-record";
 import { createPersonalMoment, type PersonalMoment, type PersonalMomentInput } from "./personal-moment";
 import { randomUUID } from "node:crypto";
@@ -119,6 +120,17 @@ function mutateStore<T>(update: (store: StoreFile) => T | Promise<T>): Promise<T
   return result;
 }
 
+function validateSubmissionId(id?: string) {
+  if (id !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error("Invalid private save request identifier.");
+  }
+}
+function validDay(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(value + "T00:00:00.000Z");
+  return !Number.isNaN(d.valueOf()) && d.toISOString().slice(0, 10) === value;
+}
+
 export async function listRelationships() {
   const store = await readStore();
   return [...store.relationships].sort((a, b) => a.personLabel.localeCompare(b.personLabel));
@@ -157,13 +169,56 @@ export async function saveRelationship(record: RelationshipRecord) {
   });
 }
 
-export async function saveNewCapture(note: string, contextRelationshipId: string | null = null) {
-  const event = newCaptureEvent(note, contextRelationshipId);
+/** An explicit request ID is retried atomically, never recreated after a lost response. */
+export async function saveNewCapture(
+  note: string, contextRelationshipId: string | null = null,
+  options: { requestId?: string; reportedInteractionAt?: string } = {},
+) {
+  validateSubmissionId(options.requestId);
+  if (options.reportedInteractionAt && !validDay(options.reportedInteractionAt)) {
+    throw new Error("Invalid reported conversation date.");
+  }
+  const event = newCaptureEvent(note, contextRelationshipId, new Date(), options);
   return mutateStore((store) => {
-    if (contextRelationshipId && !store.relationships.some((record) => record.id === contextRelationshipId)) {
+    const id = options.requestId;
+    if (id) {
+      const existing = store.captures.find((capture) => capture.requestId === id);
+      if (existing) {
+        if (existing.note !== event.note ||
+            existing.contextRelationshipId !== contextRelationshipId ||
+            (existing.reportedInteractionAt ?? "") !== (options.reportedInteractionAt ?? "")) {
+          throw new Error("This save request was already used for different text.");
+        }
+        return existing;
+      }
+      if (store.moments.some((item) => item.requestId === id) ||
+          store.relationships.some((person) =>
+            person.sources.some((source) => source.id === "pasted:" + id))) {
+        throw new Error("This save request was already used for different material.");
+      }
+    }
+    const index = contextRelationshipId
+      ? store.relationships.findIndex((record) => record.id === contextRelationshipId) : -1;
+    if (contextRelationshipId && index < 0) {
       throw new Error("The selected relationship was not found.");
     }
     store.captures.push(event);
+    if (index >= 0 && options.reportedInteractionAt) {
+      const person = store.relationships[index];
+      const day = options.reportedInteractionAt;
+      const sourceId = "capture:" + event.id;
+      store.relationships[index] = {
+        ...person,
+        updatedAt: event.capturedAt,
+        lastInteractionAt: person.lastInteractionAt && person.lastInteractionAt > day
+          ? person.lastInteractionAt : day,
+        sources: person.sources.some((source) => source.id === sourceId)
+          ? person.sources : [...person.sources, {
+            id: sourceId, source: "capture", observedAt: day,
+            label: "Your note about a reported conversation",
+          }],
+      };
+    }
     return event;
   });
 }
@@ -273,8 +328,25 @@ export async function getPersonalMoment(id: string) {
 }
 
 export async function savePersonalMoment(input: PersonalMomentInput) {
+  validateSubmissionId(input.requestId);
   const moment = createPersonalMoment(input);
   return mutateStore((store) => {
+    if (input.requestId) {
+      const existing = store.moments.find((item) => item.requestId === input.requestId);
+      if (existing) {
+        if (existing.description !== moment.description ||
+            existing.reflection !== moment.reflection || existing.url !== moment.url ||
+            existing.consideration !== moment.consideration) {
+          throw new Error("This save request was already used for different text.");
+        }
+        return existing;
+      }
+      if (store.captures.some((capture) => capture.requestId === input.requestId) ||
+          store.relationships.some((person) =>
+            person.sources.some((source) => source.id === "pasted:" + input.requestId))) {
+        throw new Error("This save request was already used for different material.");
+      }
+    }
     store.moments.push(moment);
     return moment;
   });
@@ -426,6 +498,37 @@ export async function saveConfirmedConnectionEvents(
     store.connectionJourneys[index] = journey;
     store.relationships[recordIndex] = updated;
     return { journey, events: applied, duplicate: false };
+  });
+}
+
+/** Preserve a pasted conversation's extracted evidence without storing its raw text.
+ * The source ID and hash bind one browser save attempt to one immutable report.
+ */
+export async function saveInferredConversation(
+  relationshipId: string, extraction: InteractionExtraction, source: RelationshipSource,
+  requestId?: string,
+) {
+  validateSubmissionId(requestId);
+  return mutateStore((store) => {
+    if (requestId &&
+        (store.captures.some((capture) => capture.requestId === requestId) ||
+         store.moments.some((moment) => moment.requestId === requestId))) {
+      throw new Error("This save request was already used for different material.");
+    }
+    const index = store.relationships.findIndex((item) => item.id === relationshipId);
+    if (index < 0) throw new Error("Relationship not found.");
+    const existing = store.relationships[index].sources.find((item) => item.id === source.id);
+    if (existing) {
+      if (!requestId || !source.submissionDigest ||
+          existing.submissionDigest !== source.submissionDigest) {
+        throw new Error("This save request was already used for different text.");
+      }
+      return { relationshipId, duplicate: true as const };
+    }
+    store.relationships[index] = mergeInteractionIntoRelationship(
+      store.relationships[index], extraction, source,
+    );
+    return { relationshipId, duplicate: false as const };
   });
 }
 
