@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { suggestHomePerson } from "@/lib/home-identity";
 import { planHomeCapture, type HomeCaptureChoices } from "@/lib/home-direct-capture";
-import { listRelationships, savePersonalMoment } from "@/lib/relationship-store";
+import { getRelationship, listRelationships, savePersonalMoment } from "@/lib/relationship-store";
 import { saveReviewedPersonCapture } from "@/app/relationships/conversational-actions";
 import { saveQuickCaptureWithoutRedirect, saveUniversalCaptureWithoutRedirect } from "@/app/relationships/capture-actions";
 
@@ -103,13 +103,16 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
 }
 
 /** Same one-input Home, existing photo pipeline; nothing is stored until the user clicks Save. */
-export async function saveHomePhotoInput(formData: FormData) {
+export async function saveHomePhotoInput(formData: FormData, contextRelationshipId?: string) {
   requireDevelopment();
+  if (contextRelationshipId && !(await getRelationship(contextRelationshipId))) {
+    throw new Error("The selected relationship is no longer available.");
+  }
   const file = formData.get("photo");
   if (!(file instanceof File) || file.size === 0) {
     throw new Error("Choose a photo to save.");
   }
-  const result = await saveUniversalCaptureWithoutRedirect(null, formData);
+  const result = await saveUniversalCaptureWithoutRedirect(contextRelationshipId ?? null, formData);
   if (result.error || !result.captureId) {
     throw new Error(result.error ?? "Photo save could not be confirmed.");
   }
@@ -127,6 +130,7 @@ export async function submitHomeText(input: {
   submissionId: string;
   choices?: HomeCaptureChoices;
   importedTextFile?: boolean;
+  contextRelationshipId?: string;
 }) {
   requireDevelopment();
   if (!input || typeof input.text !== "string" || !input.text.trim() ||
@@ -151,6 +155,7 @@ export async function submitHomeText(input: {
     today,
     choices: input.choices,
     importedTextFile: input.importedTextFile === true,
+    contextRelationshipId: input.contextRelationshipId,
   });
   if (plan.state === "clarify") return plan;
   const saved = await saveHomeInput({
