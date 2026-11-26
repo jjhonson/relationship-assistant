@@ -40,8 +40,23 @@ export function reportedConversationDay(text: string, localToday: string): strin
   const sentence = text.split(/[.!?\n]/).find((line) =>
     /\b(?:I|we)\s+(?:spoke|talked|met|called|chatted|caught up|had (?:a|an) (?:call|conversation|meeting))\b/i.test(line));
   if (!sentence) return "";
-  const rel = /\b(yesterday|today)\b/i.exec(sentence);
+  const encounter = /\b(?:I|we)\s+(?:spoke|talked|met|called|chatted|caught up|had (?:a|an) (?:call|conversation|meeting))\b/i.exec(sentence);
+  if (!encounter) return "";
+  const preceding = sentence.slice(0, encounter.index).trim().replace(/,$/, "").trim();
+  // "Yesterday I met Judy" is an unambiguous first-person event date.
+  if (/^(today|yesterday)$/i.test(preceding)) {
+    return preceding.toLowerCase() === "today" ? localToday : precedingDay(localToday);
+  }
+  // "I spoke with Judy yesterday" is dated. "I spoke with Judy ABOUT
+  // her race yesterday" is not: the date might refer to the race.
+  const after = sentence.slice(encounter.index + encounter[0].length).split(/[,;:]/)[0];
+  const rel = /\b(yesterday|today)\b/i.exec(after);
   if (!rel) return "";
+  const between = after.slice(0, rel.index);
+  if (between.trim().split(/\s+/).length > 9 ||
+      /\b(?:about|because|since|who|which|that|she|he|they|when|while|before|after)\b/i.test(between)) {
+    return "";
+  }
   return rel[1].toLowerCase() === "today" ? localToday : precedingDay(localToday);
 }
 
