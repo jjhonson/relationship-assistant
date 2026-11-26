@@ -80,6 +80,17 @@ export function planHomeCapture(input: {
     question: "Is this your own note, a private thought, or a pasted conversation?",
     choices,
   };
+  // An explicit first-person memory conflicts with the model's "pasted
+  // conversation" or "moment" category. Ask about authorship before choosing
+  // whether to preserve the user's words or discard the pasted original.
+  if (!pasted && !choices.kind && kind !== "note" &&
+      reportedConversationDay(text, today)) {
+    return {
+      state: "clarify", field: "kind",
+      question: "Is this your own recollection or a pasted conversation?",
+      choices,
+    };
+  }
   if (kind === "moment") return {
     state: "ready", kind, source: "unspecified",
     relationshipId: "", interactionDate: "", choices,
