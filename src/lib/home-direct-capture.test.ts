@@ -41,6 +41,19 @@ describe("one-step Home capture planning", () => {
     expect(reportedConversationDay("I caught up with Judy yesterday.", "2026-03-01")).toBe("2026-02-28");
   });
 
+  it("asks about authorship if a model mistakes a first-person recap for pasted dialogue", () => {
+    const text = "I spoke with Fictional Judy Test yesterday. She may try a 5K.";
+    const wrong = { ...note, kind: "conversation" as const,
+      source: "meeting" as const, interactionDate: "2026-11-24",
+      dateEvidence: "relative" as const };
+    expect(planHomeCapture({ text, interpretation: wrong, people, today }))
+      .toMatchObject({ state: "clarify", field: "kind" });
+    expect(planHomeCapture({ text, interpretation: wrong, people, today,
+      choices: { kind: "note" },
+    })).toMatchObject({ state: "ready", kind: "note",
+      relationshipId: "judy", interactionDate: "2026-11-24" });
+  });
+
   it("saves a private moment without relating it to people mentioned incidentally", () => {
     expect(planHomeCapture({
       text: "I read a great article about preparing for a 5K.",
