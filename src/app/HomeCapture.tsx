@@ -22,8 +22,14 @@ const kinds: Array<{ value: "conversation" | "note" | "moment"; label: string }>
 ];
 
 /** One Save, one concrete question only if the meaning needs clarification. */
-export default function HomeCapture({ people }: { people: HomePersonChoice[] }) {
+export default function HomeCapture({
+  people, contextRelationshipId,
+}: {
+  people: HomePersonChoice[];
+  contextRelationshipId?: string;
+}) {
   const router = useRouter();
+  const contextPersonLabel = people.find((person) => person.id === contextRelationshipId)?.label ?? "";
   const [text, setText] = useState("");
   const [promptIndex, setPromptIndex] = useState(0);
   const [photo, setPhoto] = useState<File | null>(null);
@@ -109,13 +115,14 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
           const form = new FormData();
           form.set("note", text);
           form.set("photo", photo);
-          const result = await saveHomePhotoInput(form);
+          const result = await saveHomePhotoInput(form, contextRelationshipId);
           router.push(result.destination);
           return;
         }
         if (!submissionRef.current) submissionRef.current = crypto.randomUUID();
         const result = await submitHomeText({
           text, submissionId: submissionRef.current, choices, importedTextFile,
+          contextRelationshipId,
         });
         if (result.state === "clarify") {
           setClarification(result);
@@ -132,14 +139,19 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
   }
 
   return (
-    <section className="rounded-3xl border border-stone-300 bg-white p-3 shadow-[0_8px_32px_rgba(28,25,23,0.05)] sm:p-4">
+    <section aria-label={contextPersonLabel ? "Remember something about " + contextPersonLabel : "Remember something"}
+      className="rounded-3xl border border-stone-300 bg-white p-3 shadow-[0_8px_32px_rgba(28,25,23,0.05)] sm:p-4">
+      {contextPersonLabel && (
+        <p className="px-3 pt-1 text-xs font-medium text-stone-500">About {contextPersonLabel}</p>
+      )}
       <form onSubmit={submit}>
         <label className="sr-only" htmlFor="home-capture-input">What do you want to remember?</label>
         <textarea
           id="home-capture-input" value={text}
           onChange={(event) => changeText(event.target.value)}
           maxLength={80_000} rows={6} disabled={saving}
-          placeholder={PROMPTS[promptIndex]}
+          placeholder={contextPersonLabel ? "Remember a conversation or something about " + contextPersonLabel + "…" :
+            PROMPTS[promptIndex]}
           className="min-h-44 w-full resize-y rounded-2xl bg-white px-3 py-3 text-base leading-relaxed text-stone-900 outline-none placeholder:text-stone-400 focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-70 sm:min-h-52 sm:px-4"
         />
 
@@ -221,11 +233,13 @@ export default function HomeCapture({ people }: { people: HomePersonChoice[] }) 
                 accept=".txt,.md,.csv,text/plain,text/markdown,text/csv"
                 onChange={importTextFile} className="sr-only" />+ Text file
             </label>
-            <button type="button" disabled={saving || !!photo}
-              onClick={() => setPromptIndex((current) => (current + 1) % PROMPTS.length)}
-              className="rounded-lg py-1.5 text-stone-500 hover:text-stone-900 disabled:opacity-40">
-              Another prompt
-            </button>
+            {!contextPersonLabel && (
+              <button type="button" disabled={saving || !!photo}
+                onClick={() => setPromptIndex((current) => (current + 1) % PROMPTS.length)}
+                className="rounded-lg py-1.5 text-stone-500 hover:text-stone-900 disabled:opacity-40">
+                Another prompt
+              </button>
+            )}
           </div>
           <button type="submit" disabled={saving}
             className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50">
