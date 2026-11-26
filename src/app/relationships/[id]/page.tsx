@@ -4,6 +4,7 @@ import { updateRelationshipIntention, updateRelationshipLabels } from "../action
 import { correctRelationshipName, dismissInferredConnection } from "../capture-actions";
 import {
   getRelationship,
+  listRelationships,
   listConnectionJourneys,
   listCapturesForRelationship,
   listConnectedPeopleForRelationship,
@@ -11,8 +12,7 @@ import {
 } from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
-import PersonConversationalCapture from "./PersonConversationalCapture";
-import QuickCaptureForm from "@/components/QuickCaptureForm";
+import HomeCapture from "@/app/HomeCapture";
 import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
 import { userOwnsCommitment } from "@/lib/connection-subjects";
 import MemoryCorrectionForm from "./MemoryCorrectionForm";
@@ -51,6 +51,7 @@ export default async function RelationshipDetailPage({
   const { updated, labels, intention, name } = await searchParams;
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
+  const people = await listRelationships();
   const capturedNotes = await listCapturesForRelationship(id);
   const journeys = await listConnectionJourneys(id);
   const connectedPeople = await listConnectedPeopleForRelationship(id);
@@ -252,14 +253,13 @@ export default async function RelationshipDetailPage({
         relationshipId={relationship.id} />
       <ConnectionJournal relationshipId={relationship.id} journeys={journeys} />
 
-      <PersonConversationalCapture relationshipId={relationship.id} personLabel={relationship.personLabel} />
-
-      <details className="rounded-2xl border border-stone-200 bg-white p-4">
-        <summary className="cursor-pointer font-medium text-indigo-700">Add a photo instead</summary>
-        <div className="mt-3">
-          <QuickCaptureForm contextRelationshipId={relationship.id} compact />
-        </div>
-      </details>
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-stone-900">Remember something</h2>
+        <HomeCapture
+          contextRelationshipId={relationship.id}
+          people={people.map((person) => ({ id: person.id, label: person.personLabel }))}
+        />
+      </section>
 
       {(connectedPeople.length > 0 || sharedHouseholdContext.length > 0) && (
         <section className="rounded-2xl border border-stone-200 bg-white p-6">
