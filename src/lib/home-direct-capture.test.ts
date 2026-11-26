@@ -87,6 +87,23 @@ describe("one-step Home capture planning", () => {
     })).toMatchObject({ state: "ready", kind: "moment" });
   });
 
+  it("asks whose writing was imported before retaining text-file content verbatim", () => {
+    const text = "I met Fictional Judy Test yesterday.";
+    expect(planHomeCapture({ text, interpretation: note, people, today,
+      importedTextFile: true })).toMatchObject({ state: "clarify", field: "kind" });
+    expect(planHomeCapture({ text, interpretation: note, people, today,
+      importedTextFile: true, choices: { kind: "note" } })).toMatchObject({
+      state: "ready", kind: "note", relationshipId: "judy",
+    });
+    const dialogue = "Judy: I may run a 5K.\nMe: Interesting.";
+    expect(planHomeCapture({ text: dialogue, people, today,
+      importedTextFile: true,
+      interpretation: { ...note, kind: "conversation", source: "messages" },
+      choices: { relationshipId: "judy", interactionDate: "2026-11-24" } })).toMatchObject({
+      state: "ready", kind: "conversation",
+    });
+  });
+
   it("recognizes pasted third-party messages even when the model or user calls them a note", () => {
     const text = "Tom: I haven't signed up for the race.\nMe: Got it.";
     const result = planHomeCapture({
