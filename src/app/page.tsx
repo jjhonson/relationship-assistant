@@ -37,14 +37,14 @@ export default async function HomePage() {
           <ul className="grid gap-3 sm:grid-cols-2">
             {opportunities.map((item) => (
               <li key={item.id} className="flex flex-col rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
-                <p className="text-xs font-medium text-stone-500">{item.personLabel}</p>
+                <p className="text-xs font-medium text-stone-500">{item.personLabel} · {item.kind === "commitment" ? "Your commitment" : "Catch up"}</p>
                 <h3 className="mt-1 text-base font-medium leading-snug text-stone-900">
                   {item.topic}
                 </h3>
                 <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-stone-600">
                   {item.context}
                 </p>
-                <details className="mt-3 text-xs text-stone-500">
+                {item.evidence.length > 0 && <details className="mt-3 text-xs text-stone-500">
                   <summary className="cursor-pointer font-medium hover:text-stone-800">
                     Why this came to mind
                   </summary>
@@ -68,11 +68,11 @@ export default async function HomePage() {
                       );
                     })}
                   </ul>
-                </details>
+                </details>}
                 <div className="mt-auto flex items-center justify-between gap-3 pt-5 text-sm">
                   <Link href={"/relationships/" + encodeURIComponent(item.relationshipId)}
                     className="font-medium text-stone-800 underline-offset-4 hover:underline">
-                    Explore conversation <span aria-hidden="true">↗</span>
+                    View relationship <span aria-hidden="true">↗</span>
                   </Link>
                   <form action={dismissHomeOpportunity.bind(null, item.relationshipId, item.basisId)}>
                     <button type="submit"

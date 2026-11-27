@@ -19,6 +19,8 @@ import MemoryCorrectionForm from "./MemoryCorrectionForm";
 import ConnectionJournal from "./ConnectionJournal";
 import { relationshipContactDetails, relationshipContextLabel, lastContactDescription, relationshipContextSummary, relationshipInteractionHistory } from "@/lib/relationship-overview";
 import { homeInteractionDate } from "@/lib/home-view";
+import { relationshipCadence, contactCadenceOptions } from "@/lib/relationship-cadence";
+import { updateContactCadence } from "../cadence-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +78,7 @@ export default async function RelationshipDetailPage({
   const contactDetails = relationshipContactDetails(relationship, today);
   const contextLabel = relationshipContextLabel(relationship, today);
   const lastContact = lastContactDescription(relationship, today);
+  const cadence = relationshipCadence(relationship, today);
   const rememberedContext = relationshipContextSummary(relationship, contactDetails, today);
   const history = relationshipInteractionHistory(relationship, capturedNotes, journeys, today);
 
@@ -127,9 +130,31 @@ export default async function RelationshipDetailPage({
             ))}
           </dl>
         )}
-        <div className="mt-5 border-t border-stone-100 pt-4">
-          <p className="text-xs font-medium text-stone-500">Last contact</p>
-          <p className="mt-1 text-base font-medium text-stone-900">{lastContact.date}{lastContact.elapsed && <span className="ml-2 text-sm font-normal text-stone-500">{lastContact.elapsed}</span>}</p>
+        <div className="mt-5 grid gap-4 border-t border-stone-100 pt-4 sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-medium text-stone-500">Last contact</p>
+            <p className="mt-1 text-base font-medium text-stone-900">{lastContact.date}</p>
+            {lastContact.elapsed && <p className="text-sm text-stone-500">{lastContact.elapsed}</p>}
+          </div>
+          <div>
+            <p className="text-xs font-medium text-stone-500">{cadence?.userSelected ? "Your cadence" : "Suggested cadence"}</p>
+            <p className="mt-1 text-base font-medium text-stone-900">{cadence?.label ?? "Still learning"}</p>
+            <details className="mt-1 text-xs text-stone-500">
+              <summary className="cursor-pointer">Adjust if desired</summary>
+              {cadence && <p className="mt-2">{cadence.basis}. This is a guide, not a quota.</p>}
+              <form action={updateContactCadence.bind(null, relationship.id)} className="mt-2 flex flex-wrap items-center gap-2">
+                <label className="sr-only" htmlFor="contact-cadence">Contact cadence</label>
+                <select id="contact-cadence" name="contactCadence"
+                  defaultValue={relationship.contactCadenceDays === undefined ? "suggested" : String(relationship.contactCadenceDays)}
+                  className="max-w-full rounded-md border border-stone-300 bg-white px-2 py-1.5 text-sm">
+                  <option value="suggested">Use suggested cadence</option>
+                  {contactCadenceOptions.map((item) => <option key={item.days} value={item.days}>{item.label}</option>)}
+                </select>
+                <button type="submit" className="rounded-md bg-stone-900 px-3 py-1.5 text-sm text-white">Save</button>
+              </form>
+              <p className="mt-2">Timely reasons to connect and your commitments can be separate from this cadence.</p>
+            </details>
+          </div>
         </div>
       </header>
 
@@ -150,7 +175,8 @@ export default async function RelationshipDetailPage({
           <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-5">
             {rememberedContext.map((item) => (
               <li key={item.id} className="py-3">
-                <p className="text-sm leading-relaxed text-stone-800">{item.value}</p>
+                <p className="text-xs font-medium text-stone-500">{item.label}</p>
+                <p className="mt-1 text-sm leading-relaxed text-stone-800">{item.value}</p>
                 <p className="mt-1 text-xs text-stone-500">Last recorded {homeInteractionDate(item.date)}</p>
               </li>
             ))}
