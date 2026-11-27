@@ -50,15 +50,12 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
   }
 
   return (
-    <section className="rounded-2xl border border-indigo-200 bg-white p-6">
-      <h2 className="text-xl font-semibold text-stone-900">Conversation ideas</h2>
-      <p className="mt-2 max-w-3xl text-sm text-stone-600">
-        A few things you might naturally ask about, based on what you remember.
-        You do not have to monitor someone else&apos;s plans first.
-      </p>
+    <section className="rounded-xl border border-stone-200 bg-white p-5">
+      <h2 className="text-lg font-semibold text-stone-900">Conversation ideas</h2>
+      <p className="mt-1 text-sm text-stone-600">Get a few natural things to talk about when you next connect.</p>
       <button type="button" onClick={requestReview} disabled={reviewing || dismissing}
-        className="mt-4 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-50">
-        {reviewing ? "Looking through saved context…" : review ? "Refresh ideas" : "Find something worth asking"}
+        className="mt-3 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-50">
+        {reviewing ? "Looking through saved context…" : review ? "Refresh ideas" : "Prepare for a conversation"}
       </button>
       <details className="mt-2 text-xs text-stone-500">
         <summary className="cursor-pointer">How suggestions are generated</summary>

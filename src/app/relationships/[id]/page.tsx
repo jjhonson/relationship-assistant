@@ -17,6 +17,8 @@ import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
 import { userOwnsCommitment } from "@/lib/connection-subjects";
 import MemoryCorrectionForm from "./MemoryCorrectionForm";
 import ConnectionJournal from "./ConnectionJournal";
+import { relationshipContactDetails, relationshipContextLabel, lastContactDescription, relationshipContextSummary, relationshipInteractionHistory } from "@/lib/relationship-overview";
+import { homeInteractionDate } from "@/lib/home-view";
 
 export const dynamic = "force-dynamic";
 
@@ -67,21 +69,19 @@ export default async function RelationshipDetailPage({
   const inferredRoles = relationship.inferredRelationshipRoles ?? [];
   const labelAuthority = relationship.labelAuthority ?? "legacy-unverified";
   const nameAction = correctRelationshipName.bind(null, relationship.id);
-  const latestFact = (label: string) => relationship.durableFacts
-    .filter((item) => item.label.toLowerCase() === label.toLowerCase())
-    .sort((a, b) => b.lastObservedAt.localeCompare(a.lastObservedAt))[0];
-  const contactDetails = [
-    { label: "Email", value: relationship.identities.find((item) => item.kind === "email")?.value ?? "", fromNote: relationship.identities.some((item) => item.source === "capture") },
-    { label: "Phone", value: latestFact("Phone")?.value ?? "", fromNote: !!latestFact("Phone") },
-    { label: "Company", value: latestFact("Company")?.value ?? "", fromNote: !!latestFact("Company") },
-    { label: "Role", value: latestFact("Role")?.value ?? "", fromNote: !!latestFact("Role") },
-    { label: "City", value: latestFact("City")?.value ?? "", fromNote: !!latestFact("City") },
-    { label: "LinkedIn", value: latestFact("LinkedIn")?.value ?? "", fromNote: !!latestFact("LinkedIn") },
-  ];
+  const today = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const contactDetails = relationshipContactDetails(relationship, today);
+  const contextLabel = relationshipContextLabel(relationship, today);
+  const lastContact = lastContactDescription(relationship, today);
+  const rememberedContext = relationshipContextSummary(relationship, contactDetails, today);
+  const history = relationshipInteractionHistory(relationship, capturedNotes, journeys, today);
 
   return (
-    <div className="space-y-6">
-      <Link href="/relationships" className="text-sm font-medium text-indigo-700 hover:underline">
+    <div className="mx-auto max-w-4xl space-y-7 pb-12">
+      <Link href="/relationships" className="text-sm font-medium text-stone-600 hover:underline">
         ← Saved relationships
       </Link>
 
@@ -106,23 +106,100 @@ export default async function RelationshipDetailPage({
         </div>
       )}
 
-      <header className="rounded-2xl border border-stone-200 bg-white p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
-          Relationship record
-        </p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight">{relationship.personLabel}</h1>
-        {relationship.personLabelAuthority === "inferred-unverified" && (
-          <p className="mt-1 text-xs text-amber-700">Name identified from a saved memory. Confirm or correct when you have a moment.</p>
+      <header className="rounded-2xl border border-stone-200 bg-white p-6 sm:p-7">
+        <h1 className="text-3xl font-semibold tracking-tight text-stone-950">{relationship.personLabel}</h1>
+        {contextLabel && (
+          <p className="mt-1 text-sm text-stone-600">
+            {contextLabel.value}{contextLabel.inferred ? " · Suggested relationship context" : ""}
+          </p>
         )}
-        <div className="mt-5 grid gap-3 border-b border-stone-100 pb-5 sm:grid-cols-2 lg:grid-cols-3">
-          {contactDetails.map((item) => (
-            <div key={item.label}>
-              <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{item.label}</p>
-              <p className="mt-1 break-words text-sm text-stone-900">{item.value || <span className="text-stone-400">Not recorded</span>}</p>
-              {item.value && item.fromNote && <p className="text-xs text-stone-500">From saved context (verify if needed)</p>}
-            </div>
-          ))}
+        {relationship.personLabelAuthority === "inferred-unverified" && (
+          <p className="mt-1 text-xs text-stone-600">Name inferred from a saved memory. You can correct it below.</p>
+        )}
+        {contactDetails.length > 0 && (
+          <dl className="mt-5 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+            {contactDetails.map((item) => (
+              <div key={item.label}>
+                <dt className="text-xs font-medium text-stone-500">{item.label}</dt>
+                <dd className="mt-1 break-words text-sm text-stone-900">{item.value}</dd>
+                {!item.confirmed && <p className="mt-0.5 text-xs text-stone-500">Last recorded {homeInteractionDate(item.observedAt)}</p>}
+              </div>
+            ))}
+          </dl>
+        )}
+        <div className="mt-5 border-t border-stone-100 pt-4">
+          <p className="text-xs font-medium text-stone-500">Last contact</p>
+          <p className="mt-1 text-base font-medium text-stone-900">{lastContact.date}{lastContact.elapsed && <span className="ml-2 text-sm font-normal text-stone-500">{lastContact.elapsed}</span>}</p>
         </div>
+      </header>
+
+      <details className="rounded-xl border border-stone-200 bg-white px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-stone-800">Remember something or add contact details</summary>
+        <p className="my-3 text-sm text-stone-600">
+          Add a note, conversation or contact details about {relationship.personLabel}.
+          {!contactDetails.some((item) => item.label === "LinkedIn") && " You can also paste their LinkedIn profile text or address."}
+          {" "}Only the information you supply is used; external profiles are not fetched.
+        </p>
+        <HomeCapture contextRelationshipId={relationship.id}
+          people={people.map((person) => ({ id: person.id, label: person.personLabel }))} />
+      </details>
+
+      <section aria-labelledby="context-heading" className="space-y-3">
+        <h2 id="context-heading" className="text-lg font-semibold tracking-tight text-stone-900">What&apos;s going on</h2>
+        {rememberedContext.length ? (
+          <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-5">
+            {rememberedContext.map((item) => (
+              <li key={item.id} className="py-3">
+                <p className="text-sm leading-relaxed text-stone-800">{item.value}</p>
+                <p className="mt-1 text-xs text-stone-500">Last recorded {homeInteractionDate(item.date)}</p>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="text-sm text-stone-500">No additional context recorded yet.</p>}
+      </section>
+
+      <ConnectionSubjectsReview
+        key={relationship.updatedAt + ":" + (relationship.actionableMemoryFeedback?.length ?? 0) +
+          ":" + (relationship.dismissedConnectionSubjects?.length ?? 0)}
+        relationshipId={relationship.id} />
+
+      <section aria-labelledby="history-heading" className="space-y-3">
+        <h2 id="history-heading" className="text-lg font-semibold tracking-tight text-stone-900">History</h2>
+        {history.length ? (
+          <>
+            <ol className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-5">
+              {history.slice(0, 5).map((entry) => (
+                <li key={entry.id} className="py-3">
+                  <p className="text-sm font-medium text-stone-900">{homeInteractionDate(entry.date)}</p>
+                  <p className="mt-0.5 text-xs text-stone-500">{entry.label}</p>
+                  <p className="mt-1 text-sm text-stone-700">{entry.detail}</p>
+                  {entry.captureId && <Link href={"/captures/" + encodeURIComponent(entry.captureId)} className="text-xs text-stone-600 underline underline-offset-2">View saved memory</Link>}
+                </li>
+              ))}
+            </ol>
+            {history.length > 5 && (
+              <details className="text-sm text-stone-600">
+                <summary className="cursor-pointer">Earlier history ({history.length - 5})</summary>
+                <ol className="mt-2 space-y-3">
+                  {history.slice(5).map((entry) => (
+                    <li key={entry.id} className="border-b border-stone-100 pb-3">
+                      <p className="font-medium">{homeInteractionDate(entry.date)} · {entry.label}</p>
+                      <p className="mt-1">{entry.detail}</p>
+                      {entry.captureId && <Link href={"/captures/" + encodeURIComponent(entry.captureId)} className="underline underline-offset-2">View saved memory</Link>}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+          </>
+        ) : <p className="text-sm text-stone-500">No dated interaction history recorded yet.</p>}
+      </section>
+
+      <details className="rounded-2xl border border-stone-200 bg-white p-4 sm:p-5">
+        <summary className="cursor-pointer text-sm font-medium text-stone-700">All memories, settings and sources</summary>
+        <div className="mt-5 space-y-5">
+        <section className="rounded-xl border border-stone-200 bg-white p-5">
+          <h2 className="text-lg font-semibold">Relationship settings</h2>
         <details className="mt-3">
           <summary className="cursor-pointer text-sm font-medium text-indigo-700">Correct name</summary>
           <form action={nameAction} className="mt-3 flex flex-wrap items-end gap-2">
@@ -235,32 +312,9 @@ export default async function RelationshipDetailPage({
             </button>
           </form>
         </details>
-      </header>
 
-      <section className="rounded-2xl border border-stone-200 bg-stone-50 p-5">
-        <h2 className="text-lg font-semibold">Where things stand</h2>
-        <p className="mt-2 text-sm text-stone-700">
-          {relationship.openLoops.length > 0
-            ? relationship.openLoops.length + " recorded open commitment" + (relationship.openLoops.length === 1 ? "" : "s") + ". See the details below."
-            : "No open commitments recorded. Nothing needs doing just because this person is in your relationships."}
-        </p>
-        {capturedNotes[0]?.summary && <p className="mt-2 text-sm text-stone-600">Latest remembered: {capturedNotes[0].summary}</p>}
-      </section>
-
-      <ConnectionSubjectsReview
-        key={relationship.updatedAt + ":" + (relationship.actionableMemoryFeedback?.length ?? 0) +
-          ":" + (relationship.dismissedConnectionSubjects?.length ?? 0)}
-        relationshipId={relationship.id} />
-      <ConnectionJournal relationshipId={relationship.id} journeys={journeys} />
-
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-stone-900">Remember something</h2>
-        <HomeCapture
-          contextRelationshipId={relationship.id}
-          people={people.map((person) => ({ id: person.id, label: person.personLabel }))}
-        />
-      </section>
-
+        </section>
+        <ConnectionJournal relationshipId={relationship.id} journeys={journeys} />
       {(connectedPeople.length > 0 || sharedHouseholdContext.length > 0) && (
         <section className="rounded-2xl border border-stone-200 bg-white p-6">
           <h2 className="text-lg font-semibold">Connected people and shared context</h2>
@@ -590,6 +644,8 @@ export default async function RelationshipDetailPage({
             </ul>
           </>
         )}
+      </details>
+        </div>
       </details>
     </div>
   );
