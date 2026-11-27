@@ -1,0 +1,107 @@
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+const mocks=vi.hoisted(()=>({
+  listRelationships:vi.fn(),getRelationship:vi.fn(),savePersonalMoment:vi.fn(),
+  saveReviewedPersonCapture:vi.fn(),learnFromNewPastedConversation:vi.fn(),
+  saveQuickCaptureWithoutRedirect:vi.fn(),saveUniversalCaptureWithoutRedirect:vi.fn(),
+  revalidatePath:vi.fn(),
+}));
+vi.mock("@/lib/relationship-store",()=>({
+  listRelationships:mocks.listRelationships,getRelationship:mocks.getRelationship,
+  savePersonalMoment:mocks.savePersonalMoment,
+}));
+vi.mock("@/app/relationships/conversational-actions",()=>({saveReviewedPersonCapture:mocks.saveReviewedPersonCapture}));
+vi.mock("@/app/relationships/actions",()=>({learnFromNewPastedConversation:mocks.learnFromNewPastedConversation}));
+vi.mock("@/app/relationships/capture-actions",()=>({
+  saveQuickCaptureWithoutRedirect:mocks.saveQuickCaptureWithoutRedirect,
+  saveUniversalCaptureWithoutRedirect:mocks.saveUniversalCaptureWithoutRedirect,
+}));
+vi.mock("next/cache",()=>({revalidatePath:mocks.revalidatePath}));
+
+import { submitHomeText, saveHomePhotoInput } from "./actions";
+import { createManualRelationshipRecord } from "@/lib/relationship-record";
+import { personAnswerEvidence } from "@/lib/relationship-entry";
+
+const submissionId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+function fixtures(){
+  const p=createManualRelationshipRecord("Rowan Taylor");
+  p.id="rowan";
+  const date="2024-04-12";
+  p.lastInteractionAt=date;
+  p.sources.push({id:"pasted:pet",label:"Fictional conversation",source:"manual",observedAt:date});
+  p.durableFacts.push({id:"pet",label:"Dog's name",category:"Personal",value:"Cooper",sourceIds:["pasted:pet"],firstObservedAt:date,lastObservedAt:date});
+  const other=createManualRelationshipRecord("Avery Morgan");
+  other.id="avery";
+  return {p,other};
+}
+function noWrites(){
+  for(const spy of [mocks.savePersonalMoment,mocks.saveReviewedPersonCapture,mocks.learnFromNewPastedConversation,mocks.saveQuickCaptureWithoutRedirect,mocks.saveUniversalCaptureWithoutRedirect,mocks.revalidatePath])expect(spy).not.toHaveBeenCalled();
+}
+const capture={kind:"note",source:"unspecified",interactionDate:"",dateEvidence:"unknown",summary:"New memory",question:""};
+function response(intent:string,evidenceIds:string[]=[]){
+  return new Response(JSON.stringify({output:[{content:[{type:"output_text",text:JSON.stringify({intent,evidenceIds,capture})}]}]}),{status:200});
+}
+describe("read-only person entry routing",()=>{
+  beforeEach(()=>{
+    vi.clearAllMocks();
+    vi.stubEnv("NODE_ENV","development");
+    vi.stubEnv("RA_DATASET_MODE","fictional");
+    vi.stubEnv("RA_STORAGE_BACKEND","json");
+    vi.stubEnv("OPENAI_API_KEY","");
+    const {p,other}=fixtures();
+    mocks.listRelationships.mockResolvedValue([p,other]);
+    mocks.getRelationship.mockResolvedValue(p);
+    mocks.saveReviewedPersonCapture.mockResolvedValue({saved:true,destination:"/relationships/rowan"});
+  });
+  afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();});
+  it("answers an indirect question from local saved evidence with zero write calls",async()=>{
+    const r=await submitHomeText({text:"Remind me of his dog's name",submissionId,contextRelationshipId:"rowan"});
+    expect(r).toMatchObject({state:"answer",evidence:[{value:"Cooper"}],offline:true});
+    noWrites();
+  });
+  it("does not convert missing information, a correction, or a different person into a saved note",async()=>{
+    for(const text of ["What's his wife's name?","Actually his dog's name is Charlie.","What do we know about Avery Morgan?"]){
+      const r=await submitHomeText({text,submissionId,contextRelationshipId:"rowan"});
+      expect(r).toMatchObject({state:"answer",evidence:[]});
+    }
+    noWrites();
+  });
+  it("cannot force a question into a note via capture choices or a misclassified model response",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    const fetchMock=vi.fn(async()=>response("addition"));
+    vi.stubGlobal("fetch",fetchMock);
+    const r=await submitHomeText({text:"What is his dog's name",submissionId,contextRelationshipId:"rowan",choices:{kind:"note",relationshipId:"rowan"}});
+    expect(r).toMatchObject({state:"answer",retainInput:true,evidence:[]});
+    expect(fetchMock).toHaveBeenCalledOnce();
+    noWrites();
+  });
+  it("uses model-selected evidence without exposing other records or updating contact recency",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    const {p}=fixtures();
+    const id=personAnswerEvidence(p,"2026-11-27","dog")[0].id;
+    const fetchMock=vi.fn(async(_url:unknown,init?:RequestInit)=>{
+      const payload=JSON.parse(String(init?.body));
+      expect(payload.input).not.toContain("Avery Morgan");
+      expect(payload.store).toBe(false);
+      return response("question",[id]);
+    });
+    vi.stubGlobal("fetch",fetchMock);
+    const r=await submitHomeText({text:"What was his dog's name?",submissionId,contextRelationshipId:"rowan"});
+    expect(r).toMatchObject({state:"answer",evidence:[{value:"Cooper"}],offline:false});
+    noWrites();
+  });
+  it("passes a clearly classified new memory through the established capture path",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    vi.stubGlobal("fetch",vi.fn(async()=>response("addition")));
+    const r=await submitHomeText({text:"He enjoys pottery.",submissionId,contextRelationshipId:"rowan"});
+    expect(r).toMatchObject({state:"saved",destination:"/relationships/rowan"});
+    expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledOnce();
+    expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("rowan",expect.objectContaining({text:"He enjoys pottery.",kind:"note",interactionDate:""}));
+  });
+  it("rejects a question with a photo before invoking the image write path",async()=>{
+    const form=new FormData();
+    form.set("note","What is his dog's name?");
+    form.set("photo",new File(["fixture"],"photo.jpg",{type:"image/jpeg"}));
+    await expect(saveHomePhotoInput(form,"rowan")).rejects.toThrow("Questions or corrections");
+    noWrites();
+  });
+});
