@@ -47,3 +47,36 @@ export function clipboardPhoto(data: {
   if (choice.kind === "photo") return {kind:"photo",file};
   return {kind:"unsupported",message:choice.kind === "unsupported" ? choice.message : "Paste a JPEG, PNG or WebP image."};
 }
+
+type FileTransfer = {
+  types?: ArrayLike<string>;
+  items?: ArrayLike<Pick<DataTransferItem, "kind" | "getAsFile">>;
+  files?: ArrayLike<File>;
+};
+
+/** During dragover, file bytes and the files list may be protected. Inspect
+ * only the transfer types and item kinds; never fetch a dragged URL. */
+export function hasFileDrag(data: FileTransfer): boolean {
+  return Array.from(data.types ?? []).includes("Files") ||
+    Array.from(data.items ?? []).some(item => item.kind === "file") ||
+    (data.files?.length ?? 0) > 0;
+}
+
+export type DroppedCaptureFile =
+  | { kind: "none" }
+  | { kind: "file"; file: File }
+  | { kind: "unsupported"; message: string };
+
+/** A single explicit local file, not a URL or HTML drop. The shared
+ * attachment handler applies the same format/size rules as the picker. */
+export function droppedCaptureFile(data: FileTransfer): DroppedCaptureFile {
+  if (!hasFileDrag(data)) return {kind:"none"};
+  const items=Array.from(data.items ?? []).filter(item=>item.kind==="file");
+  const files=Array.from(data.files ?? []);
+  if (items.length>1 || files.length>1) return {kind:"unsupported",message:"Drop one file at a time."};
+  // The browser may expose a directory or another file item that cannot
+  // be opened as a File. Do not silently accept a partial drop.
+  const file=files[0] ?? items[0]?.getAsFile();
+  if (!file) return {kind:"unsupported",message:"Drop a supported image or text file, not a folder."};
+  return {kind:"file",file};
+}
