@@ -37,8 +37,8 @@ function noWrites(){
   for(const spy of [mocks.savePersonalMoment,mocks.saveReviewedPersonCapture,mocks.learnFromNewPastedConversation,mocks.saveQuickCaptureWithoutRedirect,mocks.saveUniversalCaptureWithoutRedirect,mocks.revalidatePath])expect(spy).not.toHaveBeenCalled();
 }
 const capture={kind:"note",source:"unspecified",interactionDate:"",dateEvidence:"unknown",summary:"New memory",question:""};
-function response(intent:string,evidenceIds:string[]=[],answerText=""){
-  return new Response(JSON.stringify({output:[{content:[{type:"output_text",text:JSON.stringify({intent,evidenceIds,answerText,capture})}]}]}),{status:200});
+function response(intent:string,evidenceIds:string[]=[],answerText="",answerNote=""){
+  return new Response(JSON.stringify({output:[{content:[{type:"output_text",text:JSON.stringify({intent,evidenceIds,answerText,answerNote,capture})}]}]}),{status:200});
 }
 describe("read-only person entry routing",()=>{
   beforeEach(()=>{

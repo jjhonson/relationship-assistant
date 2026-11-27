@@ -306,7 +306,8 @@ export default function HomeCapture({
       {!canSubmit && <p id="capture-unavailable" className="sr-only">This request is unavailable in the current environment.</p>}
       {reply && <div aria-live="polite" className="mt-3 space-y-2 border-t border-stone-100 px-3 pt-3 text-sm">
         <div className="flex items-start justify-between gap-2"><p className="font-medium text-stone-800">{reply.question}</p><button type="button" onClick={() => setReply(null)} aria-label="Close answer" className="text-stone-500 hover:text-stone-900">×</button></div>
-        <p className="whitespace-pre-line leading-relaxed text-stone-800">{reply.result.message}</p>
+        <p className="whitespace-pre-line leading-relaxed text-stone-900">{reply.result.message}</p>
+        {reply.result.note && <p className="whitespace-pre-line text-xs leading-relaxed text-stone-600">{reply.result.note}</p>}
         {reply.result.evidence.length > 0 && (
           <details className="text-xs text-stone-500">
             <summary className="cursor-pointer font-medium hover:text-stone-800">Supporting memories ({reply.result.evidence.length})</summary>
