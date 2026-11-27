@@ -34,7 +34,7 @@ describe("relationship entry",()=>{
         expect(r.evidence.map(e=>e.value)).toEqual(["Cooper"]);
         expect(r.offline).toBe(true);
         expect(r.message).toContain("Cooper");
-        expect(r.message).toContain("recorded dog");
+        expect(r.message).toContain("dog's name was recorded as Cooper");
       }
     }
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -116,6 +116,17 @@ describe("relationship entry",()=>{
     const unsupported=await interpretRelationshipEntry({text:"What's his wife's name?",record,today,offlinePreview:false},
       {apiKey:"test",fetchImpl:vi.fn(async()=>result("question",[],capture,"Her name is invented."))});
     expect(unsupported).toMatchObject({state:"answer",message:expect.stringContaining("don't have enough"),evidence:[]});
+  });
+
+  it("does not treat multiple hobbies with the same generic label as a conflict", async()=>{
+    const record=person();
+    record.durableFacts.push(
+      {id:"hobby1",label:"Hobby",category:"Interest",value:"Woodworking",sourceIds:["pasted:fixture"],firstObservedAt:observed,lastObservedAt:observed},
+      {id:"hobby2",label:"Hobby",category:"Interest",value:"Jazz",sourceIds:["pasted:fixture"],firstObservedAt:observed,lastObservedAt:observed},
+    );
+    const r=await interpretRelationshipEntry({text:"What hobbies does he have?",record,today,offlinePreview:true},{apiKey:""});
+    expect(r).toMatchObject({state:"answer",evidence:[{value:"Woodworking"},{value:"Jazz"}]});
+    if(r.state==="answer")expect(r.message).not.toContain("can't verify which");
   });
 
 });

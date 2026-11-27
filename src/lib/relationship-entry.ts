@@ -82,18 +82,17 @@ export function directEvidenceAnswer(evidence:AnswerEvidence[]):string {
     const punctuation=/[.!?]$/.test(value)?"":".";
     const date=homeInteractionDate(item.observedAt);
     if (/^(dog|cat|pet)(?:'s|’s)? name$/i.test(item.label) && /^[\p{L}][\p{L}\p{M} .'-]{0,59}$/u.test(value)) {
-      return "The recorded "+item.label.toLowerCase().replace("’","'")+" is "+value+punctuation+" (mentioned "+date+").";
+      return "The "+item.label.toLowerCase().replace("’","'")+" was recorded as "+value+" ("+date+").";
     }
     if (item.status?.startsWith("Most recently recorded")) {
-      return "The most recently recorded "+item.label.toLowerCase()+" is "+value+punctuation+" (as of "+date+").";
+      return "The most recently recorded "+item.label.toLowerCase()+" is "+value.replace(/[.!?]$/,"")+" (as of "+date+").";
     }
-    return item.label+": "+value+punctuation+" (recorded "+date+").";
+    return item.label+": "+value+punctuation+" (Recorded "+date+".)";
   };
   if (latest.length===1) return sentence(latest[0]);
   // Different values for one field need visible uncertainty, not a winner
   // chosen solely because the model happened to cite one of them.
-  const multipleValues=latest.some((item,i)=>latest.slice(i+1).some(other=>
-    other.label.toLowerCase()===item.label.toLowerCase() && other.value.toLowerCase()!==item.value.toLowerCase()));
+  const multipleValues=hasAlternatives(latest);
   return (multipleValues?"There are multiple recorded values; I can't verify which is current.\n":"")+
     latest.map(sentence).join("\n");
 }
@@ -102,12 +101,15 @@ export function directEvidenceAnswer(evidence:AnswerEvidence[]):string {
  * fact. This keeps alternatives visible rather than permitting a model
  * response to silently resolve a known conflict. */
 function withAlternatives(selected:AnswerEvidence[],all:AnswerEvidence[]):AnswerEvidence[]{
-  const labels=new Set(selected.map(item=>item.label.toLowerCase()));
+  const labels=new Set(selected.filter(item=>alternativeField(item.label)).map(item=>item.label.toLowerCase()));
   const selectedIds=new Set(selected.map(item=>item.id));
   return [...selected,...all.filter(item=>labels.has(item.label.toLowerCase())&&!selectedIds.has(item.id))];
 }
+function alternativeField(label:string):boolean {
+  return /^(company|title|location|email|phone|linkedin|birthday|(dog|cat|pet)(?:'s|’s)? name)$/i.test(label);
+}
 function hasAlternatives(evidence:AnswerEvidence[]):boolean{
-  return evidence.some((item,i)=>evidence.slice(i+1).some(other=>
+  return evidence.some((item,i)=>alternativeField(item.label)&&evidence.slice(i+1).some(other=>
     item.label.toLowerCase()===other.label.toLowerCase()&&item.value.toLowerCase()!==other.value.toLowerCase()));
 }
 
