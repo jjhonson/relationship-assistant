@@ -2,11 +2,12 @@
 # Run on the Mac host. Stops only what dev-start.sh launched, then stops the Codespace.
 usage() {
   cat <<'USAGE'
-Usage: scripts/dev-stop.sh [--name CODESPACE] [--force] [--dry-run]
+Usage: scripts/dev-stop.sh [--name CODESPACE] [--personal] [--force] [--dry-run]
 
 Gracefully stops the dev server started by dev-start.sh (SIGTERM; --force escalates to SIGKILL),
 closes a verified recorded port forward, reports any next-env.d.ts changes without modifying
 them, then stops the selected Codespace. Other processes and Codespaces are never touched.
+--personal stops the managed personal runtime and its own local tunnel; save any draft before stopping.
 Manual recovery:
   Inspect:   the ownership record and process logs; do not signal a PID copied from a record.
   Retry:     scripts/dev-stop.sh --name NAME --force
@@ -23,10 +24,17 @@ trap release_host_lock EXIT
 
 resolve_codespace
 status=0
+if [ "$RA_MODE" = personal ] && [ "$RA_STATE" = Starting ]; then
+  fail "Codespace is starting. Retry Stop after startup completes."
+fi
 if [ "$RA_STATE" = "Available" ]; then
-  log "[Codespace] Stopping dev server..."
+  log "[Codespace] Stopping $RA_MODE server..."
   if [ "$RA_DRY_RUN" = "1" ]; then
-    log "[dry-run] gh codespace ssh -c $RA_CODESPACE -- bash -s -- stop $RA_REMOTE_DIR $RA_PORT"
+    if [ "$RA_MODE" = personal ]; then
+      log "[dry-run] gh codespace ssh -c $RA_CODESPACE -- bash -s -- stop $RA_REMOTE_DIR $RA_PORT personal"
+    else
+      log "[dry-run] gh codespace ssh -c $RA_CODESPACE -- bash -s -- stop $RA_REMOTE_DIR $RA_PORT"
+    fi
   else
     remote_run stop || { log "WARNING: remote stop reported a problem; Codespace will NOT be stopped so nothing is orphaned. See --help for recovery."; status=1; }
   fi

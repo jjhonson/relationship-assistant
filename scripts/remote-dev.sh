@@ -5,14 +5,123 @@
 set -u
 exec 3>&1
 ACTION="${1:-}"; DIR="${2:-}"; PORT="${3:-3000}"; FORCE="${4:-0}"; RUN_ID="${5:-}"
+RUN_MODE="${6:-dev}"
+case "$RUN_MODE" in dev|personal) ;; *) echo "ERROR: unknown runtime mode" >&2; exit 1 ;; esac
 PIDFILE="${RA_PID_FILE:-/tmp/relationship-assistant-dev.pid}"
-LOG="${RA_LOG_FILE:-/tmp/relationship-assistant-dev.log}"
+if [ "$RUN_MODE" = personal ]; then
+  LOG="${RA_LOG_FILE:-/tmp/relationship-assistant-personal.log}"
+else
+  LOG="${RA_LOG_FILE:-/tmp/relationship-assistant-dev.log}"
+fi
 LOCK_DIR="${PIDFILE}.lock"
 LOCK_TOKEN="remote-$$-${RANDOM}${RANDOM}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 meta_get() { sed -n "s/^$1=//p" "$PIDFILE" 2>/dev/null | head -n1; }
 port_listening() { (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; }
+
+record_mode_matches() {
+  local run
+  run="$(meta_get run_id)"
+  case "$RUN_MODE:$run" in
+    personal:personal-*) return 0 ;;
+    dev:personal-*) return 1 ;;
+    dev:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The ordinary personal launcher must use only the saved private files, never an
+# inherited acceptance/test override. No values from the files are printed.
+personal_workspace_clean() {
+  git diff --no-ext-diff --quiet --cached HEAD -- || return 1
+  git diff --no-ext-diff --quiet HEAD -- . ':(exclude)next-env.d.ts' || return 1
+  [ -z "$(git ls-files --others --exclude-standard)" ] || return 1
+  if ! git diff --no-ext-diff --quiet HEAD -- next-env.d.ts; then
+    # Next development may change only the generated declaration import paths.
+    # Preserve that file; refuse all other changes, including user edits.
+    git show HEAD:next-env.d.ts | cmp -s - <(sed 's#\.next/dev/types/#.next/types/#g' next-env.d.ts) || return 1
+  fi
+}
+
+personal_preflight() {
+  [ "${CODESPACES:-}" = true ] || die "personal launch requires the existing private Codespace"
+  personal_workspace_clean || die "uncommitted application changes detected; no branch or file changed"
+  GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/main </dev/null 2>/dev/null ||
+    die "could not verify the current reviewed main tree"
+  PERSONAL_TREE="$(git rev-parse 'HEAD^{tree}')" || die "could not identify checked-out tree"
+  [ "$PERSONAL_TREE" = "$(git rev-parse 'FETCH_HEAD^{tree}')" ] ||
+    die "checkout differs from current merged main; synchronize deliberately before personal use"
+  [ -f .env.local ] && [ -f .data/personal.env ] && [ ! -L .data ] &&
+    [ ! -L .data/personal.env ] && [ -O .data/personal.env ] &&
+    [ "$(stat -c %a .data/personal.env)" = 600 ] &&
+    git check-ignore -q .data/personal.env ||
+    die "protected ignored personal configuration is missing or unsafe"
+  unset NODE_ENV RA_STORAGE_BACKEND RA_DATASET_MODE RA_DB_OWNER_ID RA_SUPABASE_URL RA_SUPABASE_SECRET_KEY
+  unset RA_PERSONAL_DATA_ENABLED RA_PERSONAL_DB_OWNER_ID RA_PERSONAL_SUPABASE_URL RA_PERSONAL_SUPABASE_SECRET_KEY
+  PERSONAL_PROFILE="$(node --env-file=.env.local --env-file=.data/personal.env --input-type=module -e '
+    import { createHash } from "node:crypto";
+    import { requirePersonalDatasetProfile } from "./scripts/dataset-profile.mjs";
+    const p = requirePersonalDatasetProfile();
+    console.log(createHash("sha256").update(p.base + "\n" + p.ownerId).digest("hex"));
+  ' </dev/null 2>/dev/null)" || die "saved personal profile failed validation"
+  [[ "$PERSONAL_PROFILE" =~ ^[a-f0-9]{64}$ ]] || die "invalid private profile fingerprint"
+  export RA_PERSONAL_LAUNCH_TREE="$PERSONAL_TREE"
+  export RA_PERSONAL_LAUNCH_PROFILE="$PERSONAL_PROFILE"
+  echo "[Codespace] Reviewed main tree and saved personal profile verified."
+}
+
+personal_prepare_build() {
+  [ -f package-lock.json ] && [ ! -L node_modules ] && [ ! -L .next ] ||
+    die "reviewed dependency lock or build directory is missing or unsafe"
+  local deps build_id stamp
+  deps="$(sha256sum package-lock.json | cut -d' ' -f1)" || die "could not identify dependencies"
+  [ -n "$deps" ] || die "could not identify dependencies"
+  umask 077
+  if [ ! -d node_modules ] || [ "$(cat node_modules/.ra-personal-deps 2>/dev/null)" != "$deps" ]; then
+    echo "[Codespace] Installing reviewed locked dependencies (first use or dependency change)..."
+    npm ci </dev/null >"$LOG.build" 2>&1 || die "locked dependency install failed; see the private build log"
+    printf '%s\n' "$deps" >node_modules/.ra-personal-deps || die "could not record installed dependency version"
+  fi
+  build_id="$(cat .next/BUILD_ID 2>/dev/null)"
+  stamp="$(printf '%s\n%s\n%s' "$PERSONAL_TREE" "$deps" "$build_id")"
+  if [ -n "$build_id" ] && [ "$(cat .next/.ra-personal-build 2>/dev/null)" = "$stamp" ]; then
+    echo "[Codespace] Reusing reviewed production build."
+    return 0
+  fi
+  echo "[Codespace] Building reviewed production code (first use or code change)..."
+  # Build without activating the real personal profile or connecting to the database.
+  RA_DATASET_MODE=fictional RA_STORAGE_BACKEND=json NODE_ENV=production npm run build </dev/null >>"$LOG.build" 2>&1 ||
+    die "production build failed; see the private build log"
+  personal_workspace_clean && [ "$(git rev-parse 'HEAD^{tree}')" = "$PERSONAL_TREE" ] ||
+    die "working tree changed during build; refusing to launch"
+  build_id="$(cat .next/BUILD_ID 2>/dev/null)"
+  [ -n "$build_id" ] || die "production build did not produce a build ID"
+  printf '%s\n%s\n%s\n' "$PERSONAL_TREE" "$deps" "$build_id" >.next/.ra-personal-build ||
+    die "could not record reviewed build"
+}
+
+# Verify every listener on the intended port belongs to the managed session and
+# the launch's exact reviewed tree and profile fingerprint. Never output env.
+personal_listener_matches() {
+  local group="$1" line pids pid listeners found=0
+  listeners="$(ss -H -ltnp "sport = :$PORT" 2>/dev/null)" || return 1
+  [ -n "$listeners" ] || return 1
+  while IFS= read -r line; do
+    pids="$(printf '%s\n' "$line" | grep -oE 'pid=[0-9]+' | cut -d= -f2)"
+    [ -n "$pids" ] || return 1
+    for pid in $pids; do
+      [ "$(proc_field "$pid" 2)" = "$group" ] &&
+        [ "$(proc_field "$pid" 3)" = "$group" ] &&
+        [ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" = "$DIR" ] &&
+        has_env "$pid" RA_DEV_OWNER "$(meta_get owner)" &&
+        has_env "$pid" RA_PERSONAL_LAUNCH_TREE "$PERSONAL_TREE" &&
+        has_env "$pid" RA_PERSONAL_LAUNCH_PROFILE "$PERSONAL_PROFILE" || return 1
+      found=1
+    done
+  done <<<"$listeners"
+  [ "$found" = 1 ]
+}
 
 emit_owned_diagnostic() {
   local code="$1" pid="$2" member_pid="$3" state="$4"
@@ -144,6 +253,7 @@ owned_group() {
       emit_owned_diagnostic "$OWNED_DIAG_CODE" "$(meta_get pid)" unknown unknown mismatch unknown unknown unknown unknown unknown unknown unknown unknown
     return 1
   fi
+  record_mode_matches || return 1
   pid="$(meta_get pid)"; start="$(meta_get start)"
   dir="$(meta_get dir)"; port="$(meta_get port)"; owner="$(meta_get owner)"
   case "$pid" in ''|*[!0-9]*)
@@ -193,7 +303,11 @@ launch_process_matches() {
   [ "$(proc_field "$pid" 19)" = "$start" ] || return 1
   [ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" = "$dir" ] || return 1
   cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null)" || return 1
-  case "$cmd" in *"env RA_DEV_OWNER=$owner PORT=$port bash"*"npm run dev"*) return 0 ;; esac
+  if [ "$RUN_MODE" = personal ]; then
+    case "$cmd" in *"env RA_DEV_OWNER=$owner PORT=$port bash"*"npm run personal"*) return 0 ;; esac
+  else
+    case "$cmd" in *"env RA_DEV_OWNER=$owner PORT=$port bash"*"npm run dev"*) return 0 ;; esac
+  fi
   return 1
 }
 
@@ -421,12 +535,24 @@ trap 'remote_signal TERM' TERM
 case "$ACTION" in
   start)
     [ -n "$RUN_ID" ] || die "missing launch run id"
-    echo "[Codespace] branch/status (no switching or pulling):"
-    git status --short --branch 2>/dev/null | head -n 20
-    [ -f .env.local ] || echo "NOTE: .env.local missing; Gmail will not work until you create it manually."
+    if [ "$RUN_MODE" = personal ]; then
+      case "$RUN_ID" in personal-*) ;; *) die "invalid personal launch identifier" ;; esac
+      personal_preflight
+    else
+      case "$RUN_ID" in personal-*) die "personal launch identifier cannot start development" ;; esac
+      echo "[Codespace] branch/status (no switching or pulling):"
+      git status --short --branch 2>/dev/null | head -n 20
+      [ -f .env.local ] || echo "NOTE: .env.local missing; Gmail will not work until you create it manually."
+    fi
     if pid="$(owned_group)"; then
       port_listening || die "recorded dev server (pid $pid) is not listening on $PORT; run dev-stop.sh and retry"
-      echo "Dev server already running (pid $pid); reusing."; echo "RA_STATUS=reused"; exit 0
+      if [ "$RUN_MODE" = personal ]; then
+        personal_listener_matches "$pid" || die "running personal server does not match the verified profile/build; stop it and restart"
+        echo "Personal server already running (pid $pid); reusing."
+      else
+        echo "Dev server already running (pid $pid); reusing."
+      fi
+      echo "RA_STATUS=reused"; exit 0
     fi
     if [ -f "$PIDFILE" ]; then
       pid_record_valid || die "existing dev server record is malformed or mismatched; it was retained for inspection"
@@ -441,7 +567,12 @@ case "$ACTION" in
       rm -f "$PIDFILE" || die "could not remove the unchanged stale process record"
     fi
     port_listening && die "port $PORT already in use by a process this workflow did not start."
-    [ -d node_modules ] || npm install </dev/null || die "npm install failed"
+    if [ "$RUN_MODE" = personal ]; then
+      personal_prepare_build
+      port_listening && die "port became occupied during build; refusing to launch"
+    else
+      [ -d node_modules ] || npm install </dev/null || die "npm install failed"
+    fi
     umask 077
     LAUNCH_OWNER="$(printf '%s-%s-%s' "$RUN_ID" "$$" "$RANDOM$RANDOM")"
     LAUNCH_FILE="$PIDFILE.launch.$RUN_ID.$$"
@@ -449,7 +580,11 @@ case "$ACTION" in
       die "this invocation's unique launch handoff path already exists; it was left untouched: $LAUNCH_FILE"
     fi
     LAUNCHING=1
-    RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
+    if [ "$RUN_MODE" = personal ]; then
+      RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash -c 'set -o noclobber; printf "%s:%s\n" "$" "$RA_DEV_OWNER" > "$1" || exit 1; export NODE_ENV=production; exec npm run personal -- --hostname 127.0.0.1' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
+    else
+    RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
+    fi
     LAUNCH_PID=$!
     LAUNCH_START="$(proc_field "$LAUNCH_PID" 19)"
     LAUNCH_IDENTITY_READY=1
@@ -506,7 +641,15 @@ case "$ACTION" in
     remove_launch_file || die "could not verify removal of this launch's handoff file"
     LAUNCH_HANDED_OFF=1
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-      if port_listening; then echo "Dev server listening on $PORT."; echo "RA_STATUS=started"; exit 0; fi
+      if port_listening; then
+        if [ "$RUN_MODE" = personal ]; then
+          personal_listener_matches "$pid" || die "listener is not the verified managed personal runtime"
+          echo "Personal server listening on $PORT."
+        else
+          echo "Dev server listening on $PORT."
+        fi
+        echo "RA_STATUS=started"; exit 0
+      fi
       if ! group_has_live_members "$pid"; then
         remove_launch_record || die "dev server exited early but its record changed; it was retained for inspection"
         die "dev server exited early; see $LOG"
@@ -530,6 +673,7 @@ case "$ACTION" in
         echo "No server started by this run; leaving the recorded server untouched."
         exit 0
       fi
+      record_mode_matches || die "record belongs to the other runtime mode; not signalling it or stopping the Codespace"
       stop_owned "$FORCE"
       rc=$?
       if [ "$rc" -eq 0 ]; then
@@ -542,7 +686,8 @@ case "$ACTION" in
         die "recorded dev server group could not be verified; not signalling or removing its ownership record."
       fi
     else
-      echo "No dev server record; nothing to stop."
+      port_listening && die "port $PORT is held by an unmanaged server; not signalling it or stopping the Codespace"
+      echo "No managed server record; nothing to stop."
     fi
     report_next_env
     ;;
