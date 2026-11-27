@@ -14,6 +14,7 @@ export const PHOTO_SYSTEM_PROMPT = [
   "In visualDetails, briefly describe salient non-text content (for example people, a pet, a setting) and what can be seen, not who you assume someone is.",
   "Do not identify people from faces. Do not infer relationships, pet names, jobs, or ages from appearance.",
   "For holiday cards, distinguish sender names and family details from printer, photographer, retailer, and design credits.",
+  "For profile screenshots, preserve the clearly labeled primary profile header and experience entries with their visible dates. Distinguish a headline from a confirmed current position; distinguish the profile owner from recommendations, ads, and other profiles. Do not reconstruct a missing link or fetch the page.",
   "Return empty strings where there is no readable text or relevant visual context. Do not give recommendations.",
 ].join("\n");
 

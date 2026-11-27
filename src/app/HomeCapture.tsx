@@ -1,15 +1,28 @@
 "use client";
 
-import { useRef, useState, useTransition, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { saveHomePhotoInput, submitHomeText } from "./home/actions";
 import type { HomeCaptureChoices, HomeCapturePlan } from "@/lib/home-direct-capture";
 import type { HomePersonChoice } from "@/lib/home-identity";
-import { captureAttachmentAccept, classifyCaptureAttachment } from "@/lib/capture-attachment";
+import { captureAttachmentAccept, classifyCaptureAttachment, clipboardPhoto, hasFileDrag, droppedCaptureFile } from "@/lib/capture-attachment";
 import type { PersonEntryAnswer } from "@/lib/relationship-entry";
 import { shouldSubmitComposerKey } from "@/lib/composer-keyboard";
 
 type Clarify = Extract<HomeCapturePlan, { state: "clarify" }>;
+
+/** Preview only the selected local file. Release its temporary URL on removal,
+ * replacement or navigation; no network request or persistent browser storage. */
+function AttachmentThumbnail({file}: {file:File}) {
+  const image = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const url=URL.createObjectURL(file);
+    if(image.current) image.current.src=url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img ref={image} alt="Attached image preview" className="size-16 shrink-0 rounded-lg border border-stone-200 bg-white object-contain" />;
+}
 
 const PROMPTS = [
   "Who did you have an interesting conversation with recently?",
@@ -42,6 +55,8 @@ export default function HomeCapture({
   const [importNotice, setImportNotice] = useState("");
   const [importedTextFile, setImportedTextFile] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [draggingFile, setDraggingFile] = useState(false);
+  const dragDepth = useRef(0);
   const [clarification, setClarification] = useState<Clarify | null>(null);
   const [choices, setChoices] = useState<HomeCaptureChoices>({});
   const [saving, startSave] = useTransition();
@@ -67,21 +82,83 @@ export default function HomeCapture({
     submissionRef.current = null;
   }
 
-  async function chooseAttachment(event: ChangeEvent<HTMLInputElement>) {
+  function attachPhoto(file: File) {
+    setPhoto(file);
+    onDraftChange?.(true);
+    setClarification(null);
+    setChoices({});
+    setError(null);
+    setImportNotice("");
+    setReply(null);
+    submissionRef.current = null;
+  }
+
+  function pasteAttachment(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted=clipboardPhoto(event.clipboardData);
+    if (pasted.kind === "none") return; // Ordinary text paste is unchanged.
+    event.preventDefault();
+    if (saving || importing) return;
+    if (pasted.kind === "unsupported") {
+      setError(pasted.message);
+      return;
+    }
+    void acceptAttachment(pasted.file);
+  }
+
+  function enterDropArea(event: DragEvent<HTMLElement>) {
+    if (!hasFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDraggingFile(true);
+  }
+
+  function overDropArea(event: DragEvent<HTMLElement>) {
+    if (!hasFileDrag(event.dataTransfer)) return;
+    // Prevent the browser from navigating to or inserting a file path.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = saving || importing || photo ? "none" : "copy";
+    setDraggingFile(true);
+  }
+
+  function leaveDropArea() {
+    if (dragDepth.current > 0) dragDepth.current -= 1;
+    if (dragDepth.current === 0) setDraggingFile(false);
+  }
+
+  function dropAttachment(event: DragEvent<HTMLElement>) {
+    dragDepth.current = 0;
+    setDraggingFile(false);
+    const dropped = droppedCaptureFile(event.dataTransfer);
+    if (dropped.kind === "none") return; // Ordinary dragged text is unchanged.
+    event.preventDefault();
+    event.stopPropagation();
+    if (saving || importing) return;
+    if (dropped.kind === "unsupported") {
+      setError(dropped.message);
+      return;
+    }
+    void acceptAttachment(dropped.file);
+  }
+
+  function chooseAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || saving || importing) return;
+    if (file) void acceptAttachment(file);
+  }
+
+  async function acceptAttachment(file: File) {
+    if (saving || importing) return;
+    if (photo) {
+      setError("Remove the existing image before adding another attachment.");
+      return;
+    }
     const choice = classifyCaptureAttachment(file);
     if (choice.kind === "unsupported") {
       setError(choice.message);
       return;
     }
     if (choice.kind === "photo") {
-      setPhoto(file);
-      onDraftChange?.(true);
-      setClarification(null);
-      setError(null);
-      setImportNotice("");
+      attachPhoto(file);
       return;
     }
     // Hold the original scope while an asynchronous file read is in flight,
@@ -178,7 +255,16 @@ export default function HomeCapture({
 
   return (
     <section aria-label={currentPersonLabel ? "Remember something about " + currentPersonLabel : "Remember something"}
-      className="rounded-3xl border border-stone-300 bg-white p-3 shadow-[0_8px_32px_rgba(28,25,23,0.05)] sm:p-4">
+      onDragEnter={enterDropArea} onDragOver={overDropArea} onDragLeave={leaveDropArea} onDrop={dropAttachment}
+      className={"relative rounded-3xl border bg-white p-3 shadow-[0_8px_32px_rgba(28,25,23,0.05)] sm:p-4 " +
+        (draggingFile ? "border-stone-500 ring-2 ring-stone-300" : "border-stone-300")}>
+      {draggingFile && (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-3xl bg-white/85 p-4 text-center">
+          <span className="rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-700 shadow-sm">
+            {saving || importing ? "Finish the current request first" : photo ? "Remove the attached image first" : "Drop an image or text file"}
+          </span>
+        </div>
+      )}
       {contextPersonLabel && (
         <p className="px-3 pt-1 text-xs font-medium text-stone-500">About {currentPersonLabel}</p>
       )}
@@ -187,6 +273,7 @@ export default function HomeCapture({
         <textarea
           id="home-capture-input" value={text}
           onChange={(event) => changeText(event.target.value)}
+          onPaste={pasteAttachment}
           onKeyDown={(event) => {
             if (!shouldSubmitComposerKey({key:event.key,shiftKey:event.shiftKey,isComposing:event.nativeEvent.isComposing,keyCode:event.nativeEvent.keyCode})) return;
             event.preventDefault();
@@ -206,8 +293,9 @@ export default function HomeCapture({
 
         {photo && (
           <div className="mx-2 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs sm:mx-3">
-            <span className="font-medium text-stone-700">Photo: {photo.name}</span>
-            <button type="button" disabled={saving || importing} onClick={() => { setPhoto(null); onDraftChange?.(text.length > 0); }}
+            <AttachmentThumbnail file={photo} />
+            <span className="min-w-0 break-all font-medium text-stone-700">Image: {photo.name || "Clipboard image"}</span>
+            <button type="button" disabled={saving || importing} onClick={() => { setPhoto(null); setError(null); onDraftChange?.(text.length > 0); }}
               className="font-medium text-stone-500 underline-offset-4 hover:underline">Remove</button>
           </div>
         )}
@@ -277,7 +365,7 @@ export default function HomeCapture({
               onChange={chooseAttachment} disabled={saving || importing} className="hidden" />
             <button type="button" disabled={saving || importing}
               aria-label="Attach a photo or text file"
-              title="Attach a photo or text file (JPEG, PNG, WebP, TXT, MD, CSV)"
+              title="Attach or drop a photo or text file, or paste an image (JPEG, PNG, WebP, TXT, MD, CSV)"
               onClick={() => attachmentRef.current?.click()}
               className="flex size-8 items-center justify-center rounded-full border border-stone-200 text-lg leading-none text-stone-600 hover:border-stone-400 hover:text-stone-900 disabled:opacity-40">
               <span aria-hidden="true">+</span>

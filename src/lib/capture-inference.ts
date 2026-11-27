@@ -25,6 +25,8 @@ export const CAPTURE_PHOTO_CONTEXT_PROMPT = [
   "A card signed by a family or group does not mean the user wants a separate relationship record for everyone.",
   "Mentioned spouses, children, pets, and other family members are contextual unless clearly the intended contact.",
   "Do not treat vendor names, printer credits, or photo attributions as relationship participants.",
+  "For a professional profile screenshot, extract title, company, city and contact details only when visibly associated with the intended person. Treat headline descriptions and past positions as such, not proof of current employment. Leave the URL empty unless explicitly supplied or visibly legible; never derive it from a name. Ignore recommended contacts and unrelated profiles.",
+  "A profile screenshot is an observation, not a conversation or evidence of a new encounter. A visible mismatch with the selected person should not be resolved by guessing.",
   "The upload date is not the date of an event or a life milestone. Do not infer ages, employment or personal facts from appearance.",
 ].join("\n");
 
