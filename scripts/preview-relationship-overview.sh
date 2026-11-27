@@ -30,7 +30,7 @@ cleanup() {
       gh codespace ssh -c "$CS" -- bash -s -- "$RUN" <<'STOP_REMOTE' || echo "Preview cleanup could not be verified. Personal server was not stopped." >&2
 set -eu
 dir=/workspaces/relationship-agent-preview-7c3476a
-if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf ]; then
+if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = cb0d2f379ebc06bf31052f649e843590e855b09d ]; then
   RA_PID_FILE=/tmp/relationship-agent-preview-7c3476a.pid \
     RA_LOG_FILE=/tmp/relationship-agent-preview-7c3476a.log \
     bash "$dir/scripts/remote-dev.sh" stop-start "$dir" 3002 0 "$1"
@@ -72,7 +72,7 @@ set -eu
 run="$1"
 repo=/workspaces/relationship-assistant
 dir=/workspaces/relationship-agent-preview-7c3476a
-head=b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf
+head=cb0d2f379ebc06bf31052f649e843590e855b09d
 cd "$repo"
 GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/feature/relationship-overview </dev/null
 git cat-file -e "$head^{commit}"
@@ -89,7 +89,7 @@ fi
 cd "$dir"
 prior="$(git rev-parse HEAD)"
 case "$prior" in
-  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a|279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b) ;;
+  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a|279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b|b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf) ;;
   *) echo "Unexpected preview version; nothing was overwritten." >&2; exit 1 ;;
 esac
 if git symbolic-ref -q HEAD >/dev/null; then
@@ -292,7 +292,7 @@ done
 check_private_port || { echo "Preview port privacy could not be verified." >&2; exit 1; }
 PREVIEW_READY=1
 echo "Fictional preview ready: http://localhost:3002"
-echo "Open Rowan Taylor (fictional) for the unified conversation entry, quieter portrait and connection activity."
+echo "Browse the alphabetical relationships directory, then open Rowan Taylor (fictional)."
 echo "Leave this Terminal open during the preview. Press Control+C here when finished."
-open "http://localhost:3002/relationships/00000000-0000-4000-8000-000000000084"
+open "http://localhost:3002/relationships"
 wait "$FORWARD"
