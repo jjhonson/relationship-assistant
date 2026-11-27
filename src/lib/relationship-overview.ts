@@ -24,7 +24,18 @@ export type ContactDetail = {
 };
 
 type EvidenceValue = Omit<ContactDetail, "label">;
+export type ContactObservation = Pick<RelationshipSource, "id" | "source" | "label" | "observedAt"> & {
+  // Older sources linked to a mutable fact may have described an earlier value.
+  attribution: "value" | "earlier-context";
+};
+export type ContactValue = ContactDetail & { observations: ContactObservation[] };
+export type ContactField = {
+  label: ContactDetail["label"];
+  primary: ContactValue | null;
+  values: ContactValue[];
+};
 type MemoryLine = { id: string; value: string; date: string; label: string };
+export type PortraitGroup = { label: string; items: MemoryLine[] };
 export type RelationshipHistoryEntry = {
   id: string;
   date: string;
@@ -49,19 +60,16 @@ function evidenceFor(ids: string[], sources: Map<string, RelationshipSource>, to
 }
 
 /** Conflicting values on the same most-recent day are not resolved by array order. */
-function newestUnambiguous(values: EvidenceValue[]): EvidenceValue | undefined {
-  const sorted = [...values].sort((a, b) =>
-    Number(!!b.confirmed) - Number(!!a.confirmed) || b.observedAt.localeCompare(a.observedAt));
+function newestUnambiguous(values: ContactValue[]): ContactValue | undefined {
+  // A confirmed identity establishes whose address it is, not that it is
+  // still their preferred address. Use observation date, never identity
+  // confirmation alone, to rank distinct addresses.
+  const sorted = [...values].sort((a, b) => b.observedAt.localeCompare(a.observedAt));
   const latest = sorted[0];
   if (!latest) return;
-  const equallyCurrent = sorted.filter((item) =>
-    !!item.confirmed === !!latest.confirmed && item.observedAt === latest.observedAt);
-  if (equallyCurrent.some((item) => normalized(item.value) !== normalized(latest.value))) return;
-  return {
-    ...latest,
-    sourceIds: [...new Set(equallyCurrent.flatMap((item) => item.sourceIds))],
-    factIds: [...new Set(equallyCurrent.flatMap((item) => item.factIds))],
-  };
+  const equallyCurrent = sorted.filter((item) => item.observedAt === latest.observedAt);
+  if (equallyCurrent.some((item) => item.value !== latest.value)) return;
+  return latest;
 }
 
 function plausibleContactValue(field: ContactDetail["label"], value: string) {
@@ -89,33 +97,71 @@ function factValue(fact: DurableRelationshipFact, known: Map<string, Relationshi
   };
 }
 
-export function relationshipContactDetails(record: RelationshipRecord, today: string): ContactDetail[] {
+/** Show all available evidence-backed values, including alternatives.
+ * Never call an older value invalid solely because another was observed later.
+ * The source list is evidence, not a count of inbound emails or live usage. */
+export function relationshipContactFields(record: RelationshipRecord, today: string): ContactField[] {
   const known = new Map(record.sources.map((source) => [source.id, source]));
-  const result: ContactDetail[] = [];
-  for (const field of fields) {
+  return fields.map((field) => {
     const aliases: readonly string[] = field.aliases;
     const categories: readonly string[] = field.categories;
-    const values = record.durableFacts.flatMap((fact) => {
+    const values: ContactValue[] = [];
+    for (const fact of record.durableFacts) {
       if (!aliases.includes(normalized(fact.label)) || !categories.includes(fact.category) ||
-          !plausibleContactValue(field.label, fact.value)) return [];
+          !plausibleContactValue(field.label, fact.value)) continue;
       const value = factValue(fact, known, today);
-      return value ? [value] : [];
-    });
+      if (!value) continue;
+      const observations = evidenceFor(value.sourceIds, known, today).map((source): ContactObservation => ({
+        id: source.id, source: source.source, label: source.label, observedAt: source.observedAt,
+        attribution: source.observedAt === fact.lastObservedAt ? "value" : "earlier-context",
+      }));
+      values.push({ label: field.label, ...value, observations });
+    }
     if (field.label === "Email") {
       for (const identity of record.identities ?? []) {
         if (identity.kind !== "email" || !plausibleContactValue("Email", identity.value)) continue;
         const evidence = evidenceFor(identity.sourceIds, known, today);
         const observedAt = evidence.map((source) => source.observedAt).sort().at(-1);
         if (observedAt) values.push({
-          value: identity.value.trim(), observedAt, sourceIds: evidence.map((source) => source.id),
+          label: field.label, value: identity.value.trim(), observedAt, sourceIds: evidence.map((source) => source.id),
           factIds: [], confirmed: identity.confirmed,
+          observations: evidence.map((source) => ({ id: source.id, source: source.source,
+            label: source.label, observedAt: source.observedAt, attribution: "value" })),
         });
       }
     }
-    const latest = newestUnambiguous(values);
-    if (latest) result.push({ label: field.label, ...latest });
-  }
-  return result;
+    // The same email can occur in an identity and a durable fact. Count each
+    // linked source only once, and prefer exact-value evidence over context.
+    const distinct = new Map<string, ContactValue>();
+    for (const item of values) {
+      // Only email matching is case-insensitive; retain differences in URL,
+      // company/title wording, phone formatting and other supplied values.
+      const key = field.label === "Email" ? normalized(item.value) : item.value.trim();
+      const prior = distinct.get(key);
+      if (!prior) { distinct.set(key, item); continue; }
+      const observations = new Map(prior.observations.map((source) => [source.id, source]));
+      for (const source of item.observations) {
+        if (!observations.has(source.id) || source.attribution === "value") observations.set(source.id, source);
+      }
+      distinct.set(key, {
+        ...(item.observedAt > prior.observedAt ? item : prior),
+        confirmed: prior.confirmed || item.confirmed,
+        sourceIds: [...new Set([...prior.sourceIds, ...item.sourceIds])],
+        factIds: [...new Set([...prior.factIds, ...item.factIds])],
+        observations: [...observations.values()],
+      });
+    }
+    const ordered = [...distinct.values()].sort((a, b) =>
+      b.observedAt.localeCompare(a.observedAt) || a.value.localeCompare(b.value)).map((value) => ({
+      ...value, observations: [...value.observations].sort((a, b) => b.observedAt.localeCompare(a.observedAt)),
+    }));
+    return { label: field.label, values: ordered, primary: newestUnambiguous(ordered) ?? null };
+  });
+}
+
+/** Existing callers can use the compact nonempty projection. */
+export function relationshipContactDetails(record: RelationshipRecord, today: string): ContactDetail[] {
+  return relationshipContactFields(record, today).flatMap((field) => field.primary ? [field.primary] : []);
 }
 
 /** A useful short description, not an assertion of confirmed labels or closeness. */
@@ -164,6 +210,50 @@ export function relationshipContextSummary(record: RelationshipRecord, details: 
   // Prefer the strongest two recent threads; leave the remaining evidence available below.
   const byDate = (a: MemoryLine, b: MemoryLine) => b.date.localeCompare(a.date);
   return [...threads.sort(byDate).slice(0, 2), ...facts.sort(byDate)].slice(0, 5);
+}
+
+/** A living portrait is a read-only view of explicit saved wording.
+ * Category/label grouping does not imply a fact is current, retired or corrected.
+ * Those temporal distinctions need a separate versioned memory model. */
+export function relationshipPortrait(record: RelationshipRecord, today: string): PortraitGroup[] {
+  const known = new Map(record.sources.map((source) => [source.id, source]));
+  const groups = new Map<string, MemoryLine[]>();
+  function add(group: string, item: MemoryLine) {
+    const list = groups.get(group) ?? [];
+    if (!list.some((existing) => normalized(existing.value) === normalized(item.value))) list.push(item);
+    groups.set(group, list);
+  }
+  for (const fact of record.durableFacts) {
+    const isContactFact = fields.some((field) =>
+      (field.aliases as readonly string[]).includes(normalized(fact.label)) &&
+      (field.categories as readonly string[]).includes(fact.category));
+    if (isContactFact || !factValue(fact, known, today) || !fact.value.trim()) continue;
+    const label = normalized(fact.label);
+    // Use explicit labels to group, never infer cessation from age of a fact.
+    // Keep the actual wording intact, including "used to" or "no longer".
+    const group = /^(shared history|shared experience|shared experiences|how we met|our history)$/.test(label)
+      ? "Shared history"
+      : /^(former |past |previous |earlier )/.test(label)
+        ? "Earlier chapters"
+        : fact.category === "Family" ? "Family & life"
+          : fact.category === "Interest" ? "Interests & activities"
+            : fact.category === "Work" ? "Work & projects"
+              : fact.category === "Location" ? "Places & plans"
+                : "Other things to remember";
+    add(group, { id: "fact:" + fact.id, label: fact.label, value: fact.value, date: fact.lastObservedAt });
+  }
+  for (const thread of record.activeThreads) {
+    if (!thread.state.trim() || !dateLabel(thread.lastObservedAt, today) ||
+        !evidenceFor(thread.sourceIds, known, today).length) continue;
+    add("Looking ahead", { id: "thread:" + thread.id, label: thread.topic, value: thread.state,
+      date: thread.lastObservedAt });
+  }
+  const order = ["Interests & activities", "Family & life", "Shared history", "Looking ahead",
+    "Work & projects", "Earlier chapters", "Places & plans", "Other things to remember"];
+  return order.flatMap((label) => {
+    const items = groups.get(label);
+    return items?.length ? [{ label, items: [...items].sort((a,b) => b.date.localeCompare(a.date)) }] : [];
+  });
 }
 
 /** Saved interaction history is not a raw transcript archive. Never turn an

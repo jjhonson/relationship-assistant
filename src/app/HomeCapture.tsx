@@ -22,10 +22,11 @@ const kinds: Array<{ value: "conversation" | "note" | "moment"; label: string }>
 
 /** One Save, one concrete question only if the meaning needs clarification. */
 export default function HomeCapture({
-  people, contextRelationshipId,
+  people, contextRelationshipId, compact = false,
 }: {
   people: HomePersonChoice[];
   contextRelationshipId?: string;
+  compact?: boolean;
 }) {
   const router = useRouter();
   const contextPersonLabel = people.find((person) => person.id === contextRelationshipId)?.label ?? "";
@@ -157,10 +158,10 @@ export default function HomeCapture({
         <textarea
           id="home-capture-input" value={text}
           onChange={(event) => changeText(event.target.value)}
-          rows={6} disabled={saving}
+          rows={compact ? 3 : 6} disabled={saving}
           placeholder={contextPersonLabel ? "Remember a conversation or something about " + contextPersonLabel + "…" :
             PROMPTS[promptIndex]}
-          className="min-h-44 w-full resize-y rounded-2xl bg-white px-3 py-3 text-base leading-relaxed text-stone-900 outline-none placeholder:text-stone-400 focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-70 sm:min-h-52 sm:px-4"
+          className={(compact ? "min-h-24 " : "min-h-44 sm:min-h-52 ") + "w-full resize-y rounded-2xl bg-white px-3 py-3 text-base leading-relaxed text-stone-900 outline-none placeholder:text-stone-400 focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-70 sm:px-4"}
         />
 
         {!photo && text.length > 80_000 && (

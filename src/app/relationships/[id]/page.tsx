@@ -17,7 +17,9 @@ import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
 import { userOwnsCommitment } from "@/lib/connection-subjects";
 import MemoryCorrectionForm from "./MemoryCorrectionForm";
 import ConnectionJournal from "./ConnectionJournal";
-import { relationshipContactDetails, relationshipContextLabel, lastContactDescription, relationshipContextSummary, relationshipInteractionHistory } from "@/lib/relationship-overview";
+import { relationshipContactFields, relationshipContextLabel, lastContactDescription, relationshipPortrait, relationshipInteractionHistory } from "@/lib/relationship-overview";
+import ContactCard from "./ContactCard";
+import PersonalPortrait from "./PersonalPortrait";
 import { homeInteractionDate } from "@/lib/home-view";
 import { relationshipCadence, contactCadenceOptions } from "@/lib/relationship-cadence";
 import { updateContactCadence } from "../cadence-actions";
@@ -75,11 +77,11 @@ export default async function RelationshipDetailPage({
     timeZone: process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver",
     year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date());
-  const contactDetails = relationshipContactDetails(relationship, today);
+  const contactFields = relationshipContactFields(relationship, today);
   const contextLabel = relationshipContextLabel(relationship, today);
   const lastContact = lastContactDescription(relationship, today);
   const cadence = relationshipCadence(relationship, today);
-  const rememberedContext = relationshipContextSummary(relationship, contactDetails, today);
+  const portrait = relationshipPortrait(relationship, today);
   const history = relationshipInteractionHistory(relationship, capturedNotes, journeys, today);
 
   return (
@@ -119,17 +121,7 @@ export default async function RelationshipDetailPage({
         {relationship.personLabelAuthority === "inferred-unverified" && (
           <p className="mt-1 text-xs text-stone-600">Name inferred from a saved memory. You can correct it below.</p>
         )}
-        {contactDetails.length > 0 && (
-          <dl className="mt-5 grid gap-x-8 gap-y-4 sm:grid-cols-2">
-            {contactDetails.map((item) => (
-              <div key={item.label}>
-                <dt className="text-xs font-medium text-stone-500">{item.label}</dt>
-                <dd className="mt-1 break-words text-sm text-stone-900">{item.value}</dd>
-                {!item.confirmed && <p className="mt-0.5 text-xs text-stone-500">Last recorded {homeInteractionDate(item.observedAt)}</p>}
-              </div>
-            ))}
-          </dl>
-        )}
+        <ContactCard fields={contactFields} />
         <div className="mt-5 grid gap-4 border-t border-stone-100 pt-4 sm:grid-cols-2">
           <div>
             <p className="text-xs font-medium text-stone-500">Last contact</p>
@@ -158,30 +150,14 @@ export default async function RelationshipDetailPage({
         </div>
       </header>
 
-      <details className="rounded-xl border border-stone-200 bg-white px-4 py-3">
-        <summary className="cursor-pointer text-sm font-medium text-stone-800">Remember something or add contact details</summary>
-        <p className="my-3 text-sm text-stone-600">
-          Add a note, conversation or contact details about {relationship.personLabel}.
-          {!contactDetails.some((item) => item.label === "LinkedIn") && " You can also paste their LinkedIn profile text or address."}
-          {" "}Only the information you supply is used; external profiles are not fetched.
-        </p>
-        <HomeCapture contextRelationshipId={relationship.id}
-          people={people.map((person) => ({ id: person.id, label: person.personLabel }))} />
-      </details>
+      <PersonalPortrait groups={portrait} />
 
-      <section aria-labelledby="context-heading" className="space-y-3">
-        <h2 id="context-heading" className="text-lg font-semibold tracking-tight text-stone-900">What&apos;s going on</h2>
-        {rememberedContext.length ? (
-          <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-5">
-            {rememberedContext.map((item) => (
-              <li key={item.id} className="py-3">
-                <p className="text-xs font-medium text-stone-500">{item.label}</p>
-                <p className="mt-1 text-sm leading-relaxed text-stone-800">{item.value}</p>
-                <p className="mt-1 text-xs text-stone-500">Last recorded {homeInteractionDate(item.date)}</p>
-              </li>
-            ))}
-          </ul>
-        ) : <p className="text-sm text-stone-500">No additional context recorded yet.</p>}
+      <section aria-labelledby="add-memory-heading" className="space-y-2">
+        <h2 id="add-memory-heading" className="text-lg font-semibold tracking-tight text-stone-900">Remember something</h2>
+        <p className="text-sm text-stone-600">Add something you know, a conversation or contact details.</p>
+        <HomeCapture contextRelationshipId={relationship.id} compact
+          people={people.map((person) => ({ id: person.id, label: person.personLabel }))} />
+        <p className="text-xs text-stone-500">Adding context is supported. Retiring an obsolete contact value or correcting past memory needs a dedicated correction flow.</p>
       </section>
 
       <ConnectionSubjectsReview
