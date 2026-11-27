@@ -149,13 +149,16 @@ export function lastContactDescription(record: RelationshipRecord, today: string
 export function relationshipContextSummary(record: RelationshipRecord, details: ContactDetail[], today: string): MemoryLine[] {
   const known = new Map(record.sources.map((source) => [source.id, source]));
   const shown = new Set(details.flatMap((field) => field.factIds));
+  const isContactFact = (fact: DurableRelationshipFact) => fields.some((field) =>
+    (field.aliases as readonly string[]).includes(normalized(fact.label)) &&
+    (field.categories as readonly string[]).includes(fact.category));
   const threads = record.activeThreads.flatMap((thread) =>
     thread.state.trim() && dateLabel(thread.lastObservedAt, today) &&
     evidenceFor(thread.sourceIds, known, today).length
       ? [{ id: "thread:" + thread.id, label: thread.topic, value: thread.state, date: thread.lastObservedAt }]
       : []);
   const facts = record.durableFacts.flatMap((fact) =>
-    !shown.has(fact.id) && fact.value.trim() && factValue(fact, known, today)
+    !shown.has(fact.id) && !isContactFact(fact) && fact.value.trim() && factValue(fact, known, today)
       ? [{ id: "fact:" + fact.id, label: fact.label, value: fact.value, date: fact.lastObservedAt }]
       : []);
   // Prefer the strongest two recent threads; leave the remaining evidence available below.

@@ -22,7 +22,7 @@ describe("editable cadence working opinion", () => {
   });
   it("requires evidence, valid dates and sufficient elapsed time", () => {
     const p = person();
-    p.inferredRelationshipContexts[0].sourceIds = ["unknown"];
+    p.inferredRelationshipContexts![0].sourceIds = ["unknown"];
     expect(relationshipCadence(p, today)).toBeNull();
     p.contactCadenceDays = 180;
     p.lastInteractionAt = "2026-11-23";

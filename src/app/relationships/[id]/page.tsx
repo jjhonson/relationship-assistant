@@ -152,7 +152,7 @@ export default async function RelationshipDetailPage({
                 </select>
                 <button type="submit" className="rounded-md bg-stone-900 px-3 py-1.5 text-sm text-white">Save</button>
               </form>
-              <p className="mt-2">Timely reasons to connect and your commitments can be separate from this cadence.</p>
+              <p className="mt-2">Your commitments are considered separately from this cadence.</p>
             </details>
           </div>
         </div>

@@ -77,8 +77,9 @@ export function selectHomeOpportunities(
   for (const person of people) {
     const commitments = buildConnectionCandidates(person, userLabel)
       .filter((item) => item.kind === "commitment")
-      .filter((item) => item.evidence.some((source) => knownInteractionDate(source.observedAt) &&
-        source.observedAt <= today))
+      .map((item) => ({ ...item, evidence: item.evidence.filter((source) =>
+        knownInteractionDate(source.observedAt) && source.observedAt <= today) }))
+      .filter((item) => item.evidence.length > 0)
       .sort((a, b) => Number(b.timing.includes("Overdue")) - Number(a.timing.includes("Overdue")) ||
         b.evidence.map((s) => s.observedAt).sort().at(-1)!.localeCompare(
           a.evidence.map((s) => s.observedAt).sort().at(-1)!));
