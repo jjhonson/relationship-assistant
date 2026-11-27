@@ -30,7 +30,7 @@ cleanup() {
       gh codespace ssh -c "$CS" -- bash -s -- "$RUN" <<'STOP_REMOTE' || echo "Preview cleanup could not be verified. Personal server was not stopped." >&2
 set -eu
 dir=/workspaces/relationship-agent-preview-7c3476a
-if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = 279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b ]; then
+if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf ]; then
   RA_PID_FILE=/tmp/relationship-agent-preview-7c3476a.pid \
     RA_LOG_FILE=/tmp/relationship-agent-preview-7c3476a.log \
     bash "$dir/scripts/remote-dev.sh" stop-start "$dir" 3002 0 "$1"
@@ -72,7 +72,7 @@ set -eu
 run="$1"
 repo=/workspaces/relationship-assistant
 dir=/workspaces/relationship-agent-preview-7c3476a
-head=279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b
+head=b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf
 cd "$repo"
 GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/feature/relationship-overview </dev/null
 git cat-file -e "$head^{commit}"
@@ -89,7 +89,7 @@ fi
 cd "$dir"
 prior="$(git rev-parse HEAD)"
 case "$prior" in
-  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a) ;;
+  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a|279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b) ;;
   *) echo "Unexpected preview version; nothing was overwritten." >&2; exit 1 ;;
 esac
 if git symbolic-ref -q HEAD >/dev/null; then
@@ -231,6 +231,34 @@ if (!store.relationships.some(p => p.id === id)) {
   writeFileSync(temp, JSON.stringify(store,null,2), {flag:"wx",mode:0o600});
   renameSync(temp,file);
 }
+// Add five explicitly fictional recorded conversations to demonstrate the
+// activity chart. Never overwrite existing preview records or preferences.
+const updated = JSON.parse(readFileSync(file,"utf8"));
+const rowan = updated.relationships.find(p => p.id === id);
+const anchor = rowan.sources.find(source => source.id === "pasted:rowan-recent");
+if (!anchor || !/^\d{4}-\d{2}-\d{2}$/.test(anchor.observedAt)) throw new Error("Unexpected preview history; refusing to modify it.");
+const base = Date.parse(anchor.observedAt + "T00:00:00Z");
+const episodes = [
+  [32,"Caught up about the product platform"],
+  [35,"Talked about a family visit"],
+  [100,"Discussed a woodworking project"],
+  [164,"Caught up over coffee"],
+  [290,"Talked about a recent concert"]
+];
+let added = false;
+for (const [i,[offset,label]] of episodes.entries()) {
+  const sourceId = "pasted:rowan-fictional-activity-" + (i+1);
+  if (!rowan.sources.some(source => source.id === sourceId)) {
+    rowan.sources.push({id:sourceId,source:"manual",observedAt:new Date(base-offset*86400000).toISOString().slice(0,10),label:"Fictional conversation: "+label});
+    added = true;
+  }
+}
+if (added) {
+  const temp = file + ".activity-preview.tmp";
+  if (existsSync(temp)) throw new Error("Unexpected temporary fixture file; not modifying it.");
+  writeFileSync(temp,JSON.stringify(updated,null,2),{flag:"wx",mode:0o600});
+  renameSync(temp,file);
+}
 PORTRAIT_FIXTURE
 if [ ! -d node_modules ] || [ ! -f node_modules/.ra-preview-deps ]; then
   echo "[Preview] Installing locked dependencies for the separate checkout (first use only)..."
@@ -264,7 +292,7 @@ done
 check_private_port || { echo "Preview port privacy could not be verified." >&2; exit 1; }
 PREVIEW_READY=1
 echo "Fictional preview ready: http://localhost:3002"
-echo "Open Rowan Taylor (fictional) for the new contact card, source history and portrait."
+echo "Open Rowan Taylor (fictional) for the unified conversation entry, quieter portrait and connection activity."
 echo "Leave this Terminal open during the preview. Press Control+C here when finished."
 open "http://localhost:3002/relationships/00000000-0000-4000-8000-000000000084"
 wait "$FORWARD"
