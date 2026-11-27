@@ -1,15 +1,28 @@
 "use client";
 
-import { useRef, useState, useTransition, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type ChangeEvent, type ClipboardEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { saveHomePhotoInput, submitHomeText } from "./home/actions";
 import type { HomeCaptureChoices, HomeCapturePlan } from "@/lib/home-direct-capture";
 import type { HomePersonChoice } from "@/lib/home-identity";
-import { captureAttachmentAccept, classifyCaptureAttachment } from "@/lib/capture-attachment";
+import { captureAttachmentAccept, classifyCaptureAttachment, clipboardPhoto } from "@/lib/capture-attachment";
 import type { PersonEntryAnswer } from "@/lib/relationship-entry";
 import { shouldSubmitComposerKey } from "@/lib/composer-keyboard";
 
 type Clarify = Extract<HomeCapturePlan, { state: "clarify" }>;
+
+/** Preview only the selected local file. Release its temporary URL on removal,
+ * replacement or navigation; no network request or persistent browser storage. */
+function AttachmentThumbnail({file}: {file:File}) {
+  const image = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const url=URL.createObjectURL(file);
+    if(image.current) image.current.src=url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img ref={image} alt="Attached image preview" className="size-16 shrink-0 rounded-lg border border-stone-200 bg-white object-contain" />;
+}
 
 const PROMPTS = [
   "Who did you have an interesting conversation with recently?",
@@ -67,6 +80,33 @@ export default function HomeCapture({
     submissionRef.current = null;
   }
 
+  function attachPhoto(file: File) {
+    setPhoto(file);
+    onDraftChange?.(true);
+    setClarification(null);
+    setChoices({});
+    setError(null);
+    setImportNotice("");
+    setReply(null);
+    submissionRef.current = null;
+  }
+
+  function pasteAttachment(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted=clipboardPhoto(event.clipboardData);
+    if (pasted.kind === "none") return; // Ordinary text paste is unchanged.
+    event.preventDefault();
+    if (saving || importing) return;
+    if (pasted.kind === "unsupported") {
+      setError(pasted.message);
+      return;
+    }
+    if (photo) {
+      setError("Remove the existing image before pasting another.");
+      return;
+    }
+    attachPhoto(pasted.file);
+  }
+
   async function chooseAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -77,11 +117,7 @@ export default function HomeCapture({
       return;
     }
     if (choice.kind === "photo") {
-      setPhoto(file);
-      onDraftChange?.(true);
-      setClarification(null);
-      setError(null);
-      setImportNotice("");
+      attachPhoto(file);
       return;
     }
     // Hold the original scope while an asynchronous file read is in flight,
@@ -187,6 +223,7 @@ export default function HomeCapture({
         <textarea
           id="home-capture-input" value={text}
           onChange={(event) => changeText(event.target.value)}
+          onPaste={pasteAttachment}
           onKeyDown={(event) => {
             if (!shouldSubmitComposerKey({key:event.key,shiftKey:event.shiftKey,isComposing:event.nativeEvent.isComposing,keyCode:event.nativeEvent.keyCode})) return;
             event.preventDefault();
@@ -206,7 +243,8 @@ export default function HomeCapture({
 
         {photo && (
           <div className="mx-2 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs sm:mx-3">
-            <span className="font-medium text-stone-700">Photo: {photo.name}</span>
+            <AttachmentThumbnail file={photo} />
+            <span className="min-w-0 break-all font-medium text-stone-700">Image: {photo.name || "Clipboard image"}</span>
             <button type="button" disabled={saving || importing} onClick={() => { setPhoto(null); onDraftChange?.(text.length > 0); }}
               className="font-medium text-stone-500 underline-offset-4 hover:underline">Remove</button>
           </div>
@@ -277,7 +315,7 @@ export default function HomeCapture({
               onChange={chooseAttachment} disabled={saving || importing} className="hidden" />
             <button type="button" disabled={saving || importing}
               aria-label="Attach a photo or text file"
-              title="Attach a photo or text file (JPEG, PNG, WebP, TXT, MD, CSV)"
+              title="Attach a photo or text file, or paste an image into the box (JPEG, PNG, WebP, TXT, MD, CSV)"
               onClick={() => attachmentRef.current?.click()}
               className="flex size-8 items-center justify-center rounded-full border border-stone-200 text-lg leading-none text-stone-600 hover:border-stone-400 hover:text-stone-900 disabled:opacity-40">
               <span aria-hidden="true">+</span>

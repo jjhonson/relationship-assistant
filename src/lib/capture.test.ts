@@ -149,6 +149,25 @@ describe("universal text capture", () => {
     expect(interpreted.relationships[0].lastInteractionAt).toBeNull();
   });
 
+  it("adds attributed profile details to the intended person without advancing last contact or replacing older evidence", () => {
+    const existing=createManualRelationshipRecord("Fictional Robin Taylor",undefined,undefined,now);
+    existing.lastInteractionAt="2026-10-01";
+    existing.durableFacts.push({id:"earlier-company",category:"Work",label:"Company",value:"Prior Company",firstObservedAt:"2026-10-01",lastObservedAt:"2026-10-01",sourceIds:[existing.sources[0].id]});
+    const event=newImageCaptureEvent({
+      note:"Professional profile screenshot",
+      sourceText:"Fictional Robin Taylor\nEngineering Director at Example Software\nFort Collins, Colorado",
+      visualDetails:"A professional profile header.",
+    },existing.id,now);
+    const applied=applyCaptureExtraction(event,extraction([person("Fictional Robin Taylor",{company:"Example Software",jobTitle:"Engineering Director",city:"Fort Collins, Colorado"})]),[existing],now);
+    expect(applied.relationships).toHaveLength(1);
+    const updated=applied.relationships[0];
+    expect(updated.id).toBe(existing.id);
+    expect(updated.lastInteractionAt).toBe("2026-10-01");
+    expect(updated.durableFacts.map(fact=>[fact.label,fact.value])).toEqual(expect.arrayContaining([["Company","Prior Company"],["Company","Example Software"],["Role","Engineering Director"],["City","Fort Collins, Colorado"]]));
+    expect(updated.durableFacts.find(fact=>fact.value==="Example Software")?.sourceIds).toContain("capture:"+event.id);
+    expect(applied.event.reportedInteractionAt).toBeUndefined();
+  });
+
   it("allows an image-only memory with no presumed relationship, but rejects empty photo results", () => {
     const event = newImageCaptureEvent({ note: "", sourceText: "", visualDetails: "An old team photo." }, null, now);
     const applied = applyCaptureExtraction(event, extraction([], { summary: "Team photograph." }), [], now);
