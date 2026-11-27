@@ -16,6 +16,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const people = (await listRelationships()).map((person) => ({ id: person.id, label: person.personLabel }));
   const captureAvailable = Boolean(process.env.OPENAI_API_KEY);
+  const questionAvailable = captureAvailable || (process.env.NODE_ENV === "development" && getDatasetMode() === "fictional" && (!process.env.RA_STORAGE_BACKEND || process.env.RA_STORAGE_BACKEND === "json"));
   return (
     <html lang="en">
       <body className="min-h-screen">
@@ -42,7 +43,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </div>
         </header>
         <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-7">
-          <ConversationEntry people={people} captureAvailable={captureAvailable} />
+          <ConversationEntry people={people} captureAvailable={captureAvailable} questionAvailable={questionAvailable} />
           {children}
         </main>
         <footer className="mx-auto max-w-4xl px-4 pb-5 sm:px-6">
@@ -53,6 +54,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               Your own notes retain their wording; personal moments stay private.
               A chosen photo is interpreted without retaining the image.
               Text files are imported locally as text. PDF and Office files are not yet supported.
+              Questions about a relationship use saved context and do not update the record.
               Nothing is sent to anyone automatically.
             </p>
           </details>

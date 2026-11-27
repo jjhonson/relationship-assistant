@@ -6,6 +6,7 @@ import { saveHomePhotoInput, submitHomeText } from "./home/actions";
 import type { HomeCaptureChoices, HomeCapturePlan } from "@/lib/home-direct-capture";
 import type { HomePersonChoice } from "@/lib/home-identity";
 import { captureAttachmentAccept, classifyCaptureAttachment } from "@/lib/capture-attachment";
+import type { PersonEntryAnswer } from "@/lib/relationship-entry";
 
 type Clarify = Extract<HomeCapturePlan, { state: "clarify" }>;
 
@@ -23,12 +24,13 @@ const kinds: Array<{ value: "conversation" | "note" | "moment"; label: string }>
 
 /** One Save, one concrete question only if the meaning needs clarification. */
 export default function HomeCapture({
-  people, contextRelationshipId, compact = false, captureAvailable = true, onDraftChange,
+  people, contextRelationshipId, compact = false, captureAvailable = true, questionAvailable = false, onDraftChange,
 }: {
   people: HomePersonChoice[];
   contextRelationshipId?: string;
   compact?: boolean;
   captureAvailable?: boolean;
+  questionAvailable?: boolean;
   onDraftChange?: (active: boolean) => void;
 }) {
   const router = useRouter();
@@ -43,6 +45,7 @@ export default function HomeCapture({
   const [choices, setChoices] = useState<HomeCaptureChoices>({});
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [reply, setReply] = useState<{question:string; result:PersonEntryAnswer} | null>(null);
   const currentPersonLabel = choices.relationshipId && choices.relationshipId !== contextRelationshipId
     ? choices.relationshipId === "__new__" ? choices.newPersonLabel?.trim() || "Someone new" :
       people.find((person) => person.id === choices.relationshipId)?.label ?? contextPersonLabel
@@ -50,7 +53,7 @@ export default function HomeCapture({
   // Reuse this key after network uncertainty; never create another record on retry.
   const submissionRef = useRef<string | null>(null);
   const attachmentRef = useRef<HTMLInputElement>(null);
-  const actionLabel = contextRelationshipId ? "Update" : "Save";
+  const canSubmit = captureAvailable || (!!contextRelationshipId && questionAvailable && !photo);
 
   function changeText(next: string) {
     setText(next);
@@ -103,7 +106,7 @@ export default function HomeCapture({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving || importing || !captureAvailable) return;
+    if (saving || importing || !canSubmit) return;
     if (photo && text.trim().length > 1500) {
       setError("Keep the note with a photo under 1,500 characters.");
       return;
@@ -126,6 +129,7 @@ export default function HomeCapture({
     }
 
     setError(null);
+    setReply(null);
     function finish(destination: string) {
       setText(""); setPhoto(null); setClarification(null); setChoices({});
       setImportedTextFile(false); setImportNotice(""); submissionRef.current = null;
@@ -148,6 +152,15 @@ export default function HomeCapture({
           text, submissionId: submissionRef.current, choices, importedTextFile,
           contextRelationshipId,
         });
+        if (result.state === "answer") {
+          setReply({question:text, result});
+          setClarification(null); setChoices({});
+          if (!result.retainInput) {
+            setText(""); setImportNotice(""); setImportedTextFile(false); submissionRef.current=null;
+            onDraftChange?.(false);
+          }
+          return;
+        }
         if (result.state === "clarify") {
           setClarification(result);
           setChoices(result.choices);
@@ -157,7 +170,7 @@ export default function HomeCapture({
       } catch {
         // The write may have committed before an error was returned. Keep the
         // same input + submission ID so retry is safe for textual captures.
-        setError("Save could not be confirmed. Check the saved record before retrying.");
+        setError(contextRelationshipId ? "The request could not be confirmed. Your input is still here; check the record before retrying." : "Save could not be confirmed. Check the saved record before retrying.");
       }
     });
   }
@@ -174,7 +187,7 @@ export default function HomeCapture({
           id="home-capture-input" value={text}
           onChange={(event) => changeText(event.target.value)}
           rows={compact ? 3 : 6} disabled={saving || importing}
-          placeholder={contextPersonLabel ? "Add something about " + contextPersonLabel + "…" :
+          placeholder={contextPersonLabel ? "Ask or add something about " + contextPersonLabel + "…" :
             PROMPTS[promptIndex]}
           className={(compact ? "min-h-24 " : "min-h-44 sm:min-h-52 ") + "w-full resize-y rounded-2xl bg-white px-3 py-3 text-base leading-relaxed text-stone-900 outline-none placeholder:text-stone-400 focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-70 sm:px-4"}
         />
@@ -271,17 +284,30 @@ export default function HomeCapture({
               </button>
             )}
           </div>
-          <button type="submit" disabled={saving || importing || !captureAvailable}
-            title={!captureAvailable ? "Memory saving is unavailable without a configured model or valid person context" : undefined}
-            aria-describedby={!captureAvailable ? "capture-unavailable" : undefined}
+          <button type="submit" disabled={saving || importing || !canSubmit}
+            aria-label={contextRelationshipId ? clarification ? "Continue" : "Submit relationship request" : clarification ? "Continue" : "Save memory"}
+            title={!canSubmit ? "This request is unavailable in the current environment" : undefined}
+            aria-describedby={!canSubmit ? "capture-unavailable" : undefined}
             className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50">
-            {importing ? "Reading…" : saving ? (contextRelationshipId ? "Updating…" : "Saving…") : clarification ? "Continue" : actionLabel}
-            <span aria-hidden="true" className="ml-2">↗</span>
+            {importing ? "Reading…" : saving ? (contextRelationshipId ? "Working…" : "Saving…") : clarification ? "Continue" : contextRelationshipId ? null : "Save"}
+            {contextRelationshipId && !saving && !importing && !clarification
+              ? <span aria-hidden="true" className="text-lg leading-none">↑</span>
+              : <span aria-hidden="true" className="ml-2">↗</span>}
           </button>
         </div>
       </form>
 
-      {!captureAvailable && <p id="capture-unavailable" className="sr-only">Memory saving is unavailable without a configured model or a valid person context.</p>}
+      {!canSubmit && <p id="capture-unavailable" className="sr-only">This request is unavailable in the current environment.</p>}
+      {reply && <div aria-live="polite" className="mt-3 space-y-2 border-t border-stone-100 px-3 pt-3 text-sm">
+        <div className="flex items-start justify-between gap-2"><p className="font-medium text-stone-800">{reply.question}</p><button type="button" onClick={() => setReply(null)} aria-label="Close answer" className="text-stone-500 hover:text-stone-900">×</button></div>
+        <p className="text-stone-700">{reply.result.message}</p>
+        {reply.result.evidence.length > 0 && <ul className="space-y-2">{reply.result.evidence.map(item => <li key={item.id} className="rounded-lg bg-stone-50 p-3">
+          <p className="font-medium text-stone-800">{item.label}: <span className="font-normal">{item.value}</span></p>
+          <p className="mt-1 text-xs text-stone-500">Recorded {item.observedAt}{item.status ? " · " + item.status : ""}</p>
+          <details className="mt-1 text-xs text-stone-500"><summary className="cursor-pointer">Supporting context</summary><ul className="mt-1 space-y-1">{item.sources.map((source,i)=><li key={i}>{source.label} · {source.observedAt}</li>)}</ul></details>
+        </li>)}</ul>}
+        {reply.result.offline && <p className="text-xs text-stone-500">Fictional preview · offline topic matching</p>}
+      </div>}
       {error && (
         <p role="alert"
           className="mt-3 rounded-xl border border-stone-300 bg-stone-100 px-4 py-3 text-sm text-stone-800">

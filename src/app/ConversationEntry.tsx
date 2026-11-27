@@ -10,9 +10,10 @@ import { conversationScope, personForPath, type ConversationDraft } from "@/lib/
 
 /** Keep a single capture instance mounted across navigation. The directory
  * handles lookup; only Home and the actual relationship record show input. */
-export default function ConversationEntry({ people, captureAvailable }: {
+export default function ConversationEntry({ people, captureAvailable, questionAvailable }: {
   people: HomePersonChoice[];
   captureAvailable: boolean;
+  questionAvailable: boolean;
 }) {
   const pathname = usePathname();
   const isHome = pathname === "/";
@@ -36,7 +37,7 @@ export default function ConversationEntry({ people, captureAvailable }: {
       )}
       <div hidden={!visible}>
         <HomeCapture key={scope ?? "all"} people={people} contextRelationshipId={scope} compact={!!scope}
-          captureAvailable={captureAvailable && !scopeUnavailable}
+          captureAvailable={captureAvailable && !scopeUnavailable} questionAvailable={questionAvailable && !scopeUnavailable}
           onDraftChange={(active) => setDraft((previous) => active ? previous ?? { relationshipId: scope ?? null } : null)} />
       </div>
     </div>
