@@ -153,6 +153,7 @@ fi
 
 if [ "$RA_MODE" = personal ]; then
   if [ "$RA_DRY_RUN" != 1 ]; then
+    log "[Mac] Checking private Codespace port..."
     personal_port_private || start_fail "Could not verify private port 3000. No personal server will be started; check the Codespaces Ports panel."
   fi
   log "[Codespace] Starting reviewed personal server (reuses a verified existing one)..."
@@ -221,6 +222,7 @@ if [ "$RA_DRY_RUN" = "1" ]; then
   exit 0
 fi
 if [ "$RA_MODE" = personal ]; then
+  log "[Mac] Checking the private browser connection..."
   for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     if pid="$(forward_pid_if_ours)" && personal_forward_healthy "$pid"; then
       personal_port_private || start_fail "private port visibility could not be verified after forwarding"

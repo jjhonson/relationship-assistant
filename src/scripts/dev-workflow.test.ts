@@ -892,6 +892,23 @@ esac`);
     const first = personal("start");
     expect(first.status, first.stdout + first.stderr).toBe(0);
     expect(first.stdout).toContain("RA_STATUS=started");
+    // The host buffers stdout for ownership diagnostics; stderr stays live.
+    const stages = [
+      "Checking reviewed code and saved private configuration",
+      "Reviewed main tree and saved personal profile verified",
+      "Installing reviewed locked dependencies",
+      "Building reviewed production code",
+      "Starting the private personal application",
+    ];
+    let previous = -1;
+    for (const stage of stages) {
+      const position = first.stderr.indexOf(stage);
+      expect(position, stage).toBeGreaterThan(previous);
+      expect(first.stdout).not.toContain(stage);
+      previous = position;
+    }
+    expect(first.stdout + first.stderr).not.toContain("sb_secret_fixture_only");
+    expect(first.stdout + first.stderr).not.toContain("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     const pid = Number(meta("pid"));
     expect(listening()).toBe(true);
     expect(remote("stop").status).not.toBe(0);
@@ -905,7 +922,10 @@ esac`);
     expect(listening()).toBe(false);
     const restarted = personal("start", "personal-restart");
     expect(restarted.status, restarted.stdout + restarted.stderr).toBe(0);
-    expect(restarted.stdout).toContain("Reusing reviewed production build");
+    expect(restarted.stderr).toContain("Reusing reviewed production build");
+    expect(restarted.stderr).not.toContain("Installing reviewed locked dependencies");
+    expect(restarted.stderr).not.toContain("Building reviewed production code");
+    expect(restarted.stdout).not.toContain("Reusing reviewed production build");
     expect(readFileSync(path.join(tmp, "personal-npm.log"), "utf8")).toBe("ci\nbuild\nstart\nstart\n");
     expect(personal("stop").status).toBe(0);
     expect(listening()).toBe(false);

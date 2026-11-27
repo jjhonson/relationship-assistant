@@ -8,7 +8,7 @@ On the Mac, double-click `scripts/Start Relationship Agent.command` from a revie
 
 Save any pending browser input and double-click `scripts/Stop Relationship Agent.command` (or run `bash scripts/dev-stop.sh --personal`). It stops the verified personal process group and its recorded local tunnel, then stops the selected Codespace to conserve compute. It does not delete the Codespace, its data, or any relationship records. The database remains independent of Codespace availability.
 
-Normal Codespace inactivity shutdown still applies; the launcher is a convenience, not always-on hosting or a keepalive workaround. The first launch after code/dependency changes may rebuild. Subsequent starts reuse the build when its reviewed tree, dependency lock, and build ID match. No automatic branch switches, merges, new infrastructure, or billing changes.
+Normal Codespace inactivity shutdown still applies; the launcher is a convenience, not always-on hosting or a keepalive workaround. The first launch after code/dependency changes may rebuild. Fixed progress messages identify private configuration checks, dependency installation, compilation, cached build reuse and browser connection. Raw build/runtime output stays in private logs. Subsequent starts reuse the build when its reviewed tree, dependency lock, and build ID match. No automatic branch switches, merges, new infrastructure, or billing changes.
 
 ## Safety boundaries
 

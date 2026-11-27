@@ -44,7 +44,12 @@ personal_workspace_clean() {
   fi
 }
 
+# The Mac captures stdout for ownership diagnostics. Fixed, non-sensitive stage
+# messages travel over stderr immediately rather than appearing after startup.
+personal_progress() { printf '[Codespace] %s\n' "$1" >&2; }
+
 personal_preflight() {
+  personal_progress "Checking reviewed code and saved private configuration..."
   [ "${CODESPACES:-}" = true ] || die "personal launch requires the existing private Codespace"
   personal_workspace_clean || die "uncommitted application changes detected; no branch or file changed"
   GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/main </dev/null 2>/dev/null ||
@@ -68,7 +73,7 @@ personal_preflight() {
   [[ "$PERSONAL_PROFILE" =~ ^[a-f0-9]{64}$ ]] || die "invalid private profile fingerprint"
   export RA_PERSONAL_LAUNCH_TREE="$PERSONAL_TREE"
   export RA_PERSONAL_LAUNCH_PROFILE="$PERSONAL_PROFILE"
-  echo "[Codespace] Reviewed main tree and saved personal profile verified."
+  personal_progress "Reviewed main tree and saved personal profile verified."
 }
 
 personal_prepare_build() {
@@ -79,17 +84,17 @@ personal_prepare_build() {
   [ -n "$deps" ] || die "could not identify dependencies"
   umask 077
   if [ ! -d node_modules ] || [ "$(cat node_modules/.ra-personal-deps 2>/dev/null)" != "$deps" ]; then
-    echo "[Codespace] Installing reviewed locked dependencies (first use or dependency change)..."
+    personal_progress "Installing reviewed locked dependencies (first use or dependency change)..."
     npm ci </dev/null >"$LOG.build" 2>&1 || die "locked dependency install failed; see the private build log"
     printf '%s\n' "$deps" >node_modules/.ra-personal-deps || die "could not record installed dependency version"
   fi
   build_id="$(cat .next/BUILD_ID 2>/dev/null)"
   stamp="$(printf '%s\n%s\n%s' "$PERSONAL_TREE" "$deps" "$build_id")"
   if [ -n "$build_id" ] && [ "$(cat .next/.ra-personal-build 2>/dev/null)" = "$stamp" ]; then
-    echo "[Codespace] Reusing reviewed production build."
+    personal_progress "Reusing reviewed production build."
     return 0
   fi
-  echo "[Codespace] Building reviewed production code (first use or code change)..."
+  personal_progress "Building reviewed production code (first use or code change)..."
   # Build without activating the real personal profile or connecting to the database.
   RA_DATASET_MODE=fictional RA_STORAGE_BACKEND=json NODE_ENV=production npm run build </dev/null >>"$LOG.build" 2>&1 ||
     die "production build failed; see the private build log"
@@ -581,6 +586,7 @@ case "$ACTION" in
     fi
     LAUNCHING=1
     if [ "$RUN_MODE" = personal ]; then
+      personal_progress "Starting the private personal application..."
       RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash -c 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; export NODE_ENV=production; exec npm run personal -- --hostname 127.0.0.1' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
     else
       RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
