@@ -7,6 +7,7 @@ PORT=3002
 RUN="overview-preview-$$-$(date +%s)"
 FORWARD=""
 REMOTE_ATTEMPTED=0
+PREVIEW_READY=0
 command -v gh >/dev/null
 command -v open >/dev/null
 command -v lsof >/dev/null
@@ -37,7 +38,12 @@ fi
 STOP_REMOTE
     fi
   fi
-  echo "Preview closed. Your personal application and saved data were not modified."
+  if [ "$PREVIEW_READY" = 1 ]; then
+    echo "Preview closed. Your personal application and saved data were not modified."
+  else
+    echo "Preview did not start. Your personal application and saved data were not modified." >&2
+    [ "$status" != 0 ] || status=1
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -47,14 +53,14 @@ trap 'exit 143' TERM HUP
 echo "[Preview] Waking the existing private Codespace..."
 ready=0
 for attempt in 1 2 3 4 5 6; do
-  if gh codespace ssh -c "$CS" -- true >/dev/null 2>&1; then ready=1; break; fi
+  if gh codespace ssh -c "$CS" -- true </dev/null >/dev/null 2>&1; then ready=1; break; fi
   echo "[Preview] SSH is not ready yet ($attempt/6)"
   sleep 5
 done
 [ "$ready" = 1 ] || { echo "Could not wake the existing Codespace." >&2; exit 1; }
 
 check_private_port() {
-  visibility="$(gh codespace ports -c "$CS" --json sourcePort,visibility --jq '[.[] | select(.sourcePort == 3002) | (.visibility // "unknown" | ascii_downcase)] | if length == 0 then "absent" elif all(. == "private") then "private" else "unsafe" end' 2>/dev/null)" || return 1
+  visibility="$(gh codespace ports -c "$CS" --json sourcePort,visibility --jq '[.[] | select(.sourcePort == 3002) | (.visibility // "unknown" | ascii_downcase)] | if length == 0 then "absent" elif all(. == "private") then "private" else "unsafe" end' </dev/null 2>/dev/null)" || return 1
   [ "$visibility" = private ] || [ "$visibility" = absent ]
 }
 check_private_port || { echo "Preview port privacy could not be verified." >&2; exit 1; }
@@ -68,7 +74,7 @@ repo=/workspaces/relationship-assistant
 dir=/workspaces/relationship-agent-preview-7c3476a
 head=7c3476ac55e215b7efa3c5d0f24611e969fd283a
 cd "$repo"
-git fetch --quiet --no-tags origin refs/heads/feature/relationship-overview
+GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/feature/relationship-overview </dev/null
 git cat-file -e "$head^{commit}"
 if [ ! -e "$dir" ]; then
   git worktree add --detach "$dir" "$head"
@@ -173,6 +179,7 @@ for attempt in {1..30}; do
 done
 [ "$ready" = 1 ] || { echo "Could not verify the preview browser connection." >&2; exit 1; }
 check_private_port || { echo "Preview port privacy could not be verified." >&2; exit 1; }
+PREVIEW_READY=1
 echo "Fictional preview ready: http://localhost:3002"
 echo "Leave this Terminal open during the preview. Press Control+C here when finished."
 open "http://localhost:3002"
