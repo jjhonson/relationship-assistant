@@ -30,7 +30,7 @@ cleanup() {
       gh codespace ssh -c "$CS" -- bash -s -- "$RUN" <<'STOP_REMOTE' || echo "Preview cleanup could not be verified. Personal server was not stopped." >&2
 set -eu
 dir=/workspaces/relationship-agent-preview-7c3476a
-if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = 8e95c922e42f2195a0fbe0c0f3afce4808bae558 ]; then
+if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = 5070269584c55736ec6fbb930ec41305edc7b216 ]; then
   RA_PID_FILE=/tmp/relationship-agent-preview-7c3476a.pid \
     RA_LOG_FILE=/tmp/relationship-agent-preview-7c3476a.log \
     bash "$dir/scripts/remote-dev.sh" stop-start "$dir" 3002 0 "$1"
@@ -72,9 +72,9 @@ set -eu
 run="$1"
 repo=/workspaces/relationship-assistant
 dir=/workspaces/relationship-agent-preview-7c3476a
-head=8e95c922e42f2195a0fbe0c0f3afce4808bae558
+head=5070269584c55736ec6fbb930ec41305edc7b216
 cd "$repo"
-GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/feature/relationship-overview </dev/null
+GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/feature/clipboard-images </dev/null
 git cat-file -e "$head^{commit}"
 # Reuse the isolated checkout and its dependencies, not the personal checkout.
 [ -z "$(ss -H -ltn 'sport = :3002')" ] || {
@@ -89,7 +89,7 @@ fi
 cd "$dir"
 prior="$(git rev-parse HEAD)"
 case "$prior" in
-  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a|279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b|b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf|cb0d2f379ebc06bf31052f649e843590e855b09d|8b49d9fd2d5ec27fcb14f4302b53bb02a9c4d79a|9722f265747827f3e8562acb99b28eb91534f600|54e05b9ed007bf7c9bbd2cf6c62ac9b7841c437a) ;;
+  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a|279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b|b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf|cb0d2f379ebc06bf31052f649e843590e855b09d|8b49d9fd2d5ec27fcb14f4302b53bb02a9c4d79a|9722f265747827f3e8562acb99b28eb91534f600|54e05b9ed007bf7c9bbd2cf6c62ac9b7841c437a|8e95c922e42f2195a0fbe0c0f3afce4808bae558|7725955b08ec18ae689afcb94c1bde34b6c38de9) ;;
   *) echo "Unexpected preview version; nothing was overwritten." >&2; exit 1 ;;
 esac
 if git symbolic-ref -q HEAD >/dev/null; then
@@ -298,7 +298,7 @@ done
 check_private_port || { echo "Preview port privacy could not be verified." >&2; exit 1; }
 PREVIEW_READY=1
 echo "Fictional preview ready: http://localhost:3002"
-echo "The preview opens Rowan Taylor (fictional). Try: What is his dog\047s name? Offline read-only lookup only; no model or memory saves."
+echo "The preview opens Rowan Taylor (fictional). Try pasting or dropping a fictional image, removing it, then dropping a text file. No model or memory saves."
 echo "Leave this Terminal open during the preview. Press Control+C here when finished."
 open "http://localhost:3002/relationships/00000000-0000-4000-8000-000000000084"
 wait "$FORWARD"
