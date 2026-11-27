@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { suggestHomePerson } from "@/lib/home-identity";
 import { planHomeCapture, type HomeCaptureChoices } from "@/lib/home-direct-capture";
-import { getRelationship, listRelationships, savePersonalMoment } from "@/lib/relationship-store";
+import { getCapture, getRelationship, listRelationships, savePersonalMoment } from "@/lib/relationship-store";
+import { savedCaptureDestination } from "@/lib/capture-return";
 import { saveReviewedPersonCapture } from "@/app/relationships/conversational-actions";
 import { learnFromNewPastedConversation } from "@/app/relationships/actions";
 import { saveQuickCaptureWithoutRedirect, saveUniversalCaptureWithoutRedirect } from "@/app/relationships/capture-actions";
@@ -47,6 +48,7 @@ export type ReviewedHomeInput = {
   relationshipId: string;
   newPersonLabel?: string;
   submissionId?: string;
+  fromRelationshipRecord?: boolean;
 };
 
 /** A confirmed input uses one existing retention path, never an automatic relationship merge. */
@@ -107,6 +109,7 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
     source: input.source,
     interactionDate: input.interactionDate,
     submissionId: input.submissionId,
+    ...(input.fromRelationshipRecord === true ? { returnToRelationship: true } : {}),
   });
   revalidatePath("/");
   return result;
@@ -130,7 +133,7 @@ export async function saveHomePhotoInput(formData: FormData, contextRelationship
     throw new Error(result.error ?? "Photo save could not be confirmed.");
   }
   revalidatePath("/");
-  return { destination: "/captures/" + encodeURIComponent(result.captureId) };
+  return { destination: await savedCaptureDestination(result.captureId, contextRelationshipId, getCapture) };
 }
 
 /**
@@ -215,6 +218,7 @@ export async function submitHomeText(input: {
     newPersonLabel: plan.kind === "conversation" && !plan.relationshipId ? plan.choices.newPersonLabel : undefined,
     interactionDate: plan.interactionDate,
     submissionId: input.submissionId,
+    fromRelationshipRecord: !!pageContext,
   });
   return { state: "saved" as const, destination: saved.destination };
 }

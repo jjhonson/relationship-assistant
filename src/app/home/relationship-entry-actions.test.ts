@@ -1,12 +1,12 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 const mocks=vi.hoisted(()=>({
-  listRelationships:vi.fn(),getRelationship:vi.fn(),savePersonalMoment:vi.fn(),
+  listRelationships:vi.fn(),getRelationship:vi.fn(),getCapture:vi.fn(),savePersonalMoment:vi.fn(),
   saveReviewedPersonCapture:vi.fn(),learnFromNewPastedConversation:vi.fn(),
   saveQuickCaptureWithoutRedirect:vi.fn(),saveUniversalCaptureWithoutRedirect:vi.fn(),
   revalidatePath:vi.fn(),
 }));
 vi.mock("@/lib/relationship-store",()=>({
-  listRelationships:mocks.listRelationships,getRelationship:mocks.getRelationship,
+  listRelationships:mocks.listRelationships,getRelationship:mocks.getRelationship,getCapture:mocks.getCapture,
   savePersonalMoment:mocks.savePersonalMoment,
 }));
 vi.mock("@/app/relationships/conversational-actions",()=>({saveReviewedPersonCapture:mocks.saveReviewedPersonCapture}));
@@ -95,7 +95,7 @@ describe("read-only person entry routing",()=>{
     const r=await submitHomeText({text:"He enjoys pottery.",submissionId,contextRelationshipId:"rowan"});
     expect(r).toMatchObject({state:"saved",destination:"/relationships/rowan"});
     expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledOnce();
-    expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("rowan",expect.objectContaining({text:"He enjoys pottery.",kind:"note",interactionDate:""}));
+    expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("rowan",expect.objectContaining({text:"He enjoys pottery.",kind:"note",interactionDate:"",returnToRelationship:true}));
   });
   it("rejects a question with a photo before invoking the image write path",async()=>{
     const form=new FormData();
@@ -104,4 +104,27 @@ describe("read-only person entry routing",()=>{
     await expect(saveHomePhotoInput(form,"rowan")).rejects.toThrow("Questions or corrections");
     noWrites();
   });
+  it("returns a successfully linked screenshot to its relationship, with the memory accessible",async()=>{
+    const form=new FormData();
+    form.set("note","Professional profile screenshot");
+    form.set("photo",new File(["fixture"],"profile.png",{type:"image/png"}));
+    mocks.saveUniversalCaptureWithoutRedirect.mockResolvedValue({error:null,captureId:"capture-1"});
+    mocks.getCapture.mockResolvedValue({id:"capture-1",status:"interpreted",contextRelationshipId:"rowan",people:[{resolution:"linked",relationshipId:"rowan"}]});
+    const r=await saveHomePhotoInput(form,"rowan");
+    expect(r).toEqual({destination:"/relationships/rowan?memorySaved=capture-1"});
+    expect(mocks.getCapture).toHaveBeenCalledWith("capture-1");
+    expect(mocks.saveUniversalCaptureWithoutRedirect).toHaveBeenCalledOnce();
+  });
+  it("keeps an unresolved screenshot or a Home capture in saved-memory review",async()=>{
+    const form=new FormData();
+    form.set("note","Professional profile screenshot");
+    form.set("photo",new File(["fixture"],"profile.png",{type:"image/png"}));
+    mocks.saveUniversalCaptureWithoutRedirect.mockResolvedValue({error:null,captureId:"capture-1"});
+    mocks.getCapture.mockResolvedValue({id:"capture-1",status:"pending",contextRelationshipId:"rowan",people:[]});
+    expect(await saveHomePhotoInput(form,"rowan")).toEqual({destination:"/captures/capture-1"});
+    mocks.getCapture.mockClear();
+    expect(await saveHomePhotoInput(form)).toEqual({destination:"/captures/capture-1"});
+    expect(mocks.getCapture).not.toHaveBeenCalled();
+  });
+
 });

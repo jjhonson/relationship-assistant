@@ -22,6 +22,7 @@ import { homeInteractionDate } from "@/lib/home-view";
 import { relationshipCadence } from "@/lib/relationship-cadence";
 import { relationshipConnectionStats } from "@/lib/relationship-connection-stats";
 import ConnectionStats from "./ConnectionStats";
+import { captureAppliedToPerson } from "@/lib/capture-return";
 
 export const dynamic = "force-dynamic";
 
@@ -50,13 +51,15 @@ export default async function RelationshipDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ updated?: string; labels?: string; intention?: string; name?: string }>;
+  searchParams: Promise<{ updated?: string; labels?: string; intention?: string; name?: string; memorySaved?: string }>;
 }) {
   const { id } = await params;
-  const { updated, labels, intention, name } = await searchParams;
+  const { updated, labels, intention, name, memorySaved } = await searchParams;
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
   const capturedNotes = await listCapturesForRelationship(id);
+  // Never render a success receipt or link from an arbitrary query parameter.
+  const savedMemory = capturedNotes.find((capture) => capture.id === memorySaved && captureAppliedToPerson(capture, id));
   const journeys = await listConnectionJourneys(id);
   const connectedPeople = await listConnectedPeopleForRelationship(id);
   const sharedHouseholdContext = await listSharedHouseholdContextForRelationship(id);
@@ -91,6 +94,12 @@ export default async function RelationshipDetailPage({
         ← Saved relationships
       </Link>
 
+      {savedMemory && (
+        <p role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-stone-700">
+          <span>Memory saved.</span>
+          <Link href={"/captures/" + encodeURIComponent(savedMemory.id)} className="text-stone-600 underline underline-offset-4 hover:text-stone-900">View saved memory</Link>
+        </p>
+      )}
       {updated === "1" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           Relationship updated. The pasted conversation itself was not saved.
