@@ -1,5 +1,4 @@
 import Link from "next/link";
-import HomeCapture from "./HomeCapture";
 import { dismissHomeOpportunity } from "./home/opportunity-actions";
 import {
   homeInteractionDate, homeRelationshipDetail,
@@ -16,17 +15,6 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-14 pb-16 sm:space-y-16">
-      <section aria-labelledby="home-heading" className="mx-auto max-w-4xl pt-4 sm:pt-10">
-        <div className="mb-7 text-center sm:mb-8">
-          <h1 id="home-heading" className="text-3xl font-semibold tracking-tight text-stone-950 sm:text-4xl">
-            What would you like to remember?
-          </h1>
-        </div>
-        <HomeCapture people={people.map((person) => ({
-          id: person.id, label: person.personLabel,
-        }))} />
-      </section>
-
       <section aria-labelledby="opportunities-heading" className="mx-auto max-w-4xl space-y-5">
         <h2 id="opportunities-heading"
           className="text-lg font-semibold tracking-tight text-stone-900">

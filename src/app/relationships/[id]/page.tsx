@@ -4,7 +4,6 @@ import { updateRelationshipIntention, updateRelationshipLabels } from "../action
 import { correctRelationshipName, dismissInferredConnection } from "../capture-actions";
 import {
   getRelationship,
-  listRelationships,
   listConnectionJourneys,
   listCapturesForRelationship,
   listConnectedPeopleForRelationship,
@@ -12,7 +11,6 @@ import {
 } from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
-import HomeCapture from "@/app/HomeCapture";
 import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
 import { userOwnsCommitment } from "@/lib/connection-subjects";
 import MemoryCorrectionForm from "./MemoryCorrectionForm";
@@ -21,8 +19,9 @@ import { relationshipContactFields, relationshipContextLabel, lastContactDescrip
 import ContactCard from "./ContactCard";
 import PersonalPortrait from "./PersonalPortrait";
 import { homeInteractionDate } from "@/lib/home-view";
-import { relationshipCadence, contactCadenceOptions } from "@/lib/relationship-cadence";
-import { updateContactCadence } from "../cadence-actions";
+import { relationshipCadence } from "@/lib/relationship-cadence";
+import { relationshipConnectionStats } from "@/lib/relationship-connection-stats";
+import ConnectionStats from "./ConnectionStats";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +56,6 @@ export default async function RelationshipDetailPage({
   const { updated, labels, intention, name } = await searchParams;
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
-  const people = await listRelationships();
   const capturedNotes = await listCapturesForRelationship(id);
   const journeys = await listConnectionJourneys(id);
   const connectedPeople = await listConnectedPeopleForRelationship(id);
@@ -83,6 +81,9 @@ export default async function RelationshipDetailPage({
   const cadence = relationshipCadence(relationship, today);
   const portrait = relationshipPortrait(relationship, today);
   const history = relationshipInteractionHistory(relationship, capturedNotes, journeys, today);
+  const stats = relationshipConnectionStats(relationship, history, today);
+  const savedTopics = portrait.filter((group) => group.label !== "Earlier chapters").flatMap((group) => group.items.slice(0, 1)).slice(0, 3).map(({ label, value }) => ({ label, value }));
+  const initials = relationship.personLabel.replace(/\s*\(fictional\)$/i, "").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join("");
 
   return (
     <div className="mx-auto max-w-4xl space-y-7 pb-12">
@@ -111,62 +112,31 @@ export default async function RelationshipDetailPage({
         </div>
       )}
 
-      <header className="rounded-2xl border border-stone-200 bg-white p-6 sm:p-7">
-        <h1 className="text-3xl font-semibold tracking-tight text-stone-950">{relationship.personLabel}</h1>
-        {contextLabel && (
-          <p className="mt-1 text-sm text-stone-600">
-            {contextLabel.value}{contextLabel.inferred ? " · Suggested relationship context" : ""}
-          </p>
-        )}
-        {relationship.personLabelAuthority === "inferred-unverified" && (
-          <p className="mt-1 text-xs text-stone-600">Name inferred from a saved memory. You can correct it below.</p>
-        )}
-        <ContactCard fields={contactFields} />
-        <div className="mt-5 grid gap-4 border-t border-stone-100 pt-4 sm:grid-cols-2">
-          <div>
-            <p className="text-xs font-medium text-stone-500">Last contact</p>
-            <p className="mt-1 text-base font-medium text-stone-900">{lastContact.date}</p>
-            {lastContact.elapsed && <p className="text-sm text-stone-500">{lastContact.elapsed}</p>}
-          </div>
-          <div>
-            <p className="text-xs font-medium text-stone-500">{cadence?.userSelected ? "Your cadence" : "Suggested cadence"}</p>
-            <p className="mt-1 text-base font-medium text-stone-900">{cadence?.label ?? "Still learning"}</p>
-            <details className="mt-1 text-xs text-stone-500">
-              <summary className="cursor-pointer">Adjust if desired</summary>
-              {cadence && <p className="mt-2">{cadence.basis}. This is a guide, not a quota.</p>}
-              <form action={updateContactCadence.bind(null, relationship.id)} className="mt-2 flex flex-wrap items-center gap-2">
-                <label className="sr-only" htmlFor="contact-cadence">Contact cadence</label>
-                <select id="contact-cadence" name="contactCadence"
-                  defaultValue={relationship.contactCadenceDays === undefined ? "suggested" : String(relationship.contactCadenceDays)}
-                  className="max-w-full rounded-md border border-stone-300 bg-white px-2 py-1.5 text-sm">
-                  <option value="suggested">Use suggested cadence</option>
-                  {contactCadenceOptions.map((item) => <option key={item.days} value={item.days}>{item.label}</option>)}
-                </select>
-                <button type="submit" className="rounded-md bg-stone-900 px-3 py-1.5 text-sm text-white">Save</button>
-              </form>
-              <p className="mt-2">Your commitments are considered separately from this cadence.</p>
-            </details>
+      <header className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-6">
+        <div className="flex items-center gap-4">
+          <div aria-hidden="true" className="flex size-14 shrink-0 items-center justify-center rounded-full bg-stone-100 text-lg font-medium text-stone-600 sm:size-16">{initials || "?"}</div>
+          <div className="min-w-0">
+            <h1 className="break-words text-2xl font-semibold tracking-tight text-stone-950 sm:text-3xl">{relationship.personLabel}</h1>
+            {contextLabel && <p className="mt-1 text-sm text-stone-600" title={contextLabel.inferred ? "Suggested relationship context" : "Confirmed relationship context"}>
+              {contextLabel.value}{contextLabel.inferred && <span className="sr-only"> (suggested)</span>}
+            </p>}
+            {relationship.personLabelAuthority === "inferred-unverified" && <p className="mt-1 text-xs text-stone-500">Name not yet confirmed.</p>}
           </div>
         </div>
+        <ContactCard fields={contactFields} />
       </header>
-
-      <PersonalPortrait groups={portrait} />
-
-      <section aria-labelledby="add-memory-heading" className="space-y-2">
-        <h2 id="add-memory-heading" className="text-lg font-semibold tracking-tight text-stone-900">Remember something</h2>
-        <p className="text-sm text-stone-600">Add something you know, a conversation or contact details.</p>
-        <HomeCapture contextRelationshipId={relationship.id} compact
-          people={people.map((person) => ({ id: person.id, label: person.personLabel }))} />
-        <p className="text-xs text-stone-500">Adding context is supported. Retiring an obsolete contact value or correcting past memory needs a dedicated correction flow.</p>
-      </section>
 
       <ConnectionSubjectsReview
         key={relationship.updatedAt + ":" + (relationship.actionableMemoryFeedback?.length ?? 0) +
           ":" + (relationship.dismissedConnectionSubjects?.length ?? 0)}
-        relationshipId={relationship.id} />
+        relationshipId={relationship.id} modelAvailable={Boolean(process.env.OPENAI_API_KEY)} savedTopics={savedTopics}>
+        <PersonalPortrait groups={portrait} />
+      </ConnectionSubjectsReview>
 
       <section aria-labelledby="history-heading" className="space-y-3">
-        <h2 id="history-heading" className="text-lg font-semibold tracking-tight text-stone-900">History</h2>
+        <h2 id="history-heading" className="text-lg font-semibold tracking-tight text-stone-900">Connection</h2>
+        <ConnectionStats stats={stats} lastContact={lastContact} cadence={cadence} relationshipId={relationship.id} cadenceDays={relationship.contactCadenceDays} />
+        <h3 className="pt-2 text-sm font-semibold text-stone-700">History</h3>
         {history.length ? (
           <>
             <ol className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-5">

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { getDatasetMode } from "../../scripts/dataset-profile.mjs";
+import { listRelationships } from "@/lib/relationship-store";
+import ConversationEntry from "./ConversationEntry";
 
 // Mode is runtime configuration, not a label baked into the build.
 export const dynamic = "force-dynamic";
@@ -11,7 +13,9 @@ export const metadata: Metadata = {
   description: "Remember what matters and find thoughtful reasons to connect.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const people = (await listRelationships()).map((person) => ({ id: person.id, label: person.personLabel }));
+  const captureAvailable = Boolean(process.env.OPENAI_API_KEY);
   return (
     <html lang="en">
       <body className="min-h-screen">
@@ -37,7 +41,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </span>
           </div>
         </header>
-        <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">{children}</main>
+        <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-7">
+          <ConversationEntry people={people} captureAvailable={captureAvailable} />
+          {children}
+        </main>
       </body>
     </html>
   );

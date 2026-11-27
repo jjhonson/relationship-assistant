@@ -1,21 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
+import InterfaceIcon from "@/app/InterfaceIcon";
 import { useRouter } from "next/navigation";
 import { dismissRelationshipConnectionIdea } from "../correction-actions";
 import { reviewRelationshipConnection } from "../actions";
 import type { ConnectionReview } from "@/lib/connection-subjects";
 
 /** Conversation context, not a queue of tasks to track. */
-export default function ConnectionSubjectsReview({ relationshipId }: { relationshipId: string }) {
+export default function ConnectionSubjectsReview({ relationshipId, children, modelAvailable, savedTopics }: {
+  relationshipId: string;
+  children: ReactNode;
+  modelAvailable: boolean;
+  savedTopics: { label: string; value: string }[];
+}) {
   const router = useRouter();
   const [review, setReview] = useState<ConnectionReview | null>(null);
+  const [showSavedTopics, setShowSavedTopics] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, beginReview] = useTransition();
   const [dismissing, beginDismiss] = useTransition();
 
   function requestReview() {
+    if (!modelAvailable) { setShowSavedTopics((value) => !value); return; }
     setReview(null);
     setError(null);
     beginReview(async () => {
@@ -50,21 +58,26 @@ export default function ConnectionSubjectsReview({ relationshipId }: { relations
   }
 
   return (
-    <section className="rounded-xl border border-stone-200 bg-white p-5">
-      <h2 className="text-lg font-semibold text-stone-900">Conversation ideas</h2>
-      <p className="mt-1 text-sm text-stone-600">Get a few natural things to talk about when you next connect.</p>
-      <button type="button" onClick={requestReview} disabled={reviewing || dismissing}
-        className="mt-3 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-50">
-        {reviewing ? "Looking through saved context…" : review ? "Refresh ideas" : "Prepare for a conversation"}
-      </button>
-      <details className="mt-2 text-xs text-stone-500">
-        <summary className="cursor-pointer">How suggestions are generated</summary>
-        <p className="mt-1 max-w-3xl">
-          Only when you ask, a bounded selection of saved relationship context is sent to the configured
-          model with provider storage disabled. No live messages or calendar events are checked.
-          No messages are sent and nothing is scheduled or monitored.
-        </p>
-      </details>
+    <section aria-labelledby="portrait-heading" className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="portrait-heading" className="text-lg font-semibold tracking-tight text-stone-900">About them</h2>
+        <button type="button" onClick={requestReview} disabled={reviewing || dismissing}
+          aria-expanded={modelAvailable ? !!review || !!error : showSavedTopics}
+          className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-800 hover:border-stone-500 disabled:opacity-50">
+          <InterfaceIcon name="sparkles" className="size-3.5 text-stone-500" />
+          {reviewing ? "Preparing…" : showSavedTopics ? "Hide ideas" : review ? "Refresh ideas" : "Conversation ideas"}
+        </button>
+      </div>
+      {children}
+      {showSavedTopics && !modelAvailable && (
+        <div className="rounded-xl border border-stone-200 bg-white p-4 text-sm">
+          <h3 className="font-semibold">Saved conversation topics</h3>
+          <p className="mt-1 text-xs text-stone-500">AI preparation is disabled in this preview. These are recorded topics, not generated recommendations.</p>
+          {savedTopics.length ? <ul className="mt-3 space-y-2">
+            {savedTopics.map((item, index) => <li key={index}><span className="font-medium">{item.label}</span><p className="text-stone-600">{item.value}</p></li>)}
+          </ul> : <p className="mt-3 text-stone-500">No topics recorded.</p>}
+        </div>
+      )}
       {error && (
         <p role="alert" className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
           {error}

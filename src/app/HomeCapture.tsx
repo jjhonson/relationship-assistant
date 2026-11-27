@@ -22,11 +22,13 @@ const kinds: Array<{ value: "conversation" | "note" | "moment"; label: string }>
 
 /** One Save, one concrete question only if the meaning needs clarification. */
 export default function HomeCapture({
-  people, contextRelationshipId, compact = false,
+  people, contextRelationshipId, compact = false, captureAvailable = true, onDraftChange,
 }: {
   people: HomePersonChoice[];
   contextRelationshipId?: string;
   compact?: boolean;
+  captureAvailable?: boolean;
+  onDraftChange?: (active: boolean) => void;
 }) {
   const router = useRouter();
   const contextPersonLabel = people.find((person) => person.id === contextRelationshipId)?.label ?? "";
@@ -48,6 +50,7 @@ export default function HomeCapture({
 
   function changeText(next: string) {
     setText(next);
+    onDraftChange?.(next.length > 0 || !!photo);
     if (!next.trim()) setImportedTextFile(false);
     setClarification(null);
     setChoices({});
@@ -88,6 +91,7 @@ export default function HomeCapture({
       return;
     }
     setPhoto(next);
+    onDraftChange?.(!!next || text.length > 0);
     setClarification(null);
     setError(null);
     setImportNotice("");
@@ -95,7 +99,7 @@ export default function HomeCapture({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving) return;
+    if (saving || !captureAvailable) return;
     if (photo && text.trim().length > 1500) {
       setError("Keep the note with a photo under 1,500 characters.");
       return;
@@ -118,6 +122,13 @@ export default function HomeCapture({
     }
 
     setError(null);
+    function finish(destination: string) {
+      setText(""); setPhoto(null); setClarification(null); setChoices({});
+      setImportedTextFile(false); setImportNotice(""); submissionRef.current = null;
+      onDraftChange?.(false);
+      router.push(destination);
+      router.refresh();
+    }
     startSave(async () => {
       try {
         if (photo) {
@@ -125,7 +136,7 @@ export default function HomeCapture({
           form.set("note", text);
           form.set("photo", photo);
           const result = await saveHomePhotoInput(form, contextRelationshipId);
-          router.push(result.destination);
+          finish(result.destination);
           return;
         }
         if (!submissionRef.current) submissionRef.current = crypto.randomUUID();
@@ -138,7 +149,7 @@ export default function HomeCapture({
           setChoices(result.choices);
           return;
         }
-        router.push(result.destination);
+        finish(result.destination);
       } catch {
         // The write may have committed before an error was returned. Keep the
         // same input + submission ID so retry is safe for textual captures.
@@ -173,7 +184,7 @@ export default function HomeCapture({
         {photo && (
           <div className="mx-2 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs sm:mx-3">
             <span className="font-medium text-stone-700">Photo: {photo.name}</span>
-            <button type="button" onClick={() => setPhoto(null)}
+            <button type="button" disabled={saving} onClick={() => { setPhoto(null); onDraftChange?.(text.length > 0); }}
               className="font-medium text-stone-500 underline-offset-4 hover:underline">Remove</button>
             <span className="text-stone-500">We save extracted observations, not the original image.</span>
           </div>
@@ -243,12 +254,12 @@ export default function HomeCapture({
             <label className="cursor-pointer rounded-lg px-1 py-1.5 hover:text-stone-950 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-stone-500">
               <input aria-label="Attach a photo" type="file"
                 accept="image/jpeg,image/png,image/webp"
-                onChange={choosePhoto} className="sr-only" />+ Photo
+                onChange={choosePhoto} disabled={saving} className="sr-only" />+ Photo
             </label>
             <label className="cursor-pointer rounded-lg px-1 py-1.5 hover:text-stone-950 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-stone-500">
               <input aria-label="Import a text file" type="file"
                 accept=".txt,.md,.csv,text/plain,text/markdown,text/csv"
-                onChange={importTextFile} className="sr-only" />+ Text file
+                onChange={importTextFile} disabled={saving} className="sr-only" />+ Text file
             </label>
             {!contextPersonLabel && (
               <button type="button" disabled={saving || !!photo}
@@ -258,7 +269,7 @@ export default function HomeCapture({
               </button>
             )}
           </div>
-          <button type="submit" disabled={saving}
+          <button type="submit" disabled={saving || !captureAvailable}
             className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50">
             {saving ? "Saving…" : clarification ? "Continue" : "Save"}
             <span aria-hidden="true" className="ml-2">↗</span>
@@ -280,6 +291,7 @@ export default function HomeCapture({
         </details>
       </div>
 
+      {!captureAvailable && <p className="px-3 pb-2 text-xs text-stone-500">Memory saving is unavailable without a configured model or a valid person context.</p>}
       {error && (
         <p role="alert"
           className="mt-3 rounded-xl border border-stone-300 bg-stone-100 px-4 py-3 text-sm text-stone-800">

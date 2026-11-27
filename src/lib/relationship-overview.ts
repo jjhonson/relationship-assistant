@@ -42,6 +42,7 @@ export type RelationshipHistoryEntry = {
   label: string;
   detail: string;
   captureId?: string;
+  countsAsContact?: boolean;
 };
 
 function normalized(value: string) {
@@ -274,7 +275,7 @@ export function relationshipInteractionHistory(record: RelationshipRecord, captu
     ].filter((topic) => topic.trim());
     const unique = [...new Set(topics)].slice(0, 4);
     entries.push({ id: source.id, date: source.observedAt, label: source.label,
-      detail: unique.length ? "Remembered topics: " + unique.join(" · ") : "Saved conversation context" });
+      countsAsContact: true, detail: unique.length ? "Remembered topics: " + unique.join(" · ") : "Saved conversation context" });
   }
   for (const capture of captures) {
     if (!capture.people.some((person) => person.relationshipId === record.id) &&
@@ -285,13 +286,14 @@ export function relationshipInteractionHistory(record: RelationshipRecord, captu
     entries.push({ id: "capture:" + capture.id, date,
       label: reported ? "Reported conversation" : capture.source === "user-image" ? "Saved photo" : "Saved note",
       detail: capture.summary || (capture.source === "user-image" ? "Saved photo context" : "Saved personal note"),
-      captureId: capture.id });
+      captureId: capture.id, countsAsContact: !!reported });
   }
   for (const journey of journeys.filter((item) => item.relationshipId === record.id)) {
     for (const event of journey.events) {
       if (!["sent", "reply_received", "interaction_occurred"].includes(event.kind) ||
           !dateLabel(event.happenedOn, today)) continue;
       entries.push({ id: "event:" + event.id, date: event.happenedOn,
+        countsAsContact: event.kind === "reply_received" || event.kind === "interaction_occurred",
         label: connectionEventLabel(event.kind), detail: event.summary + (event.outcome ? " · " + event.outcome : "") });
     }
   }
