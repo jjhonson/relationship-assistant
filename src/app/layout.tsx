@@ -45,6 +45,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <ConversationEntry people={people} captureAvailable={captureAvailable} />
           {children}
         </main>
+        <footer className="mx-auto max-w-4xl px-4 pb-5 sm:px-6">
+          <details className="text-xs leading-relaxed text-stone-500">
+            <summary className="cursor-pointer hover:text-stone-800">Memory &amp; privacy</summary>
+            <p className="mt-2 max-w-2xl">
+              Pasted conversations are reduced to sourced memory without saving the transcript.
+              Your own notes retain their wording; personal moments stay private.
+              A chosen photo is interpreted without retaining the image.
+              Text files are imported locally as text. PDF and Office files are not yet supported.
+              Nothing is sent to anyone automatically.
+            </p>
+          </details>
+        </footer>
       </body>
     </html>
   );

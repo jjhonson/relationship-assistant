@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { saveHomePhotoInput, submitHomeText } from "./home/actions";
 import type { HomeCaptureChoices, HomeCapturePlan } from "@/lib/home-direct-capture";
 import type { HomePersonChoice } from "@/lib/home-identity";
+import { captureAttachmentAccept, classifyCaptureAttachment } from "@/lib/capture-attachment";
 
 type Clarify = Extract<HomeCapturePlan, { state: "clarify" }>;
 
@@ -37,6 +38,7 @@ export default function HomeCapture({
   const [photo, setPhoto] = useState<File | null>(null);
   const [importNotice, setImportNotice] = useState("");
   const [importedTextFile, setImportedTextFile] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [clarification, setClarification] = useState<Clarify | null>(null);
   const [choices, setChoices] = useState<HomeCaptureChoices>({});
   const [saving, startSave] = useTransition();
@@ -47,6 +49,8 @@ export default function HomeCapture({
     : contextPersonLabel;
   // Reuse this key after network uncertainty; never create another record on retry.
   const submissionRef = useRef<string | null>(null);
+  const attachmentRef = useRef<HTMLInputElement>(null);
+  const actionLabel = contextRelationshipId ? "Update" : "Save";
 
   function changeText(next: string) {
     setText(next);
@@ -59,14 +63,27 @@ export default function HomeCapture({
     submissionRef.current = null;
   }
 
-  async function importTextFile(event: ChangeEvent<HTMLInputElement>) {
+  async function chooseAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
-    if (!/\.(txt|md|csv)$/i.test(file.name) || file.size > 100_000) {
-      setError("Choose a .txt, .md or .csv file smaller than 100 KB.");
+    if (!file || saving || importing) return;
+    const choice = classifyCaptureAttachment(file);
+    if (choice.kind === "unsupported") {
+      setError(choice.message);
       return;
     }
+    if (choice.kind === "photo") {
+      setPhoto(file);
+      onDraftChange?.(true);
+      setClarification(null);
+      setError(null);
+      setImportNotice("");
+      return;
+    }
+    // Hold the original scope while an asynchronous file read is in flight,
+    // including when navigating with an otherwise empty draft.
+    setImporting(true);
+    onDraftChange?.(true);
     try {
       const imported = await file.text();
       if (!imported.trim() || imported.includes("\u0000") || imported.length + text.length + 2 > 80_000) {
@@ -74,32 +91,19 @@ export default function HomeCapture({
       }
       changeText(text ? text + "\n\n" + imported : imported);
       setPhoto(null);
-      setImportNotice("Added text from " + file.name + ". The original file was not saved.");
+      setImportNotice("Added text from " + file.name);
       setImportedTextFile(true);
     } catch {
       setError("Couldn't read that text file. Nothing was saved.");
+      onDraftChange?.(text.length > 0 || !!photo);
+    } finally {
+      setImporting(false);
     }
-  }
-
-  function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0] ?? null;
-    event.target.value = "";
-    if (!next) return;
-    if (!["image/jpeg", "image/png", "image/webp"].includes(next.type) ||
-        next.size === 0 || next.size > 4 * 1024 * 1024) {
-      setError("Choose a JPEG, PNG or WebP smaller than 4 MB.");
-      return;
-    }
-    setPhoto(next);
-    onDraftChange?.(!!next || text.length > 0);
-    setClarification(null);
-    setError(null);
-    setImportNotice("");
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving || !captureAvailable) return;
+    if (saving || importing || !captureAvailable) return;
     if (photo && text.trim().length > 1500) {
       setError("Keep the note with a photo under 1,500 characters.");
       return;
@@ -169,7 +173,7 @@ export default function HomeCapture({
         <textarea
           id="home-capture-input" value={text}
           onChange={(event) => changeText(event.target.value)}
-          rows={compact ? 3 : 6} disabled={saving}
+          rows={compact ? 3 : 6} disabled={saving || importing}
           placeholder={contextPersonLabel ? "Add something about " + contextPersonLabel + "…" :
             PROMPTS[promptIndex]}
           className={(compact ? "min-h-24 " : "min-h-44 sm:min-h-52 ") + "w-full resize-y rounded-2xl bg-white px-3 py-3 text-base leading-relaxed text-stone-900 outline-none placeholder:text-stone-400 focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-70 sm:px-4"}
@@ -184,9 +188,8 @@ export default function HomeCapture({
         {photo && (
           <div className="mx-2 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs sm:mx-3">
             <span className="font-medium text-stone-700">Photo: {photo.name}</span>
-            <button type="button" disabled={saving} onClick={() => { setPhoto(null); onDraftChange?.(text.length > 0); }}
+            <button type="button" disabled={saving || importing} onClick={() => { setPhoto(null); onDraftChange?.(text.length > 0); }}
               className="font-medium text-stone-500 underline-offset-4 hover:underline">Remove</button>
-            <span className="text-stone-500">We save extracted observations, not the original image.</span>
           </div>
         )}
         {importNotice && <p className="mx-3 mb-3 text-xs text-stone-500" role="status">{importNotice}</p>}
@@ -251,47 +254,34 @@ export default function HomeCapture({
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-100 px-2 pt-3 sm:px-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-medium text-stone-600">
-            <label className="cursor-pointer rounded-lg px-1 py-1.5 hover:text-stone-950 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-stone-500">
-              <input aria-label="Attach a photo" type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={choosePhoto} disabled={saving} className="sr-only" />+ Photo
-            </label>
-            <label className="cursor-pointer rounded-lg px-1 py-1.5 hover:text-stone-950 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-stone-500">
-              <input aria-label="Import a text file" type="file"
-                accept=".txt,.md,.csv,text/plain,text/markdown,text/csv"
-                onChange={importTextFile} disabled={saving} className="sr-only" />+ Text file
-            </label>
+            <input ref={attachmentRef} type="file" accept={captureAttachmentAccept}
+              onChange={chooseAttachment} disabled={saving || importing} className="hidden" />
+            <button type="button" disabled={saving || importing}
+              aria-label="Attach a photo or text file"
+              title="Attach a photo or text file (JPEG, PNG, WebP, TXT, MD, CSV)"
+              onClick={() => attachmentRef.current?.click()}
+              className="flex size-8 items-center justify-center rounded-full border border-stone-200 text-lg leading-none text-stone-600 hover:border-stone-400 hover:text-stone-900 disabled:opacity-40">
+              <span aria-hidden="true">+</span>
+            </button>
             {!contextPersonLabel && (
-              <button type="button" disabled={saving || !!photo}
+              <button type="button" disabled={saving || importing || !!photo}
                 onClick={() => setPromptIndex((current) => (current + 1) % PROMPTS.length)}
                 className="rounded-lg py-1.5 text-stone-500 hover:text-stone-900 disabled:opacity-40">
                 Another prompt
               </button>
             )}
           </div>
-          <button type="submit" disabled={saving || !captureAvailable}
+          <button type="submit" disabled={saving || importing || !captureAvailable}
+            title={!captureAvailable ? "Memory saving is unavailable without a configured model or valid person context" : undefined}
+            aria-describedby={!captureAvailable ? "capture-unavailable" : undefined}
             className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-wait disabled:opacity-50">
-            {saving ? "Saving…" : clarification ? "Continue" : "Save"}
+            {importing ? "Reading…" : saving ? (contextRelationshipId ? "Updating…" : "Saving…") : clarification ? "Continue" : actionLabel}
             <span aria-hidden="true" className="ml-2">↗</span>
           </button>
         </div>
       </form>
 
-      <div className="px-3 pb-1 pt-2 text-xs leading-relaxed text-stone-500">
-        <details>
-          <summary className="cursor-pointer hover:text-stone-800">Privacy &amp; sources</summary>
-          <p className="mt-1 max-w-2xl">
-            One Save when the meaning is clear. Otherwise we ask only what we need.
-            Pasted conversations are reduced to sourced memory without saving the transcript.
-            Your own notes retain their wording; personal moments stay private.
-            A chosen photo is interpreted without retaining the image.
-            Text files are imported locally as text. PDF and Office files are not yet supported.
-            Nothing is sent to anyone automatically.
-          </p>
-        </details>
-      </div>
-
-      {!captureAvailable && <p className="px-3 pb-2 text-xs text-stone-500">Memory saving is unavailable without a configured model or a valid person context.</p>}
+      {!captureAvailable && <p id="capture-unavailable" className="sr-only">Memory saving is unavailable without a configured model or a valid person context.</p>}
       {error && (
         <p role="alert"
           className="mt-3 rounded-xl border border-stone-300 bg-stone-100 px-4 py-3 text-sm text-stone-800">
