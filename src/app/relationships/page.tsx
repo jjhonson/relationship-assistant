@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { createManualRelationship } from "./actions";
 import { listRecentCaptures, listRelationships } from "@/lib/relationship-store";
+import { relationshipContactDetails, relationshipContextLabel, lastContactDescription } from "@/lib/relationship-overview";
+import RelationshipDirectory from "./RelationshipDirectory";
 
 export const dynamic = "force-dynamic";
 
@@ -28,21 +30,31 @@ const roleOptions = [
 
 export default async function RelationshipsPage() {
   const [relationships, recentCaptures] = await Promise.all([listRelationships(), listRecentCaptures()]);
+  const today = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const people = relationships.map((relationship) => {
+    const fields = relationshipContactDetails(relationship, today);
+    const title = fields.find((field) => field.label === "Title")?.value;
+    const company = fields.find((field) => field.label === "Company")?.value;
+    const context = relationshipContextLabel(relationship, today);
+    const detail = [title, company].filter(Boolean).join(" · ") || (context ? context.value + (context.inferred ? " (suggested)" : "") : "");
+    const lastContact = lastContactDescription(relationship, today);
+    return { id: relationship.id, label: relationship.personLabel, detail,
+      lastContact: lastContact.elapsed ? "Last contact " + lastContact.elapsed.toLowerCase() : "" };
+  });
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Relationships</h1>
-          <p className="mt-2 text-sm text-stone-600">
-            The people and memories you&apos;ve saved.
-          </p>
-        </div>
-        <Link href="/" className="text-sm font-medium text-stone-800 underline-offset-4 hover:underline">
-          Remember something ↗
-        </Link>
+    <div className="mx-auto max-w-4xl space-y-5 pb-12">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight text-stone-950 sm:text-3xl">Relationships</h1>
+        <Link href="/" className="text-sm font-medium text-stone-700 underline-offset-4 hover:underline">Remember something</Link>
       </div>
-
+      <RelationshipDirectory people={people} />
+      <details className="rounded-xl border border-stone-200 bg-white p-4">
+        <summary className="cursor-pointer text-sm font-medium text-stone-600">Other tools</summary>
+        <div className="mt-4 space-y-5">
       {recentCaptures.length > 0 && (
         <section>
           <h2 className="text-lg font-semibold">Recently remembered</h2>
@@ -115,76 +127,9 @@ export default async function RelationshipsPage() {
         </form>
       </details>
 
-      <section>
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Saved relationships</h2>
-            <p className="mt-1 text-sm text-stone-600">
-              {relationships.length === 0
-                ? "None yet."
-                : relationships.length + " relationship" + (relationships.length === 1 ? "" : "s") + " saved."}
-            </p>
-          </div>
-          <Link href="/discover" className="text-sm font-medium text-indigo-700 hover:underline">
-            Find people from Gmail →
-          </Link>
+          <Link href="/discover" className="inline-block text-sm font-medium text-stone-700 underline-offset-4 hover:underline">Find people from Gmail</Link>
         </div>
-
-        {relationships.length > 0 && (
-          <ul className="mt-4 grid gap-4 sm:grid-cols-2">
-            {relationships.map((relationship) => (
-              <li key={relationship.id}>
-                <Link
-                  href={"/relationships/" + relationship.id}
-                  className="block rounded-2xl border border-stone-200 bg-white p-5 shadow-sm hover:border-indigo-300"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold text-stone-900">{relationship.personLabel}</h3>
-                      <p className="mt-1 text-sm text-stone-600">
-                        {relationship.relationshipContexts.length > 0
-                          ? relationship.relationshipContexts.join(" · ")
-                          : "No user-confirmed context yet"}
-                        {relationship.labelAuthority !== "user-confirmed" && (
-                          <span className="ml-2 text-xs text-amber-700">
-                            {relationship.labelAuthority === "inferred-only" ? "AI analysis only" : "Previously saved; review needed"}
-                          </span>
-                        )}
-                      </p>
-                      <p className="mt-2 text-xs font-medium text-indigo-700">
-                        {relationship.intention?.mode ?? "Intention not set"}
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-600">
-                      {relationship.currentState}
-                    </span>
-                  </div>
-                  <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-stone-600">
-                    <div className="rounded-lg bg-stone-50 px-2 py-2">
-                      <strong className="block text-base text-stone-900">
-                        {relationship.durableFacts.length}
-                      </strong>
-                      facts
-                    </div>
-                    <div className="rounded-lg bg-stone-50 px-2 py-2">
-                      <strong className="block text-base text-stone-900">
-                        {relationship.activeThreads.length}
-                      </strong>
-                      active threads
-                    </div>
-                    <div className="rounded-lg bg-stone-50 px-2 py-2">
-                      <strong className="block text-base text-stone-900">
-                        {relationship.stewardshipOpportunities.length}
-                      </strong>
-                      opportunities
-                    </div>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      </details>
     </div>
   );
 }

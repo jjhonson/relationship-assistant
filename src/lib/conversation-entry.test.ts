@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conversationScope, findSavedPeople, personForPath } from "./conversation-entry";
+import { conversationScope, filterDirectoryPeople, personForPath } from "./conversation-entry";
 const people = [{id:"a",label:"Rowan Taylor"},{id:"b",label:"Avery Taylor"},{id:"c",label:"Casey Park"}];
 describe("persistent conversation context", () => {
   it("follows the active person when no unsaved draft exists", () => {
@@ -13,9 +13,16 @@ describe("persistent conversation context", () => {
     expect(conversationScope("/",people,{relationshipId:"a"})).toBe("a");
     expect(conversationScope("/relationships/b",people,{relationshipId:null})).toBeUndefined();
   });
-  it("finds only saved names without implying AI search", () => {
-    expect(findSavedPeople("taylor row",people)).toEqual([people[0]]);
-    expect(findSavedPeople("Taylor",people)).toEqual([people[0],people[1]]);
-    expect(findSavedPeople("",people)).toEqual([]);
+  it("lists every saved person alphabetically by display name and filters by typed name", () => {
+    expect(filterDirectoryPeople("",people)).toEqual([people[1],people[2],people[0]]);
+    expect(filterDirectoryPeople("  ",people)).toEqual([people[1],people[2],people[0]]);
+    expect(filterDirectoryPeople("taylor row",people)).toEqual([people[0]]);
+    expect(filterDirectoryPeople("Taylor",people)).toEqual([people[1],people[0]]);
+    expect(filterDirectoryPeople("missing",people)).toEqual([]);
+    expect(people.map((p) => p.id)).toEqual(["a","b","c"]);
+  });
+  it("keeps duplicate display names distinct, with their original row details", () => {
+    const rows = [{id:"z",label:"Alex Smith",detail:"One"},{id:"a",label:"Alex Smith",detail:"Two"}];
+    expect(filterDirectoryPeople("alex",rows)).toEqual([rows[1],rows[0]]);
   });
 });
