@@ -151,7 +151,15 @@ describe("dev-start / dev-stop (dry run)", () => {
     expect(result.stdout).toContain("personal < remote-dev.sh");
     expect(result.stdout).toContain("gh codespace ports forward 3000:3001 -c cs-one");
     expect(result.stdout).toContain("open http://localhost:3001");
-    expect(run("dev-stop.sh", ["--personal", "--dry-run"]).stdout).toContain("gh codespace stop -c cs-one");
+    // A dry run does not actually wake the Codespace, so stop must be a no-op.
+    const stopped = run("dev-stop.sh", ["--personal", "--dry-run"]);
+    expect(stopped.status).toBe(0);
+    expect(stopped.stdout).toContain("Not running (Shutdown)");
+    expect(stopped.stdout).not.toContain("gh codespace stop");
+    fakeGh("cs-one\\tAvailable\\n");
+    const running = run("dev-stop.sh", ["--personal", "--dry-run"]);
+    expect(running.status).toBe(0);
+    expect(running.stdout).toContain("gh codespace stop -c cs-one");
     expect(ghCalls()).not.toContain("ports");
     expect(existsSync(path.join(tmp, "state"))).toBe(false);
   });
