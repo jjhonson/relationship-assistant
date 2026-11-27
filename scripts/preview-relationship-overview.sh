@@ -30,7 +30,7 @@ cleanup() {
       gh codespace ssh -c "$CS" -- bash -s -- "$RUN" <<'STOP_REMOTE' || echo "Preview cleanup could not be verified. Personal server was not stopped." >&2
 set -eu
 dir=/workspaces/relationship-agent-preview-7c3476a
-if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = 7c3476ac55e215b7efa3c5d0f24611e969fd283a ]; then
+if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = 279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b ]; then
   RA_PID_FILE=/tmp/relationship-agent-preview-7c3476a.pid \
     RA_LOG_FILE=/tmp/relationship-agent-preview-7c3476a.log \
     bash "$dir/scripts/remote-dev.sh" stop-start "$dir" 3002 0 "$1"
@@ -72,18 +72,29 @@ set -eu
 run="$1"
 repo=/workspaces/relationship-assistant
 dir=/workspaces/relationship-agent-preview-7c3476a
-head=7c3476ac55e215b7efa3c5d0f24611e969fd283a
+head=279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b
 cd "$repo"
 GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/feature/relationship-overview </dev/null
 git cat-file -e "$head^{commit}"
+# Reuse the isolated checkout and its dependencies, not the personal checkout.
+[ -z "$(ss -H -ltn 'sport = :3002')" ] || {
+  echo "An earlier preview is still running. Close its Terminal with Control+C first." >&2; exit 1;
+}
 if [ ! -e "$dir" ]; then
   git worktree add --detach "$dir" "$head"
 fi
-[ ! -L "$dir" ] && [ "$(git -C "$dir" rev-parse --show-toplevel)" = "$dir" ] &&
-  [ "$(git -C "$dir" rev-parse HEAD)" = "$head" ] || {
+[ ! -L "$dir" ] && [ "$(git -C "$dir" rev-parse --show-toplevel)" = "$dir" ] || {
   echo "Unexpected preview checkout; nothing was overwritten." >&2; exit 1;
 }
 cd "$dir"
+prior="$(git rev-parse HEAD)"
+case "$prior" in
+  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a) ;;
+  *) echo "Unexpected preview version; nothing was overwritten." >&2; exit 1 ;;
+esac
+if git symbolic-ref -q HEAD >/dev/null; then
+  echo "Preview checkout is no longer detached; nothing was overwritten." >&2; exit 1
+fi
 git diff --quiet --cached HEAD --
 git diff --quiet HEAD -- . ':(exclude)next-env.d.ts'
 [ -z "$(git ls-files --others --exclude-standard)" ] || {
@@ -93,6 +104,11 @@ if ! git diff --quiet HEAD -- next-env.d.ts; then
   git show HEAD:next-env.d.ts | cmp -s - <(sed 's#\.next/dev/types/#.next/types/#g' next-env.d.ts) ||
     { echo "Unexpected generated-file edits; nothing was overwritten." >&2; exit 1; }
 fi
+if [ "$prior" != "$head" ]; then
+  echo "[Preview] Updating the isolated checkout to the revised relationship page..."
+  git switch --detach "$head"
+fi
+[ "$(git rev-parse HEAD)" = "$head" ] || exit 1
 # No personal .env file, network storage or model credentials in the preview.
 for file in .env .env.local .env.development .env.development.local .data/personal.env; do
   [ ! -e "$file" ] && [ ! -L "$file" ] || { echo "Unexpected preview configuration; refusing to run." >&2; exit 1; }
@@ -149,6 +165,73 @@ d.openLoops.push({commitment:"Send the article about garden design",owner:"User"
 writeFileSync(".data/relationships.json",JSON.stringify({version:1,relationships:[a,b,d],captures:[],moments:[],connectionJourneys:[]},null,2),{flag:"wx",mode:0o600});
 FIXTURE
 fi
+echo "[Preview] Adding the new fictional relationship if not already present..."
+node --input-type=module <<'PORTRAIT_FIXTURE'
+import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
+const file = ".data/relationships.json";
+const store = JSON.parse(readFileSync(file, "utf8"));
+const known = new Set(["00000000-0000-4000-8000-000000000081", "00000000-0000-4000-8000-000000000082", "00000000-0000-4000-8000-000000000083", "00000000-0000-4000-8000-000000000084"]);
+if (store.version !== 1 || !Array.isArray(store.relationships) ||
+    !store.relationships.every((p) => known.has(p.id) && p.personLabel.endsWith(" (fictional)")) ||
+    store.captures?.length || store.moments?.length || store.connectionJourneys?.length || store.raDatasetPurpose === "personal") {
+  throw new Error("Unexpected preview data; not modifying it.");
+}
+const id = "00000000-0000-4000-8000-000000000084";
+if (!store.relationships.some(p => p.id === id)) {
+  const today = new Intl.DateTimeFormat("sv-SE", { timeZone:"America/Denver", year:"numeric",month:"2-digit",day:"2-digit" }).format(new Date());
+  const ago = n => new Date(Date.parse(today+"T00:00:00Z")-n*86400000).toISOString().slice(0,10);
+  const recent = ago(4), older = ago(920), note = ago(350), shared = ago(1900);
+  const sources = [
+    {id:"pasted:rowan-recent",source:"manual",observedAt:recent,label:"Fictional recent catch-up"},
+    {id:"pasted:rowan-older",source:"manual",observedAt:older,label:"Fictional earlier catch-up"},
+    {id:"manual:rowan-note",source:"manual",observedAt:note,label:"Fictional contact details supplied by the user"},
+    {id:"manual:rowan-shared",source:"manual",observedAt:shared,label:"Fictional shared-history recollection"},
+    {id:"gmail:rowan-old",source:"gmail",observedAt:older,label:"Fictional email metadata from previous work address"},
+  ];
+  for (let i=0;i<10;i++) sources.push({
+    id:"gmail:rowan-new-"+i,source:"gmail",observedAt:ago(5+i),
+    label:"Fictional observed email address in metadata"
+  });
+  const fact = (id, category, label, value, source, date) => ({
+    id,category,label,value,sourceIds:[source],firstObservedAt:date,lastObservedAt:date,
+  });
+  const p = {
+    id,personLabel:"Rowan Taylor (fictional)",personLabelAuthority:"user-confirmed",
+    createdAt:shared+"T12:00:00Z",updatedAt:recent+"T12:00:00Z",
+    lastInteractionAt:recent,classification:"Professional contact",relationshipContexts:[],
+    relationshipRoles:[],intention:null,labelAuthority:"user-confirmed",
+    inferredRelationshipContexts:[{value:"Former colleague",sourceIds:["pasted:rowan-recent"],lastSuggestedAt:recent,verification:"Unverified"}],
+    inferredRelationshipRoles:[],disposition:"Relationship worth managing",currentState:"Active",tags:[],
+    history:{earliestObservedMeaningfulInteraction:older,latestObservedMeaningfulInteraction:recent,pattern:"Fictional prior colleagues",evidenceIds:["pasted:rowan-older","pasted:rowan-recent"]},
+    openLoops:[],actionableMemoryFeedback:[],dismissedConnectionSubjects:[],reasonsToEngage:[],unknowns:[],confidence:"Low",
+    identities:[
+      {id:"rowan-new",kind:"email",value:"rowan@example-software.example",source:"gmail",label:"Fictional metadata",confirmed:false,sourceIds:sources.filter(s=>s.id.startsWith("gmail:rowan-new-")).map(s=>s.id)},
+      {id:"rowan-old",kind:"email",value:"rowan@previous-company.example",source:"gmail",label:"Fictional earlier identity",confirmed:true,sourceIds:["gmail:rowan-old"]},
+    ],
+    durableFacts:[
+      fact("rowan-employer","Work","Company","Example Software","pasted:rowan-recent",recent),
+      fact("rowan-old-employer","Work","Company","Previous Company","pasted:rowan-older",older),
+      fact("rowan-title","Work","Role","Product Engineering Director","pasted:rowan-recent",recent),
+      fact("rowan-city","Location","City","Fort Collins, Colorado","pasted:rowan-recent",recent),
+      fact("rowan-personal-email","Personal","Email","rowan@personal.example","manual:rowan-note",note),
+      fact("rowan-birthday","Personal","Birthday","September 18","manual:rowan-note",note),
+      fact("rowan-woodwork","Interest","Woodworking","Enjoys building furniture in the garage.","pasted:rowan-recent",recent),
+      fact("rowan-music","Interest","Music","Enjoys live jazz and going to small concerts.","pasted:rowan-recent",recent),
+      fact("rowan-family","Family","Children","Two children in college; family visits are a priority.","pasted:rowan-recent",recent),
+      fact("rowan-shared","Personal","Shared history","Played on a recreational soccer team together when we worked at the same company.","manual:rowan-shared",shared),
+      fact("rowan-fishing","Interest","Former interest","Used to go fly fishing regularly; said in the recent catch-up that they no longer fish.","pasted:rowan-recent",recent),
+      fact("rowan-work","Work","Current project","Leading a new product platform initiative.","pasted:rowan-recent",recent),
+    ],
+    activeThreads:[{id:"rowan-plan",topic:"A future career chapter",state:"Considering a move and a new career direction in a few years, after the children graduate.",whyItMatters:"Long-term possibilities",nextChangeSignal:"Several years from now",sourceIds:["pasted:rowan-recent"],lastObservedAt:recent}],
+    stewardshipOpportunities:[],sources,
+  };
+  store.relationships.push(p);
+  const temp = file + ".portrait-preview.tmp";
+  if (existsSync(temp)) throw new Error("Unexpected temporary fixture file; not modifying it.");
+  writeFileSync(temp, JSON.stringify(store,null,2), {flag:"wx",mode:0o600});
+  renameSync(temp,file);
+}
+PORTRAIT_FIXTURE
 if [ ! -d node_modules ] || [ ! -f node_modules/.ra-preview-deps ]; then
   echo "[Preview] Installing locked dependencies for the separate checkout (first use only)..."
   npm ci </dev/null
@@ -181,6 +264,7 @@ done
 check_private_port || { echo "Preview port privacy could not be verified." >&2; exit 1; }
 PREVIEW_READY=1
 echo "Fictional preview ready: http://localhost:3002"
+echo "Open Rowan Taylor (fictional) for the new contact card, source history and portrait."
 echo "Leave this Terminal open during the preview. Press Control+C here when finished."
-open "http://localhost:3002"
+open "http://localhost:3002/relationships/00000000-0000-4000-8000-000000000084"
 wait "$FORWARD"
