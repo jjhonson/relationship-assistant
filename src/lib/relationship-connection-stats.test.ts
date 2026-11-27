@@ -55,6 +55,8 @@ describe("recorded contact stats", () => {
     expect(relationshipConnectionStats(p, history, today).group).toBe("Within usual cadence");
     p.contactCadenceDays = 0;
     expect(relationshipConnectionStats(p, history, today).group).toBe("No regular cadence");
+    p.lastInteractionAt = "2026-11-26"; // e.g. a newer metadata-only date
+    expect(relationshipConnectionStats(p, history, today).group).toBe("Insufficient history");
     p.lastInteractionAt = null;
     expect(relationshipConnectionStats(p, history, today).group).toBe("Insufficient history");
   });

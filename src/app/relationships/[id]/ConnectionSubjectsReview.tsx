@@ -24,6 +24,7 @@ export default function ConnectionSubjectsReview({ relationshipId, children, mod
 
   function requestReview() {
     if (!modelAvailable) { setShowSavedTopics((value) => !value); return; }
+    if (review || error) { setReview(null); setError(null); return; }
     setReview(null);
     setError(null);
     beginReview(async () => {
@@ -65,7 +66,7 @@ export default function ConnectionSubjectsReview({ relationshipId, children, mod
           aria-expanded={modelAvailable ? !!review || !!error : showSavedTopics}
           className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-800 hover:border-stone-500 disabled:opacity-50">
           <InterfaceIcon name="sparkles" className="size-3.5 text-stone-500" />
-          {reviewing ? "Preparing…" : showSavedTopics ? "Hide ideas" : review ? "Refresh ideas" : "Conversation ideas"}
+          {reviewing ? "Preparing…" : showSavedTopics || review || error ? "Hide ideas" : "Conversation ideas"}
         </button>
       </div>
       {children}

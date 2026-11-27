@@ -22,7 +22,7 @@ export default function ConversationEntry({ people, captureAvailable }: {
   const scopedPerson = people.find((person) => person.id === scope);
   const expanded = isHome || open;
   const matches = findSavedPeople(query, people);
-  const contextLabel = scopedPerson ? "About " + scopedPerson.label : "All relationships";
+  const contextLabel = scopedPerson ? "About " + scopedPerson.label : scope ? "Original person unavailable" : "All relationships";
   const retainedDraft = !!draft && scope !== current?.id;
   const scopeUnavailable = !!scope && !scopedPerson;
   return (

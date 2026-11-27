@@ -21,7 +21,10 @@ export function relationshipConnectionStats(record: RelationshipRecord, history:
   });
   const elapsed = daysSinceContact(record, today);
   const cadence = relationshipCadence(record, today);
-  const group = elapsed === null || days.size === 0 ? "Insufficient history"
+  // A contact date inferred from passive metadata alone cannot establish a
+  // network grouping, even when an older completed interaction is recorded.
+  const hasSupportingContactDay = !!record.lastInteractionAt && days.has(record.lastInteractionAt);
+  const group = elapsed === null || !hasSupportingContactDay ? "Insufficient history"
     : elapsed <= 30 ? "Recently in touch"
     : !cadence ? "Insufficient history"
     : cadence.days === 0 ? "No regular cadence"
