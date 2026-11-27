@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { getDatasetMode } from "../../scripts/dataset-profile.mjs";
+import { listRelationships } from "@/lib/relationship-store";
+import ConversationEntry from "./ConversationEntry";
 
 // Mode is runtime configuration, not a label baked into the build.
 export const dynamic = "force-dynamic";
@@ -11,7 +13,10 @@ export const metadata: Metadata = {
   description: "Remember what matters and find thoughtful reasons to connect.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const people = (await listRelationships()).map((person) => ({ id: person.id, label: person.personLabel }));
+  const captureAvailable = Boolean(process.env.OPENAI_API_KEY);
+  const questionAvailable = captureAvailable || (process.env.NODE_ENV === "development" && getDatasetMode() === "fictional" && (!process.env.RA_STORAGE_BACKEND || process.env.RA_STORAGE_BACKEND === "json"));
   return (
     <html lang="en">
       <body className="min-h-screen">
@@ -37,7 +42,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </span>
           </div>
         </header>
-        <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">{children}</main>
+        <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-7">
+          <ConversationEntry people={people} captureAvailable={captureAvailable} questionAvailable={questionAvailable} />
+          {children}
+        </main>
+        <footer className="mx-auto max-w-4xl px-4 pb-5 sm:px-6">
+          <details className="text-xs leading-relaxed text-stone-500">
+            <summary className="cursor-pointer hover:text-stone-800">Memory &amp; privacy</summary>
+            <p className="mt-2 max-w-2xl">
+              Pasted conversations are reduced to sourced memory without saving the transcript.
+              Your own notes retain their wording; personal moments stay private.
+              A chosen photo is interpreted without retaining the image.
+              Text files are imported locally as text. PDF and Office files are not yet supported.
+              Questions about a relationship use saved context and do not update the record.
+              Nothing is sent to anyone automatically.
+            </p>
+          </details>
+        </footer>
       </body>
     </html>
   );

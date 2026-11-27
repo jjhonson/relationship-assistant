@@ -1,8 +1,9 @@
 import { buildConnectionCandidates } from "./connection-subjects";
 import type { ConnectionEvidence } from "./connection-subjects";
 import type { RelationshipRecord } from "./relationship-record";
+import { dueCadence, relationshipToday } from "./relationship-cadence";
 
-/** A compact, source-backed conversation possibility, never a contact task. */
+/** A grounded reason to consider contact, not merely a remembered topic. */
 export type HomeOpportunity = {
   id: string;
   relationshipId: string;
@@ -12,6 +13,7 @@ export type HomeOpportunity = {
   context: string;
   observedAt: string;
   evidence: ConnectionEvidence[];
+  kind: "commitment" | "cadence";
 };
 
 /** Treat malformed or impossible interaction dates as unknown. */
@@ -60,55 +62,65 @@ export function homeInteractionDate(value: string | null): string {
 }
 
 /**
- * Suggestions are intentionally conservative. A sourced active thread is
- * meaningful context; a single sourced Interest is weaker context, not proof
- * of enthusiasm. No inference from recency alone, unsourced claims, user tasks,
- * or a saved PRIVATE personal moment.
- *
- * Dismissal is handled by buildConnectionCandidates so unchanged evidence
- * cannot regenerate the same opportunity.
+ * Home answers "why now?", not "what could we talk about?".
+ * Old interests, active threads, and future plans remain available for on-demand
+ * preparation. They are never promoted merely because they were remembered.
+ * No live external events are monitored in this release.
  */
 export function selectHomeOpportunities(
   people: RelationshipRecord[],
   userLabel: string,
   limit = 3,
+  today = relationshipToday(),
 ): HomeOpportunity[] {
-  const opportunities: HomeOpportunity[] = [];
+  const opportunities: Array<HomeOpportunity & { priority: number; daysPast: number }> = [];
   for (const person of people) {
-    // A dismissed idea must not reappear as another label for the same
-    // unchanged evidence. A genuinely new source can still qualify later.
-    const dismissed = person.dismissedConnectionSubjects ?? [];
-    const candidates = buildConnectionCandidates(person, userLabel).filter((item) =>
-      !dismissed.some((decision) => item.evidence.length > 0 &&
-        item.evidence.every((source) => decision.sourceIds.includes(source.id))));
-    const thread = candidates.find((item) => item.kind === "thread");
-    const interest = candidates.find((item) => item.kind === "fact" &&
-      (person.durableFacts ?? []).some((fact) => "fact:" + fact.id === item.id &&
-        fact.category === "Interest"));
-    const candidate = thread ?? interest;
-    if (!candidate || !candidate.evidence.length) continue;
-
-    const recordThread = candidate.kind === "thread" ?
-      (person.activeThreads ?? []).find((item) => "thread:" + item.id === candidate.id) : null;
-    const recordFact = candidate.kind === "fact" ?
-      (person.durableFacts ?? []).find((item) => "fact:" + item.id === candidate.id) : null;
-
-    const topic = (recordThread?.topic || recordFact?.value || "").trim();
-    const context = recordThread
-      ? [recordThread.state, recordThread.whyItMatters].filter(Boolean).join(" · ").trim()
-      : "An interest they mentioned previously, not necessarily a current priority.";
-    if (!topic || !context) continue;
-    const observedAt = candidate.evidence.map((source) => source.observedAt).sort().at(-1) ?? "";
+    const commitments = buildConnectionCandidates(person, userLabel)
+      .filter((item) => item.kind === "commitment")
+      .map((item) => ({ ...item, evidence: item.evidence.filter((source) =>
+        knownInteractionDate(source.observedAt) && source.observedAt <= today) }))
+      .filter((item) => item.evidence.length > 0)
+      .sort((a, b) => Number(b.timing.includes("Overdue")) - Number(a.timing.includes("Overdue")) ||
+        b.evidence.map((s) => s.observedAt).sort().at(-1)!.localeCompare(
+          a.evidence.map((s) => s.observedAt).sort().at(-1)!));
+    const commitment = commitments[0];
+    if (commitment) {
+      const evidence = commitment.evidence.filter((source) =>
+        knownInteractionDate(source.observedAt) && source.observedAt <= today);
+      opportunities.push({
+        id: person.id + ":" + commitment.id, relationshipId: person.id,
+        personLabel: person.personLabel, basisId: commitment.id, kind: "commitment",
+        topic: commitment.description,
+        context: "A commitment you made. " + commitment.timing + ".",
+        observedAt: evidence.map((s) => s.observedAt).sort().at(-1) ?? "",
+        evidence, priority: commitment.timing.includes("Overdue") ? 0 : 1, daysPast: 0,
+      });
+      continue;
+    }
+    const due = dueCadence(person, today);
+    if (!due) continue;
+    const last = person.lastInteractionAt!;
     opportunities.push({
-      id: person.id + ":" + candidate.id,
-      relationshipId: person.id,
-      personLabel: person.personLabel,
-      basisId: candidate.id,
-      topic, context, observedAt,
-      evidence: candidate.evidence,
+      id: person.id + ":" + due.basisId, relationshipId: person.id,
+      personLabel: person.personLabel, basisId: due.basisId, kind: "cadence",
+      topic: "Time to catch up?",
+      context: "Last recorded contact " + homeInteractionDate(last) + ". " +
+        (due.userSelected ? "Your preferred cadence: " : "Suggested cadence: ") +
+        due.label.toLowerCase() + ". Revisit your saved context if it feels natural.",
+      observedAt: last,
+      evidence: person.sources.filter((source) => source.observedAt === last &&
+        (source.id.startsWith("pasted:") || source.source === "transcript" ||
+         source.id.startsWith("connection-event:") || source.label === "Your note about a reported conversation"))
+        .map(({ id, label, observedAt }) => ({ id, label, observedAt })),
+      priority: 2, daysPast: due.daysPast,
     });
   }
-  return opportunities.sort((a, b) =>
-    b.observedAt.localeCompare(a.observedAt) || a.personLabel.localeCompare(b.personLabel)
-  ).slice(0, Math.max(0, Math.min(limit, 3)));
+  return opportunities.sort((a, b) => a.priority - b.priority || b.daysPast - a.daysPast ||
+    b.observedAt.localeCompare(a.observedAt) || a.personLabel.localeCompare(b.personLabel))
+    .slice(0, Math.max(0, Math.min(limit, 3)))
+    .map(({ priority: _priority, daysPast: _daysPast, ...item }) => {
+      // Explicit projection keeps internal ranking fields out of the view.
+      void _priority; void _daysPast;
+      return item;
+    });
 }

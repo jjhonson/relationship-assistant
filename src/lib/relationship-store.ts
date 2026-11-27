@@ -20,6 +20,7 @@ import { correctActionableMemory, mergeInteractionIntoRelationship, type Interac
 import { createPersonalMoment, type PersonalMoment, type PersonalMomentInput } from "./personal-moment";
 import { randomUUID } from "node:crypto";
 import { buildConnectionCandidates, dismissConnectionCandidate } from "./connection-subjects";
+import { applyCadencePreference, dismissCadenceCycle, relationshipToday } from "./relationship-cadence";
 import { looksLikePastedConversation } from "./conversational-capture";
 import {
   addConnectionEvent, makeConnectionJourney, type ConnectionJourney,
@@ -578,12 +579,28 @@ export async function correctSavedActionableMemory(
   });
 }
 
+/** A cadence preference is separate from identity and memory; mutate atomically. */
+export async function saveRelationshipCadence(relationshipId: string, days: number | undefined) {
+  return mutateStore((store) => {
+    const index = store.relationships.findIndex((record) => record.id === relationshipId);
+    if (index < 0) throw new Error("Relationship not found.");
+    const updated = applyCadencePreference(store.relationships[index], days);
+    store.relationships[index] = updated;
+    return updated;
+  });
+}
+
 /** Declining a suggestion is not the same as denying its underlying memory. */
 export async function dismissSavedConnectionSuggestion(relationshipId: string, basisId: string, userLabel: string) {
   return mutateStore((store) => {
     const index = store.relationships.findIndex((record) => record.id === relationshipId);
     if (index < 0) throw new Error("Relationship not found.");
     const person = store.relationships[index];
+    if (basisId.startsWith("cadence:")) {
+      const updated = dismissCadenceCycle(person, basisId, relationshipToday());
+      store.relationships[index] = updated;
+      return updated;
+    }
     const candidate = buildConnectionCandidates(person, userLabel)
       .find((item) => item.id === basisId);
     if (!candidate) throw new Error("The suggestion is no longer available.");

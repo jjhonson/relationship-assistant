@@ -1,5 +1,4 @@
 import Link from "next/link";
-import HomeCapture from "./HomeCapture";
 import { dismissHomeOpportunity } from "./home/opportunity-actions";
 import {
   homeInteractionDate, homeRelationshipDetail,
@@ -16,17 +15,6 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-14 pb-16 sm:space-y-16">
-      <section aria-labelledby="home-heading" className="mx-auto max-w-4xl pt-4 sm:pt-10">
-        <div className="mb-7 text-center sm:mb-8">
-          <h1 id="home-heading" className="text-3xl font-semibold tracking-tight text-stone-950 sm:text-4xl">
-            What would you like to remember?
-          </h1>
-        </div>
-        <HomeCapture people={people.map((person) => ({
-          id: person.id, label: person.personLabel,
-        }))} />
-      </section>
-
       <section aria-labelledby="opportunities-heading" className="mx-auto max-w-4xl space-y-5">
         <h2 id="opportunities-heading"
           className="text-lg font-semibold tracking-tight text-stone-900">
@@ -37,14 +25,14 @@ export default async function HomePage() {
           <ul className="grid gap-3 sm:grid-cols-2">
             {opportunities.map((item) => (
               <li key={item.id} className="flex flex-col rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
-                <p className="text-xs font-medium text-stone-500">{item.personLabel}</p>
+                <p className="text-xs font-medium text-stone-500">{item.personLabel} · {item.kind === "commitment" ? "Your commitment" : "Catch up"}</p>
                 <h3 className="mt-1 text-base font-medium leading-snug text-stone-900">
                   {item.topic}
                 </h3>
                 <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-stone-600">
                   {item.context}
                 </p>
-                <details className="mt-3 text-xs text-stone-500">
+                {item.evidence.length > 0 && <details className="mt-3 text-xs text-stone-500">
                   <summary className="cursor-pointer font-medium hover:text-stone-800">
                     Why this came to mind
                   </summary>
@@ -68,11 +56,11 @@ export default async function HomePage() {
                       );
                     })}
                   </ul>
-                </details>
+                </details>}
                 <div className="mt-auto flex items-center justify-between gap-3 pt-5 text-sm">
                   <Link href={"/relationships/" + encodeURIComponent(item.relationshipId)}
                     className="font-medium text-stone-800 underline-offset-4 hover:underline">
-                    Explore conversation <span aria-hidden="true">↗</span>
+                    View relationship <span aria-hidden="true">↗</span>
                   </Link>
                   <form action={dismissHomeOpportunity.bind(null, item.relationshipId, item.basisId)}>
                     <button type="submit"

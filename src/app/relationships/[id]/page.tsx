@@ -4,7 +4,6 @@ import { updateRelationshipIntention, updateRelationshipLabels } from "../action
 import { correctRelationshipName, dismissInferredConnection } from "../capture-actions";
 import {
   getRelationship,
-  listRelationships,
   listConnectionJourneys,
   listCapturesForRelationship,
   listConnectedPeopleForRelationship,
@@ -12,11 +11,17 @@ import {
 } from "@/lib/relationship-store";
 import type { RelationshipContextValue, RelationshipRoleValue } from "@/lib/inference-benchmark";
 import { relationshipIntentionModes } from "@/lib/relationship-record";
-import HomeCapture from "@/app/HomeCapture";
 import ConnectionSubjectsReview from "./ConnectionSubjectsReview";
 import { userOwnsCommitment } from "@/lib/connection-subjects";
 import MemoryCorrectionForm from "./MemoryCorrectionForm";
 import ConnectionJournal from "./ConnectionJournal";
+import { relationshipContactFields, relationshipContextLabel, lastContactDescription, relationshipPortrait, relationshipInteractionHistory } from "@/lib/relationship-overview";
+import ContactCard from "./ContactCard";
+import PersonalPortrait from "./PersonalPortrait";
+import { homeInteractionDate } from "@/lib/home-view";
+import { relationshipCadence } from "@/lib/relationship-cadence";
+import { relationshipConnectionStats } from "@/lib/relationship-connection-stats";
+import ConnectionStats from "./ConnectionStats";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +56,6 @@ export default async function RelationshipDetailPage({
   const { updated, labels, intention, name } = await searchParams;
   const relationship = await getRelationship(id);
   if (!relationship) notFound();
-  const people = await listRelationships();
   const capturedNotes = await listCapturesForRelationship(id);
   const journeys = await listConnectionJourneys(id);
   const connectedPeople = await listConnectedPeopleForRelationship(id);
@@ -67,21 +71,23 @@ export default async function RelationshipDetailPage({
   const inferredRoles = relationship.inferredRelationshipRoles ?? [];
   const labelAuthority = relationship.labelAuthority ?? "legacy-unverified";
   const nameAction = correctRelationshipName.bind(null, relationship.id);
-  const latestFact = (label: string) => relationship.durableFacts
-    .filter((item) => item.label.toLowerCase() === label.toLowerCase())
-    .sort((a, b) => b.lastObservedAt.localeCompare(a.lastObservedAt))[0];
-  const contactDetails = [
-    { label: "Email", value: relationship.identities.find((item) => item.kind === "email")?.value ?? "", fromNote: relationship.identities.some((item) => item.source === "capture") },
-    { label: "Phone", value: latestFact("Phone")?.value ?? "", fromNote: !!latestFact("Phone") },
-    { label: "Company", value: latestFact("Company")?.value ?? "", fromNote: !!latestFact("Company") },
-    { label: "Role", value: latestFact("Role")?.value ?? "", fromNote: !!latestFact("Role") },
-    { label: "City", value: latestFact("City")?.value ?? "", fromNote: !!latestFact("City") },
-    { label: "LinkedIn", value: latestFact("LinkedIn")?.value ?? "", fromNote: !!latestFact("LinkedIn") },
-  ];
+  const today = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const contactFields = relationshipContactFields(relationship, today);
+  const contextLabel = relationshipContextLabel(relationship, today);
+  const lastContact = lastContactDescription(relationship, today);
+  const cadence = relationshipCadence(relationship, today);
+  const portrait = relationshipPortrait(relationship, today);
+  const history = relationshipInteractionHistory(relationship, capturedNotes, journeys, today);
+  const stats = relationshipConnectionStats(relationship, history, today);
+  const savedTopics = portrait.filter((group) => group.label !== "Earlier chapters").flatMap((group) => group.items.slice(0, 1)).slice(0, 3).map(({ label, value }) => ({ label, value }));
+  const initials = relationship.personLabel.replace(/\s*\(fictional\)$/i, "").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join("");
 
   return (
-    <div className="space-y-6">
-      <Link href="/relationships" className="text-sm font-medium text-indigo-700 hover:underline">
+    <div className="mx-auto max-w-4xl space-y-7 pb-12">
+      <Link href="/relationships" className="text-sm font-medium text-stone-600 hover:underline">
         ← Saved relationships
       </Link>
 
@@ -106,23 +112,66 @@ export default async function RelationshipDetailPage({
         </div>
       )}
 
-      <header className="rounded-2xl border border-stone-200 bg-white p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
-          Relationship record
-        </p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight">{relationship.personLabel}</h1>
-        {relationship.personLabelAuthority === "inferred-unverified" && (
-          <p className="mt-1 text-xs text-amber-700">Name identified from a saved memory. Confirm or correct when you have a moment.</p>
-        )}
-        <div className="mt-5 grid gap-3 border-b border-stone-100 pb-5 sm:grid-cols-2 lg:grid-cols-3">
-          {contactDetails.map((item) => (
-            <div key={item.label}>
-              <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{item.label}</p>
-              <p className="mt-1 break-words text-sm text-stone-900">{item.value || <span className="text-stone-400">Not recorded</span>}</p>
-              {item.value && item.fromNote && <p className="text-xs text-stone-500">From saved context (verify if needed)</p>}
-            </div>
-          ))}
+      <header className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-6">
+        <div className="flex items-center gap-4">
+          <div aria-hidden="true" className="flex size-14 shrink-0 items-center justify-center rounded-full bg-stone-100 text-lg font-medium text-stone-600 sm:size-16">{initials || "?"}</div>
+          <div className="min-w-0">
+            <h1 className="break-words text-2xl font-semibold tracking-tight text-stone-950 sm:text-3xl">{relationship.personLabel}</h1>
+            {contextLabel && <p className="mt-1 text-sm text-stone-600" title={contextLabel.inferred ? "Suggested relationship context" : "Confirmed relationship context"}>
+              {contextLabel.value}{contextLabel.inferred && <span className="sr-only"> (suggested)</span>}
+            </p>}
+            {relationship.personLabelAuthority === "inferred-unverified" && <p className="mt-1 text-xs text-stone-500">Name not yet confirmed.</p>}
+          </div>
         </div>
+        <ContactCard fields={contactFields} />
+      </header>
+
+      <ConnectionSubjectsReview
+        key={relationship.updatedAt + ":" + (relationship.actionableMemoryFeedback?.length ?? 0) +
+          ":" + (relationship.dismissedConnectionSubjects?.length ?? 0)}
+        relationshipId={relationship.id} modelAvailable={Boolean(process.env.OPENAI_API_KEY)} savedTopics={savedTopics}>
+        <PersonalPortrait groups={portrait} />
+      </ConnectionSubjectsReview>
+
+      <section aria-labelledby="history-heading" className="space-y-3">
+        <h2 id="history-heading" className="text-lg font-semibold tracking-tight text-stone-900">Connection</h2>
+        <ConnectionStats stats={stats} lastContact={lastContact} cadence={cadence} relationshipId={relationship.id} cadenceDays={relationship.contactCadenceDays} />
+        <h3 className="pt-2 text-sm font-semibold text-stone-700">History</h3>
+        {history.length ? (
+          <>
+            <ol className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-5">
+              {history.slice(0, 5).map((entry) => (
+                <li key={entry.id} className="py-3">
+                  <p className="text-sm font-medium text-stone-900">{homeInteractionDate(entry.date)}</p>
+                  <p className="mt-0.5 text-xs text-stone-500">{entry.label}</p>
+                  <p className="mt-1 text-sm text-stone-700">{entry.detail}</p>
+                  {entry.captureId && <Link href={"/captures/" + encodeURIComponent(entry.captureId)} className="text-xs text-stone-600 underline underline-offset-2">View saved memory</Link>}
+                </li>
+              ))}
+            </ol>
+            {history.length > 5 && (
+              <details className="text-sm text-stone-600">
+                <summary className="cursor-pointer">Earlier history ({history.length - 5})</summary>
+                <ol className="mt-2 space-y-3">
+                  {history.slice(5).map((entry) => (
+                    <li key={entry.id} className="border-b border-stone-100 pb-3">
+                      <p className="font-medium">{homeInteractionDate(entry.date)} · {entry.label}</p>
+                      <p className="mt-1">{entry.detail}</p>
+                      {entry.captureId && <Link href={"/captures/" + encodeURIComponent(entry.captureId)} className="underline underline-offset-2">View saved memory</Link>}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+          </>
+        ) : <p className="text-sm text-stone-500">No dated interaction history recorded yet.</p>}
+      </section>
+
+      <details className="rounded-2xl border border-stone-200 bg-white p-4 sm:p-5">
+        <summary className="cursor-pointer text-sm font-medium text-stone-700">All memories, settings and sources</summary>
+        <div className="mt-5 space-y-5">
+        <section className="rounded-xl border border-stone-200 bg-white p-5">
+          <h2 className="text-lg font-semibold">Relationship settings</h2>
         <details className="mt-3">
           <summary className="cursor-pointer text-sm font-medium text-indigo-700">Correct name</summary>
           <form action={nameAction} className="mt-3 flex flex-wrap items-end gap-2">
@@ -235,32 +284,9 @@ export default async function RelationshipDetailPage({
             </button>
           </form>
         </details>
-      </header>
 
-      <section className="rounded-2xl border border-stone-200 bg-stone-50 p-5">
-        <h2 className="text-lg font-semibold">Where things stand</h2>
-        <p className="mt-2 text-sm text-stone-700">
-          {relationship.openLoops.length > 0
-            ? relationship.openLoops.length + " recorded open commitment" + (relationship.openLoops.length === 1 ? "" : "s") + ". See the details below."
-            : "No open commitments recorded. Nothing needs doing just because this person is in your relationships."}
-        </p>
-        {capturedNotes[0]?.summary && <p className="mt-2 text-sm text-stone-600">Latest remembered: {capturedNotes[0].summary}</p>}
-      </section>
-
-      <ConnectionSubjectsReview
-        key={relationship.updatedAt + ":" + (relationship.actionableMemoryFeedback?.length ?? 0) +
-          ":" + (relationship.dismissedConnectionSubjects?.length ?? 0)}
-        relationshipId={relationship.id} />
-      <ConnectionJournal relationshipId={relationship.id} journeys={journeys} />
-
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-stone-900">Remember something</h2>
-        <HomeCapture
-          contextRelationshipId={relationship.id}
-          people={people.map((person) => ({ id: person.id, label: person.personLabel }))}
-        />
-      </section>
-
+        </section>
+        <ConnectionJournal relationshipId={relationship.id} journeys={journeys} />
       {(connectedPeople.length > 0 || sharedHouseholdContext.length > 0) && (
         <section className="rounded-2xl border border-stone-200 bg-white p-6">
           <h2 className="text-lg font-semibold">Connected people and shared context</h2>
@@ -590,6 +616,8 @@ export default async function RelationshipDetailPage({
             </ul>
           </>
         )}
+      </details>
+        </div>
       </details>
     </div>
   );

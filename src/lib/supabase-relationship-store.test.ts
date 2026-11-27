@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualRelationshipRecord } from "./relationship-record";
 import {
   correctSavedActionableMemory, getRelationship, listConnectionJourneys,
+  saveRelationshipCadence, dismissSavedConnectionSuggestion,
   listPersonalMoments, saveConfirmedConnectionEvents,
   savePersonalMoment, saveRelationship, startConnectionJourney,
 } from "./relationship-store";
@@ -81,4 +82,26 @@ describe("fictional Next.js domain operations with remote storage selected", () 
     expect(revision).toBeGreaterThan(3);
     expect(calls.every(url => url.includes("example.supabase.co/rest/v1/rpc/ra_store_"))).toBe(true);
   });
+  it("persists an optional cadence and exact-cycle dismissal without modifying existing memory or dates", async () => {
+    const p = createManualRelationshipRecord("Fictional Avery");
+    p.lastInteractionAt = "2025-01-01";
+    p.durableFacts.push({ id: "example", category: "Work", label: "Company", value: "Example Software",
+      sourceIds: [p.sources[0].id], firstObservedAt: "2025-01-01", lastObservedAt: "2025-01-01" });
+    await saveRelationship(p);
+    await saveRelationshipCadence(p.id, 180);
+    const chosen = (await getRelationship(p.id))!;
+    expect(chosen.contactCadenceDays).toBe(180);
+    expect(chosen.lastInteractionAt).toBe(p.lastInteractionAt);
+    expect(chosen.durableFacts).toEqual(p.durableFacts);
+    expect(chosen.sources).toEqual(p.sources);
+    await expect(dismissSavedConnectionSuggestion(p.id, "cadence:2025-01-02:180", "Jason")).rejects.toThrow("no longer current");
+    await dismissSavedConnectionSuggestion(p.id, "cadence:2025-01-01:180", "Jason");
+    expect((await getRelationship(p.id))?.dismissedCadenceCycle).toBe("cadence:2025-01-01:180");
+    await saveRelationshipCadence(p.id, 0);
+    expect((await getRelationship(p.id))?.contactCadenceDays).toBe(0);
+    await saveRelationshipCadence(p.id, undefined);
+    expect((await getRelationship(p.id))?.contactCadenceDays).toBeUndefined();
+    expect((await getRelationship(p.id))?.durableFacts).toEqual(p.durableFacts);
+  });
+
 });

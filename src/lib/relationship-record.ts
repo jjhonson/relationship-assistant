@@ -120,6 +120,11 @@ export type RelationshipRecord = {
   relationshipRoles: RelationshipRoleValue[];
   // Set only by the user. Older saved relationships legitimately have no intention yet.
   intention?: RelationshipIntention | null;
+  /** Undefined = use a working suggestion. Zero = no cadence-based prompts.
+   * Other values are explicitly chosen by the user, not an inference of closeness. */
+  contactCadenceDays?: number;
+  /** Dismiss one exact contact-date/interval cycle, not the relationship. */
+  dismissedCadenceCycle?: string;
   // Missing on older local records: their saved labels have unknown origin.
   labelAuthority?: RelationshipLabelAuthority;
   inferredRelationshipContexts?: RelationshipLabelSuggestion<RelationshipContextValue>[];

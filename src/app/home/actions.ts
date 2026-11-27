@@ -10,6 +10,7 @@ import { getRelationship, listRelationships, savePersonalMoment } from "@/lib/re
 import { saveReviewedPersonCapture } from "@/app/relationships/conversational-actions";
 import { learnFromNewPastedConversation } from "@/app/relationships/actions";
 import { saveQuickCaptureWithoutRedirect, saveUniversalCaptureWithoutRedirect } from "@/app/relationships/capture-actions";
+import { interpretRelationshipEntry, scopedInputGuard } from "@/lib/relationship-entry";
 
 function localToday() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -117,6 +118,9 @@ export async function saveHomePhotoInput(formData: FormData, contextRelationship
   if (contextRelationshipId && !(await getRelationship(contextRelationshipId))) {
     throw new Error("The selected relationship is no longer available.");
   }
+  if (contextRelationshipId && typeof formData.get("note") === "string" && scopedInputGuard(String(formData.get("note"))) !== "none") {
+    throw new Error("Questions or corrections with photo attachments are not supported. Nothing was saved.");
+  }
   const file = formData.get("photo");
   if (!(file instanceof File) || file.size === 0) {
     throw new Error("Choose a photo to save.");
@@ -163,15 +167,30 @@ export async function submitHomeText(input: {
   }
   // The page context (or an explicit corrected selection) may help interpret
   // pronouns. Send one label only, never the full private contact list.
-  const interpretation = await interpretConversationalCapture({
-    text: input.text, personLabel: chosenPerson?.personLabel ??
-      (chosenId === "__new__" ? "No existing person selected" :
-        pageContext?.personLabel ?? "No existing person selected"),
-    currentDate: today,
-  }, {
-    apiKey: process.env.OPENAI_API_KEY ?? "",
-    model: process.env.OPENAI_RELATIONSHIP_MODEL,
-  });
+  const options = { apiKey: process.env.OPENAI_API_KEY ?? "", model: process.env.OPENAI_RELATIONSHIP_MODEL };
+  // Person-page input must pass the intent gate before capture planning,
+  // including retries after a previous capture clarification.
+  let interpretation;
+  if (pageContext) {
+    const target = suggestHomePerson(input.text, known.map(person => ({ id:person.id,label:person.personLabel })));
+    if (target.ambiguous || (target.id && target.id !== pageContext.id) ||
+        (chosenId && chosenId !== pageContext.id)) {
+      return { state:"answer" as const, message:"Open the relationship for the person you mean and try again. Nothing was changed.", evidence:[], offline:false, retainInput:true };
+    }
+    const result = await interpretRelationshipEntry({
+      text:input.text,record:pageContext,today,
+      offlinePreview: !options.apiKey && process.env.NODE_ENV === "development" &&
+        (!process.env.RA_DATASET_MODE || process.env.RA_DATASET_MODE === "fictional") &&
+        (!process.env.RA_STORAGE_BACKEND || process.env.RA_STORAGE_BACKEND === "json"),
+    },options);
+    if (result.state === "answer") return result;
+    interpretation = result.interpretation;
+  } else {
+    interpretation = await interpretConversationalCapture({
+      text: input.text, personLabel: chosenPerson?.personLabel ?? "No existing person selected",
+      currentDate: today,
+    }, options);
+  }
   const plan = planHomeCapture({
     text: input.text,
     interpretation,
@@ -182,6 +201,12 @@ export async function submitHomeText(input: {
     contextRelationshipId: input.contextRelationshipId,
   });
   if (plan.state === "clarify") return plan;
+  if (pageContext && plan.kind === "moment") {
+    return {state:"answer" as const,message:"Use Home to save a personal moment. Nothing was changed.",evidence:[],offline:false,retainInput:true};
+  }
+  if (pageContext && plan.relationshipId !== pageContext.id) {
+    return {state:"answer" as const,message:"Open the relationship for the person you mean. Nothing was changed.",evidence:[],offline:false,retainInput:true};
+  }
   const saved = await saveHomeInput({
     text: input.text,
     kind: plan.kind,
