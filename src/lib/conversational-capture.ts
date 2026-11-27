@@ -34,7 +34,7 @@ export type CaptureInterpretation = {
   question: string;
 };
 
-const schema = {
+export const captureInterpretationJsonSchema = {
   type: "object",
   additionalProperties: false,
   required: ["kind", "source", "interactionDate", "dateEvidence", "summary", "question"],
@@ -154,7 +154,7 @@ export async function interpretConversationalCapture(
       reasoning: { effort: "low" },
       instructions: CONVERSATIONAL_CAPTURE_PROMPT,
       input: JSON.stringify({ currentDate: input.currentDate, selectedPerson: input.personLabel, pastedText: text }),
-      text: { format: { type: "json_schema", name: "conversational_capture_preview", strict: true, schema } },
+      text: { format: { type: "json_schema", name: "conversational_capture_preview", strict: true, schema: captureInterpretationJsonSchema } },
     }),
   });
   if (!response.ok) throw new Error("Capture review failed with status " + response.status + ".");
