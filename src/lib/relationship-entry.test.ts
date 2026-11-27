@@ -20,8 +20,8 @@ function person(){
   return p;
 }
 const capture={kind:"note",source:"unspecified",interactionDate:"",dateEvidence:"unknown",summary:"A new memory",question:""};
-function result(intent:string,evidenceIds:string[]=[],proposed:unknown=capture){
-  return new Response(JSON.stringify({output:[{content:[{type:"output_text",text:JSON.stringify({intent,evidenceIds,capture:proposed})}]}]}),{status:200});
+function result(intent:string,evidenceIds:string[]=[],proposed:unknown=capture,answerText=""){
+  return new Response(JSON.stringify({output:[{content:[{type:"output_text",text:JSON.stringify({intent,evidenceIds,answerText,capture:proposed})}]}]}),{status:200});
 }
 describe("relationship entry",()=>{
   it("answers from saved evidence offline, including indirect questions without punctuation, and never mutates",async()=>{
@@ -33,6 +33,8 @@ describe("relationship entry",()=>{
       if(r.state==="answer"){
         expect(r.evidence.map(e=>e.value)).toEqual(["Cooper"]);
         expect(r.offline).toBe(true);
+        expect(r.message).toContain("Cooper");
+        expect(r.message).toContain("recorded dog");
       }
     }
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -71,13 +73,13 @@ describe("relationship entry",()=>{
       expect(body.text.format.schema.properties.intent.enum).toContain("question");
       expect(body.input).not.toContain("private-digest");
       expect(body.input).not.toContain("555-0100");
-      return result("question",[dog.id]);
+      return result("question",[dog.id],capture,"His dog is named Cooper, as mentioned on November 23, 2026.");
     });
     const r=await interpretRelationshipEntry({text:"His pet's name, please",record,today,offlinePreview:false},{apiKey:"test",fetchImpl});
-    expect(r).toMatchObject({state:"answer",evidence:[{value:"Cooper",sources:[{label:"Fictional catch-up",observedAt:observed}]}]});
+    expect(r).toMatchObject({state:"answer",message:"His dog is named Cooper, as mentioned on November 23, 2026.",evidence:[{value:"Cooper",sources:[{label:"Fictional catch-up",observedAt:observed}]}]});
     const invented=await interpretRelationshipEntry({text:"What is his dog's name?",record,today,offlinePreview:false},
-      {apiKey:"test",fetchImpl:vi.fn(async()=>result("question",["not-a-real-id"]))});
-    expect(invented).toMatchObject({state:"answer",evidence:[]});
+      {apiKey:"test",fetchImpl:vi.fn(async()=>result("question",["not-a-real-id"],capture,"His dog is Max."))});
+    expect(invented).toMatchObject({state:"answer",evidence:[],message:expect.stringContaining("don't have enough")});
   });
   it("only clearly classified additions reach validated capture; the offline preview never enables writes",async()=>{
     const record=person();
@@ -96,4 +98,24 @@ describe("relationship entry",()=>{
     expect(e.find(x=>x.label==="Company")?.sources.map(s=>s.observedAt)).toEqual([observed]);
     expect(e.some(x=>x.value==="555-0100")).toBe(false);
   });
+  it("shows a direct literal answer when the model gives no usable prose",async()=>{
+    const record=person(),dog=personAnswerEvidence(record,today,"dog").find(e=>e.label==="Dog's name")!;
+    for(const answerText of ["","<script>unknown</script>","x".repeat(1001)]){
+      const r=await interpretRelationshipEntry({text:"What is his dog's name?",record,today,offlinePreview:false},
+        {apiKey:"test",fetchImpl:vi.fn(async()=>result("question",[dog.id],capture,answerText))});
+      expect(r).toMatchObject({state:"answer",message:expect.stringContaining("Cooper")});
+    }
+  });
+  it("does not present uncited guesses or hide competing contact values",async()=>{
+    const record=person();
+    record.durableFacts.push({id:"old-company",label:"Company",category:"Work",value:"Previous Company",sourceIds:["pasted:old"],firstObservedAt:"2024-01-01",lastObservedAt:"2024-01-01"});
+    const item=personAnswerEvidence(record,today,"company").find(e=>e.value==="Example Software")!;
+    const r=await interpretRelationshipEntry({text:"Where does he work?",record,today,offlinePreview:false},
+      {apiKey:"test",fetchImpl:vi.fn(async()=>result("question",[item.id],capture,"He definitely works at Example Software."))});
+    expect(r).toMatchObject({state:"answer",message:expect.stringContaining("multiple recorded values"),evidence:[{value:"Example Software"},{value:"Previous Company"}]});
+    const unsupported=await interpretRelationshipEntry({text:"What's his wife's name?",record,today,offlinePreview:false},
+      {apiKey:"test",fetchImpl:vi.fn(async()=>result("question",[],capture,"Her name is invented."))});
+    expect(unsupported).toMatchObject({state:"answer",message:expect.stringContaining("don't have enough"),evidence:[]});
+  });
+
 });

@@ -37,8 +37,8 @@ function noWrites(){
   for(const spy of [mocks.savePersonalMoment,mocks.saveReviewedPersonCapture,mocks.learnFromNewPastedConversation,mocks.saveQuickCaptureWithoutRedirect,mocks.saveUniversalCaptureWithoutRedirect,mocks.revalidatePath])expect(spy).not.toHaveBeenCalled();
 }
 const capture={kind:"note",source:"unspecified",interactionDate:"",dateEvidence:"unknown",summary:"New memory",question:""};
-function response(intent:string,evidenceIds:string[]=[]){
-  return new Response(JSON.stringify({output:[{content:[{type:"output_text",text:JSON.stringify({intent,evidenceIds,capture})}]}]}),{status:200});
+function response(intent:string,evidenceIds:string[]=[],answerText=""){
+  return new Response(JSON.stringify({output:[{content:[{type:"output_text",text:JSON.stringify({intent,evidenceIds,answerText,capture})}]}]}),{status:200});
 }
 describe("read-only person entry routing",()=>{
   beforeEach(()=>{
@@ -82,11 +82,11 @@ describe("read-only person entry routing",()=>{
       const payload=JSON.parse(String(init?.body));
       expect(payload.input).not.toContain("Avery Morgan");
       expect(payload.store).toBe(false);
-      return response("question",[id]);
+      return response("question",[id],"The recorded name of his dog is Cooper.");
     });
     vi.stubGlobal("fetch",fetchMock);
     const r=await submitHomeText({text:"What was his dog's name?",submissionId,contextRelationshipId:"rowan"});
-    expect(r).toMatchObject({state:"answer",evidence:[{value:"Cooper"}],offline:false});
+    expect(r).toMatchObject({state:"answer",message:"The recorded name of his dog is Cooper.",evidence:[{value:"Cooper"}],offline:false});
     noWrites();
   });
   it("passes a clearly classified new memory through the established capture path",async()=>{

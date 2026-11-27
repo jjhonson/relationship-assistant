@@ -7,6 +7,7 @@ import type { HomeCaptureChoices, HomeCapturePlan } from "@/lib/home-direct-capt
 import type { HomePersonChoice } from "@/lib/home-identity";
 import { captureAttachmentAccept, classifyCaptureAttachment } from "@/lib/capture-attachment";
 import type { PersonEntryAnswer } from "@/lib/relationship-entry";
+import { shouldSubmitComposerKey } from "@/lib/composer-keyboard";
 
 type Clarify = Extract<HomeCapturePlan, { state: "clarify" }>;
 
@@ -186,6 +187,11 @@ export default function HomeCapture({
         <textarea
           id="home-capture-input" value={text}
           onChange={(event) => changeText(event.target.value)}
+          onKeyDown={(event) => {
+            if (!shouldSubmitComposerKey({key:event.key,shiftKey:event.shiftKey,isComposing:event.nativeEvent.isComposing,keyCode:event.nativeEvent.keyCode})) return;
+            event.preventDefault();
+            if (!saving && !importing && canSubmit && (text.trim() || photo)) event.currentTarget.form?.requestSubmit();
+          }}
           rows={compact ? 3 : 6} disabled={saving || importing}
           placeholder={contextPersonLabel ? "Ask or add something about " + contextPersonLabel + "…" :
             PROMPTS[promptIndex]}
@@ -300,12 +306,19 @@ export default function HomeCapture({
       {!canSubmit && <p id="capture-unavailable" className="sr-only">This request is unavailable in the current environment.</p>}
       {reply && <div aria-live="polite" className="mt-3 space-y-2 border-t border-stone-100 px-3 pt-3 text-sm">
         <div className="flex items-start justify-between gap-2"><p className="font-medium text-stone-800">{reply.question}</p><button type="button" onClick={() => setReply(null)} aria-label="Close answer" className="text-stone-500 hover:text-stone-900">×</button></div>
-        <p className="text-stone-700">{reply.result.message}</p>
-        {reply.result.evidence.length > 0 && <ul className="space-y-2">{reply.result.evidence.map(item => <li key={item.id} className="rounded-lg bg-stone-50 p-3">
-          <p className="font-medium text-stone-800">{item.label}: <span className="font-normal">{item.value}</span></p>
-          <p className="mt-1 text-xs text-stone-500">Recorded {item.observedAt}{item.status ? " · " + item.status : ""}</p>
-          <details className="mt-1 text-xs text-stone-500"><summary className="cursor-pointer">Supporting context</summary><ul className="mt-1 space-y-1">{item.sources.map((source,i)=><li key={i}>{source.label} · {source.observedAt}</li>)}</ul></details>
-        </li>)}</ul>}
+        <p className="whitespace-pre-line leading-relaxed text-stone-800">{reply.result.message}</p>
+        {reply.result.evidence.length > 0 && (
+          <details className="text-xs text-stone-500">
+            <summary className="cursor-pointer font-medium hover:text-stone-800">Supporting memories ({reply.result.evidence.length})</summary>
+            <ul className="mt-2 space-y-2">{reply.result.evidence.map(item => (
+              <li key={item.id} className="rounded-lg bg-stone-50 p-3">
+                <p className="text-sm font-medium text-stone-800">{item.label}: <span className="font-normal">{item.value}</span></p>
+                <p className="mt-1">Recorded {item.observedAt}{item.status ? " · " + item.status : ""}</p>
+                <ul className="mt-1 space-y-1">{item.sources.map((source,i)=><li key={i}>{source.label} · {source.observedAt}</li>)}</ul>
+              </li>
+            ))}</ul>
+          </details>
+        )}
         {reply.result.offline && <p className="text-xs text-stone-500">Fictional preview · offline topic matching</p>}
       </div>}
       {error && (
