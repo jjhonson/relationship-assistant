@@ -19,6 +19,7 @@ RA_FORCE=0
 . "$(dirname "${BASH_SOURCE[0]}")/dev-common.sh"
 parse_common_args "$@"
 require_tools
+[ "$RA_MODE" != personal ] || umask 077
 acquire_host_lock
 trap release_host_lock EXIT
 

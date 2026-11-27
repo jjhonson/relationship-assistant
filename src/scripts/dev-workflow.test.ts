@@ -44,6 +44,10 @@ case "$2" in
     echo "unsupported ssh command: $*" >&2; exit 99
     ;;
   ports)
+    if [ "$3" = "-c" ]; then
+      printf '%s\\n' "\${RA_FAKE_GH_PORT_VISIBILITY:-private}"
+      exit 0
+    fi
     if [ -n "\${RA_FAKE_GH_COLLISION_FILE:-}" ]; then
       cp "$RA_FAKE_GH_COLLISION_FILE" "$RA_STATE_DIR/forward-cs-one.meta"
     fi
@@ -138,6 +142,30 @@ describe("dev-start / dev-stop (dry run)", () => {
     const unsupported = spawnSync(path.join(bin, "gh"), ["codespace", "start", "-c", "cs-one"], { encoding: "utf8" });
     expect(unsupported.status).toBe(97);
     expect(unsupported.stderr).toContain("unsupported gh codespace subcommand");
+  });
+
+  it("personal dry-run uses the separate loopback port and managed runtime", () => {
+    fakeGh("cs-one\\tShutdown\\n");
+    const result = run("dev-start.sh", ["--personal", "--dry-run"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("personal < remote-dev.sh");
+    expect(result.stdout).toContain("gh codespace ports forward 3000:3001 -c cs-one");
+    expect(result.stdout).toContain("open http://localhost:3001");
+    expect(run("dev-stop.sh", ["--personal", "--dry-run"]).stdout).toContain("gh codespace stop -c cs-one");
+    expect(ghCalls()).not.toContain("ports");
+    expect(existsSync(path.join(tmp, "state"))).toBe(false);
+  });
+
+  it("refuses personal startup before launching anything if port visibility is unsafe", () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const lsof = path.join(bin, "lsof");
+    writeFileSync(lsof, "#!/usr/bin/env bash\nexit 0\n"); chmodSync(lsof, 0o755);
+    const result = run("dev-start.sh", ["--personal"], { RA_FAKE_GH_PORT_VISIBILITY: "unsafe" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("verify private port 3000");
+    expect(ghCalls()).not.toContain("-- bash -s -- start");
+    expect(ghCalls()).not.toContain("ports forward");
+    expect(ghCalls()).not.toContain("codespace stop");
   });
 
   it("writes only validated remote diagnostics to a private report before cleanup", () => {
@@ -404,6 +432,47 @@ describe("dev-start / dev-stop (dry run)", () => {
       sleeper.kill();
     }
   });
+
+  it("personal host start opens only its verified tunnel; restart reuses or replaces stale connections", () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const work = path.join(tmp, "remote");
+    mkdirSync(work);
+    const port = String(48100 + (process.pid % 400));
+    const state = path.join(tmp, "state");
+    mkdirSync(state);
+    const personalMeta = path.join(state, "personal-forward-cs-one.meta");
+    const devMeta = path.join(state, "forward-cs-one.meta");
+    writeFileSync(devMeta, "unrelated fictional metadata\n");
+    writeFileSync(personalMeta, "pid=99999999\nstart=Mon Jan  1 00:00:00 2001\ncodespace=cs-one\nport=3000\nrun_id=personal-stale\n");
+    writeFileSync(path.join(bin, "lsof"), `#!/usr/bin/env bash\nsed -n 's/^pid=/p/p' "${personalMeta}"\n`);
+    writeFileSync(path.join(bin, "curl"), "#!/usr/bin/env bash\nprintf '200'\n");
+    writeFileSync(path.join(bin, "open"), `#!/usr/bin/env bash\nprintf '%s\\n' "$1" >>"${tmp}/opened"\n`);
+    for (const name of ["lsof", "curl", "open"]) chmodSync(path.join(bin, name), 0o755);
+    const env = { RA_REMOTE_DIR: work, RA_PERSONAL_LOCAL_PORT: port,
+      RA_FAKE_GH_REMOTE_STUB: "1", RA_PID_FILE: path.join(tmp, "remote.pid") };
+    try {
+      const first = run("dev-start.sh", ["--personal"], env);
+      expect(first.status, first.stdout + first.stderr).toBe(0);
+      expect(first.stdout).toContain("definitively exited");
+      expect(first.stdout).toContain("Personal alpha ready");
+      expect(ghCalls()).toContain("ports forward 3000:" + port);
+      expect(readFileSync(path.join(tmp, "opened"), "utf8")).toContain("http://localhost:" + port);
+      const firstRecord = readFileSync(personalMeta, "utf8");
+      const repeat = run("dev-start.sh", ["--personal"], env);
+      expect(repeat.status, repeat.stdout + repeat.stderr).toBe(0);
+      expect(repeat.stdout).toContain("Port forward already running");
+      expect(readFileSync(personalMeta, "utf8")).toBe(firstRecord);
+      expect(run("dev-stop.sh", ["--personal"], env).status).toBe(0);
+      expect(existsSync(personalMeta)).toBe(false);
+      expect(readFileSync(devMeta, "utf8")).toBe("unrelated fictional metadata\n");
+      expect(ghCalls()).toContain("codespace stop -c cs-one");
+    } finally {
+      if (existsSync(personalMeta)) {
+        const pid = Number(readFileSync(personalMeta, "utf8").match(/^pid=(\d+)$/m)?.[1]);
+        if (pid > 0 && pid !== 99999999) { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
+      }
+    }
+  }, 30000);
 
   it("cleans up its unrecorded forward after a metadata link collision", async () => {
     fakeGh("cs-one\\tAvailable\\n");
@@ -691,8 +760,8 @@ linuxDescribe("remote-dev.sh", () => {
     } catch { return false; }
   };
 
-  function remote(action: string, extra: Record<string, string> = {}, force = "0", runId = "test-run", dir = work) {
-    return spawnSync("bash", [path.join(scripts, "remote-dev.sh"), action, dir, PORT, force, runId], {
+  function remote(action: string, extra: Record<string, string> = {}, force = "0", runId = "test-run", dir = work, mode = "dev") {
+    return spawnSync("bash", [path.join(scripts, "remote-dev.sh"), action, dir, PORT, force, runId, mode], {
       encoding: "utf8",
       env: {
         ...process.env,
@@ -771,6 +840,81 @@ linuxDescribe("remote-dev.sh", () => {
     expect(alive(pid)).toBe(false);
     expect(listening()).toBe(false);
     expect(existsSync(pidFile)).toBe(false);
+  }, 30000);
+
+  function setupPersonalFixture() {
+    writeFileSync(path.join(work, ".gitignore"), ".data/\n.env.local\n.next/\nnode_modules/\n");
+    writeFileSync(path.join(work, "package-lock.json"), "{}\n");
+    mkdirSync(path.join(work, "scripts"));
+    writeFileSync(path.join(work, "scripts/dataset-profile.mjs"), readFileSync(path.join(scripts, "dataset-profile.mjs")));
+    mkdirSync(path.join(work, ".data"));
+    writeFileSync(path.join(work, ".env.local"), [
+      "RA_STORAGE_BACKEND=supabase", "RA_DATASET_MODE=fictional",
+      "RA_DB_OWNER_ID=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "",
+    ].join("\n"));
+    writeFileSync(path.join(work, ".data/personal.env"), [
+      "RA_DATASET_MODE=personal", "RA_STORAGE_BACKEND=supabase",
+      "RA_PERSONAL_DATA_ENABLED=yes", "RA_PERSONAL_SUPABASE_URL=https://fictional.supabase.co",
+      "RA_PERSONAL_SUPABASE_SECRET_KEY=sb_secret_fixture_only",
+      "RA_PERSONAL_DB_OWNER_ID=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "",
+    ].join("\n"), { mode: 0o600 });
+    expect(sh("git add . && git commit -qm personal-fixture && git branch -M main && git remote add origin .").status).toBe(0);
+    fakeNpm(`
+case "$1:$2" in
+  ci:*) mkdir -p node_modules; echo ci >> "${tmp}/personal-npm.log" ;;
+  run:build)
+    [ "$RA_STORAGE_BACKEND" = json ] && [ "$RA_DATASET_MODE" = fictional ] || exit 10
+    mkdir -p .next; echo fixture-build >.next/BUILD_ID
+    echo build >> "${tmp}/personal-npm.log" ;;
+  run:personal)
+    echo start >> "${tmp}/personal-npm.log"
+    exec node --env-file=.env.local --env-file=.data/personal.env -e '
+      if(process.env.RA_PERSONAL_DB_OWNER_ID !== "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb") process.exit(11);
+      require("http").createServer((q,r)=>r.end("ok")).listen(Number(process.env.PORT), "127.0.0.1");
+    ' ;;
+  *) exit 12 ;;
+esac`);
+  }
+
+  it("personal launch scrubs test overrides, reuses its server/build, and refuses cross-mode stop", () => {
+    setupPersonalFixture();
+    const env = { CODESPACES: "true", RA_PERSONAL_DB_OWNER_ID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      RA_PERSONAL_SUPABASE_SECRET_KEY: "sb_secret_wrong_fixture" };
+    const personal = (action: string, runId = "personal-fixture") => remote(action, env, "0", runId, work, "personal");
+    const first = personal("start");
+    expect(first.status, first.stdout + first.stderr).toBe(0);
+    expect(first.stdout).toContain("RA_STATUS=started");
+    const pid = Number(meta("pid"));
+    expect(listening()).toBe(true);
+    expect(remote("stop").status).not.toBe(0);
+    expect(alive(pid)).toBe(true);
+    expect(remote("start").status).not.toBe(0);
+    const repeat = personal("start", "personal-repeat");
+    expect(repeat.status, repeat.stdout + repeat.stderr).toBe(0);
+    expect(repeat.stdout).toContain("RA_STATUS=reused");
+    expect(Number(meta("pid"))).toBe(pid);
+    expect(personal("stop").status).toBe(0);
+    expect(listening()).toBe(false);
+    const restarted = personal("start", "personal-restart");
+    expect(restarted.status, restarted.stdout + restarted.stderr).toBe(0);
+    expect(restarted.stdout).toContain("Reusing reviewed production build");
+    expect(readFileSync(path.join(tmp, "personal-npm.log"), "utf8")).toBe("ci\nbuild\nstart\nstart\n");
+    expect(personal("stop").status).toBe(0);
+    expect(listening()).toBe(false);
+    expect(existsSync(pidFile)).toBe(false);
+  }, 60000);
+
+  it("personal launch rejects a dirty checkout or a different main tree before starting", () => {
+    setupPersonalFixture();
+    const launch = () => remote("start", { CODESPACES: "true" }, "0", "personal-fixture", work, "personal");
+    writeFileSync(path.join(work, "local-user-work.txt"), "preserve this");
+    expect(launch().stderr).toContain("uncommitted application changes");
+    expect(readFileSync(path.join(work, "local-user-work.txt"), "utf8")).toBe("preserve this");
+    expect(sh("git switch -qc unreviewed && git add local-user-work.txt && git commit -qm unreviewed").status).toBe(0);
+    expect(launch().stderr).toContain("differs from current merged main");
+    expect(existsSync(pidFile)).toBe(false);
+    expect(existsSync(path.join(tmp, "personal-npm.log"))).toBe(false);
+    expect(listening()).toBe(false);
   }, 30000);
 
   it("uses the actual npm CLI and a local Node server for start, reuse, and stop", () => {

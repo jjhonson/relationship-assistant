@@ -17,6 +17,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/dev-common.sh"
 parse_common_args "$@"
 require_tools
+[ "$RA_MODE" != personal ] || umask 077
 
 acquire_host_lock
 trap release_host_lock EXIT
@@ -24,7 +25,8 @@ trap release_host_lock EXIT
 STARTED_CS=0
 STARTED_FWD=""
 STARTED_FWD_START=""
-RA_RUN_ID="mac-$-$(date +%s)-${RANDOM}${RANDOM}"
+REMOTE_ATTEMPTED=0
+RA_RUN_ID="mac-$$-$(date +%s)-${RANDOM}${RANDOM}"
 if [ "$RA_MODE" = personal ]; then
   RA_RUN_ID="personal-$RA_RUN_ID"
   command -v lsof >/dev/null 2>&1 || [ "$RA_DRY_RUN" = 1 ] || fail "lsof is needed to verify the private Mac tunnel"
@@ -48,8 +50,10 @@ cleanup_failed_start() {
       log "WARNING: this run's forward could not be verified as terminated; no mismatched ownership record was changed."
     fi
   fi
-  remote_run stop-start "$RA_RUN_ID" >/dev/null 2>&1 \
-    || log "WARNING: could not clean up this run's remote server; it was not stopped unless its launch record matched."
+  if [ "$REMOTE_ATTEMPTED" = 1 ] || [ "$RA_MODE" = dev ]; then
+    remote_run stop-start "$RA_RUN_ID" >/dev/null 2>&1 \
+      || log "WARNING: could not clean up this run's remote server; it was not stopped unless its launch record matched."
+  fi
   if [ "$STARTED_CS" = "1" ] && [ "$RA_MODE" = dev ]; then
     gh codespace stop -c "$RA_CODESPACE" >/dev/null 2>&1 \
       || log "WARNING: could not stop Codespace; run: gh codespace stop -c $RA_CODESPACE"
@@ -163,6 +167,7 @@ if [ "$RA_DRY_RUN" = "1" ]; then
   fi
 else
   mkdir -p "$RA_STATE_DIR"
+  REMOTE_ATTEMPTED=1
   if out="$(remote_run start "$RA_RUN_ID")"; then
     printf '%s\n' "$out" | sed '/^RA_DIAG /d'
   else

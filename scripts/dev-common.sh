@@ -119,7 +119,7 @@ forward_log_file() { printf '%s/%s-%s.log' "$RA_STATE_DIR" "$RA_FORWARD_PREFIX" 
 personal_port_private() {
   local visibility
   visibility="$(gh codespace ports -c "$RA_CODESPACE" --json sourcePort,visibility \
-    --jq "[.[] | select(.sourcePort == $RA_PORT) | (.visibility // \\"unknown\\" | ascii_downcase)] | if length == 0 then \\"absent\\" elif all(. == \\"private\\") then \\"private\\" else \\"unsafe\\" end" 2>/dev/null)" || return 1
+    --jq '[.[] | select(.sourcePort == 3000) | (.visibility // "unknown" | ascii_downcase)] | if length == 0 then "absent" elif all(. == "private") then "private" else "unsafe" end' 2>/dev/null)" || return 1
   case "$visibility" in private|absent) return 0 ;; *) return 1 ;; esac
 }
 

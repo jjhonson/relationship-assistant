@@ -581,9 +581,9 @@ case "$ACTION" in
     fi
     LAUNCHING=1
     if [ "$RUN_MODE" = personal ]; then
-      RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash -c 'set -o noclobber; printf "%s:%s\n" "$" "$RA_DEV_OWNER" > "$1" || exit 1; export NODE_ENV=production; exec npm run personal -- --hostname 127.0.0.1' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
+      RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash -c 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; export NODE_ENV=production; exec npm run personal -- --hostname 127.0.0.1' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
     else
-    RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
+      RA_DEV_OWNER="$LAUNCH_OWNER" setsid env RA_DEV_OWNER="$LAUNCH_OWNER" PORT="$PORT" bash "${RA_REMOTE_SHELL_FLAGS:--lc}" 'set -o noclobber; printf "%s:%s\n" "$$" "$RA_DEV_OWNER" > "$1" || exit 1; exec npm run dev' _ "$LAUNCH_FILE" >"$LOG" 2>&1 </dev/null 3>&- &
     fi
     LAUNCH_PID=$!
     LAUNCH_START="$(proc_field "$LAUNCH_PID" 19)"
@@ -680,6 +680,7 @@ case "$ACTION" in
         [ "$(cat "$PIDFILE" 2>/dev/null)" = "$old_record" ] || die "server record changed during shutdown; leaving it untouched."
         echo "Dev server stopped."
         rm -f "$PIDFILE" || die "server stopped but its ownership record could not be removed."
+        port_listening && die "another listener still occupies the port; not stopping the Codespace"
       elif [ "$rc" -eq 1 ]; then
         die "dev server group did not exit within the grace period; ownership record retained. Re-run with --force."
       else
