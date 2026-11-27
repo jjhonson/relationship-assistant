@@ -30,7 +30,7 @@ cleanup() {
       gh codespace ssh -c "$CS" -- bash -s -- "$RUN" <<'STOP_REMOTE' || echo "Preview cleanup could not be verified. Personal server was not stopped." >&2
 set -eu
 dir=/workspaces/relationship-agent-preview-7c3476a
-if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = 9722f265747827f3e8562acb99b28eb91534f600 ]; then
+if [ -d "$dir" ] && [ "$(git -C "$dir" rev-parse HEAD)" = 54e05b9ed007bf7c9bbd2cf6c62ac9b7841c437a ]; then
   RA_PID_FILE=/tmp/relationship-agent-preview-7c3476a.pid \
     RA_LOG_FILE=/tmp/relationship-agent-preview-7c3476a.log \
     bash "$dir/scripts/remote-dev.sh" stop-start "$dir" 3002 0 "$1"
@@ -72,7 +72,7 @@ set -eu
 run="$1"
 repo=/workspaces/relationship-assistant
 dir=/workspaces/relationship-agent-preview-7c3476a
-head=9722f265747827f3e8562acb99b28eb91534f600
+head=54e05b9ed007bf7c9bbd2cf6c62ac9b7841c437a
 cd "$repo"
 GIT_TERMINAL_PROMPT=0 git fetch --quiet --no-tags origin refs/heads/feature/relationship-overview </dev/null
 git cat-file -e "$head^{commit}"
@@ -89,7 +89,7 @@ fi
 cd "$dir"
 prior="$(git rev-parse HEAD)"
 case "$prior" in
-  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a|279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b|b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf|cb0d2f379ebc06bf31052f649e843590e855b09d|8b49d9fd2d5ec27fcb14f4302b53bb02a9c4d79a) ;;
+  "$head"|7c3476ac55e215b7efa3c5d0f24611e969fd283a|279caa35bbb9d3a35dfdbf71ad0bb171f4b8bf0b|b17a61c12a13e3eb1a45f591d6a9ca9e6809f0bf|cb0d2f379ebc06bf31052f649e843590e855b09d|8b49d9fd2d5ec27fcb14f4302b53bb02a9c4d79a|9722f265747827f3e8562acb99b28eb91534f600) ;;
   *) echo "Unexpected preview version; nothing was overwritten." >&2; exit 1 ;;
 esac
 if git symbolic-ref -q HEAD >/dev/null; then
