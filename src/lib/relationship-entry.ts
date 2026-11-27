@@ -37,7 +37,7 @@ function words(text:string):Set<string>{
   const aliases:Record<string,string>={dogs:"dog",puppy:"dog",puppies:"dog",canine:"dog",kids:"children",child:"children",
     hobbies:"interest",hobby:"interest",interests:"interest",activities:"interest",work:"company",employer:"company",job:"title",role:"title",
     lives:"location",live:"location",city:"location",residence:"location",emails:"email",mobile:"phone",telephone:"phone",born:"birthday",fishing:"fish",fishes:"fish",fished:"fish"};
-  const stop=new Set("a an the i me my we our you your he his him she her hers they their them it its is are was were be been being do did does have has had what who when where why how which name named called of to in at on for from about and or with can could would please tell remind know remember saved recorded currently current".split(" "));
+  const stop=new Set("a an the i me my we our you your he his him she her hers they their them it its is are was were be been being do did does have has had what who when where why how which name names named called still anymore of to in at on for from about and or with can could would please tell remind know remember saved recorded currently current".split(" "));
   return new Set((text.toLowerCase().match(/[a-z0-9]+/g)??[]).map(w=>aliases[w]??w).filter(w=>w.length>1&&!stop.has(w)));
 }
 
@@ -71,9 +71,10 @@ export function personAnswerEvidence(record:RelationshipRecord,today:string,quer
     .filter(item=>{const size=JSON.stringify(item).length;if(chars+size>24000)return false;chars+=size;return true;}).slice(0,60);
 }
 
-function offlineLookup(text:string,evidence:AnswerEvidence[]):PersonEntryAnswer{
+function offlineLookup(text:string,evidence:AnswerEvidence[],personLabel:string):PersonEntryAnswer{
   if(scopedInputGuard(text)!=="question")return answer("This fictional preview supports read-only memory lookup. Nothing was saved.",[],true,true);
   const query=words(text);
+  for(const name of words(personLabel))query.delete(name);
   if(!query.size)return answer(unknown,[],true);
   const matches=evidence.filter(item=>{const terms=words(item.label+" "+item.value);return [...query].every(w=>terms.has(w));}).slice(0,5);
   return answer(matches.length?"Here's the saved context I found:":unknown,matches,true);
@@ -104,7 +105,7 @@ export async function interpretRelationshipEntry(input:{text:string;record:Relat
   if(guard==="change")return answer(unsupported,[],input.offlinePreview,true);
   if(guard==="uncertain")return answer(ambiguous,[],input.offlinePreview,true);
   const evidence=personAnswerEvidence(input.record,input.today,text);
-  if(input.offlinePreview)return offlineLookup(text,evidence);
+  if(input.offlinePreview)return offlineLookup(text,evidence,input.record.personLabel);
   if(!options.apiKey)return answer("The relationship assistant is not configured. Nothing was changed.",[],false,true);
   const response=await (options.fetchImpl??fetch)("https://api.openai.com/v1/responses",{
     method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+options.apiKey},

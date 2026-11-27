@@ -201,7 +201,10 @@ export async function submitHomeText(input: {
     contextRelationshipId: input.contextRelationshipId,
   });
   if (plan.state === "clarify") return plan;
-  if (pageContext && plan.kind !== "moment" && plan.relationshipId !== pageContext.id) {
+  if (pageContext && plan.kind === "moment") {
+    return {state:"answer" as const,message:"Use Home to save a personal moment. Nothing was changed.",evidence:[],offline:false,retainInput:true};
+  }
+  if (pageContext && plan.relationshipId !== pageContext.id) {
     return {state:"answer" as const,message:"Open the relationship for the person you mean. Nothing was changed.",evidence:[],offline:false,retainInput:true};
   }
   const saved = await saveHomeInput({
