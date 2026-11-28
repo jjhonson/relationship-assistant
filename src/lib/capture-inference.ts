@@ -12,6 +12,7 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "A connection between people in the same encounter is not implied simply by co-occurrence. Never assume marriage, family status, or a shared residence.",
   "Put other people mentioned but not directly met in otherPeople. Never put a dog's name in participants or otherPeople.",
   "Use empty strings for unknown optional fields. A first name alone is valid. An empty participants list is valid if no person can be confidently identified.",
+  "Location has different meanings. Leave the legacy city scalar empty. Put clearly stated current residence in facts as Home city (Location), a specific job or office location as Work location (Work), a professional profile header region as Profile location (Location), and an unclear location as Location (unspecified) (Location). Never infer a home city from a workplace, employer headquarters or profile region. Preserve historical places separately; do not invent a move.",
   "Keep the summary short, factual, and faithful to the note. Do not embellish or recommend outreach.",
   "A commitment must be an actual promise or agreed action; a friendly expression of intent is not one. Empty commitments are valid.",
   "Use only the allowed durable fact categories. Do not speculate about sensitive personal details.",
@@ -27,6 +28,7 @@ export const CAPTURE_PHOTO_CONTEXT_PROMPT = [
   "Do not treat vendor names, printer credits, or photo attributions as relationship participants.",
   "For a professional profile screenshot, extract title, company, city and contact details only when visibly associated with the intended person. Treat headline descriptions and past positions as such, not proof of current employment. Leave the URL empty unless explicitly supplied or visibly legible; never derive it from a name. Ignore recommended contacts and unrelated profiles.",
   "A profile screenshot is an observation, not a conversation or evidence of a new encounter. A visible mismatch with the selected person should not be resolved by guessing.",
+  "In an Experience entry, a location next to a role or company belongs to that work entry, not the home city. A profile header location is profile geography, not proof of residence. Only an explicit statement of residence supports Home city. Use past work location labels for previous jobs; do not make them the present workplace.",
   "The upload date is not the date of an event or a life milestone. Do not infer ages, employment or personal facts from appearance.",
 ].join("\n");
 

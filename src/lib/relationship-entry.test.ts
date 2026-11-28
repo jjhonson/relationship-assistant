@@ -149,4 +149,23 @@ describe("relationship entry",()=>{
     expect(r).toMatchObject({state:"answer",message:"Cooper.",note:"That was mentioned on November 23, 2026."});
   });
 
+  it("answers an explicit residence question from home evidence, not a newer role or profile city",async()=>{
+    const record=person();
+    record.sources.push({id:"capture:profile",source:"capture",label:"Saved screenshot",observedAt:today});
+    record.durableFacts.push(
+      {id:"home",category:"Location",label:"Home city",value:"Home Town",sourceIds:["pasted:fixture"],firstObservedAt:observed,lastObservedAt:observed},
+      {id:"office",category:"Work",label:"Work location",value:"Office Town",sourceIds:["capture:profile"],firstObservedAt:today,lastObservedAt:today},
+      {id:"legacy-city",category:"Location",label:"City",value:"Office Town",sourceIds:["capture:profile"],firstObservedAt:today,lastObservedAt:today},
+    );
+    const offline=await interpretRelationshipEntry({text:"Where does he live?",record,today,offlinePreview:true},{apiKey:""});
+    expect(offline).toMatchObject({state:"answer",message:expect.stringContaining("Home Town"),evidence:[{label:"Home location",value:"Home Town"}]});
+    const office=personAnswerEvidence(record,today,"Where does he live?").find(e=>e.label==="Work location")!;
+    const live=await interpretRelationshipEntry({text:"Where does he live?",record,today,offlinePreview:false},
+      {apiKey:"test",fetchImpl:vi.fn(async()=>result("question",[office.id],capture,"He lives in Office Town."))});
+    expect(live).toMatchObject({state:"answer",message:expect.stringContaining("Home Town"),evidence:[{label:"Home location",value:"Home Town"}]});
+    record.durableFacts=record.durableFacts.filter(fact=>fact.id!=="home");
+    const missing=await interpretRelationshipEntry({text:"Where does he live?",record,today,offlinePreview:true},{apiKey:""});
+    expect(missing).toMatchObject({state:"answer",message:expect.stringContaining("don't have enough"),evidence:[]});
+  });
+
 });

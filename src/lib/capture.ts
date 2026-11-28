@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { explicitLocationMeaning } from "./location-meaning";
 import {
   createManualRelationshipRecord,
   type DurableRelationshipFact,
@@ -190,7 +191,9 @@ function participantFacts(person: CaptureParticipant): CaptureFact[] {
   const fields: CaptureFact[] = [
     { category: "Work", label: "Company", value: person.company },
     { category: "Work", label: "Role", value: person.jobTitle },
-    { category: "Location", label: "City", value: person.city },
+    // The legacy city scalar does not distinguish residence, workplace and
+    // profile geography. A typed, explicitly attributed fact carries meaning.
+    { category: "Location", label: "Location (unspecified)", value: person.facts.some(fact => explicitLocationMeaning(fact) && normalized(fact.value) === normalized(person.city)) ? "" : person.city },
     { category: "Personal", label: "Phone", value: person.phone },
     { category: "Personal", label: "LinkedIn", value: person.linkedin },
   ];

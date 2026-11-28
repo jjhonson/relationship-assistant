@@ -139,4 +139,30 @@ describe("relationship overview", () => {
     expect(JSON.stringify(groups)).not.toContain("Unsourced claim");
   });
 
+  it("keeps earlier residence separate from newer image city, work location and profile geography",()=>{
+    const p=person();
+    p.sources.push({id:"capture:profile",source:"capture",observedAt:today,label:"Photo you chose (image not retained)"});
+    p.durableFacts.push(
+      fact("legacy-home","Location","City","Home Town"),
+      fact("legacy-image","Location","City","Office Town",today,"capture:profile"),
+      fact("work-city","Work","Work location","Office Town",today,"capture:profile"),
+      fact("profile-region","Location","Profile location","Metro Area",today,"capture:profile"),
+    );
+    const before=JSON.stringify(p);
+    const home=relationshipContactFields(p,today).find(field=>field.label==="Location");
+    expect(home?.primary?.value).toBe("Home Town");
+    expect(home?.values.map(item=>item.value)).toEqual(["Home Town"]);
+    const groups=relationshipPortrait(p,today);
+    expect(groups.find(g=>g.label==="Work & projects")?.items).toEqual(expect.arrayContaining([expect.objectContaining({label:"Work location",value:"Office Town"})]));
+    expect(groups.find(g=>g.label==="Places & plans")?.items).toEqual(expect.arrayContaining([expect.objectContaining({label:"Location (meaning unclear)",value:"Office Town"}),expect.objectContaining({label:"Profile location",value:"Metro Area"})]));
+    expect(JSON.stringify(p)).toBe(before);
+  });
+  it("keeps home unknown when only a profile or generic location is recorded",()=>{
+    const p=person();
+    p.durableFacts.push(fact("unspecified","Location","Location","Metro Area"),fact("office","Work","Office location","Office Town"));
+    const home=relationshipContactFields(p,today).find(field=>field.label==="Location");
+    expect(home?.primary).toBeNull();
+    expect(home?.values).toEqual([]);
+  });
+
 });
