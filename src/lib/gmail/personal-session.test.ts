@@ -27,7 +27,7 @@ describe("personal-only Gmail credentials", () => {
     expect(personalGmailConfig(env)?.config.redirectUri).toBe(PERSONAL_GMAIL_CALLBACK);
     for (const modified of [
       { RA_PERSONAL_GMAIL_ENABLED: "" }, { RA_PERSONAL_GMAIL_REDIRECT_URI: env.GOOGLE_REDIRECT_URI },
-      { NODE_ENV: "development" }, { CODESPACES: "" }, { RA_PERSONAL_DATA_ENABLED: "" },
+      { NODE_ENV: "development" as const }, { CODESPACES: "" }, { RA_PERSONAL_DATA_ENABLED: "" },
       { RA_PERSONAL_DB_OWNER_ID: env.RA_DB_OWNER_ID }, { SESSION_SECRET: "short" },
     ]) expect(personalGmailConfig({ ...env, ...modified })).toBeNull();
     expect(legacyGmailAllowed({ NODE_ENV: "development" })).toBe(true);
