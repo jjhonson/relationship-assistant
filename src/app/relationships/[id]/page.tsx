@@ -24,6 +24,7 @@ import { relationshipConnectionStats } from "@/lib/relationship-connection-stats
 import ConnectionStats from "./ConnectionStats";
 import { captureAppliedToPerson } from "@/lib/capture-return";
 import { captureLocalDay, localCaptureEvidence } from "@/lib/capture-calendar";
+import { getDatasetMode } from "../../../../scripts/dataset-profile.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -135,6 +136,13 @@ export default async function RelationshipDetailPage({
           </div>
         </div>
         <ContactCard fields={contactFields} />
+        {getDatasetMode() === "personal" && (
+          <div className="mt-4 border-t border-stone-100 pt-3">
+            <Link href={"/relationships/" + encodeURIComponent(relationship.id) + "/gmail"} className="text-sm font-medium text-stone-700 underline underline-offset-4">
+              Import from Gmail
+            </Link>
+          </div>
+        )}
       </header>
 
       <ConnectionSubjectsReview

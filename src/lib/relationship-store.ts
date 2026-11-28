@@ -560,6 +560,18 @@ export async function inspectPersonGmailMemory(input: Pick<PersonImportMemoryInp
     : assessment;
 }
 
+/** Read the latest dataset once for a bounded batch preflight. */
+export async function inspectPersonGmailBatch(scope: PersonImportMemoryInput["scope"], candidates: PersonImportMemoryInput["candidate"][]) {
+  if (candidates.length > 20) throw new Error("Too many Gmail messages.");
+  const store = await readStore();
+  return candidates.map((candidate) => {
+    const assessment = assessPersonImportMemory(store.relationships, store.captures, store.connectionJourneys, { scope, candidate });
+    return assessment.kind === "ready"
+      ? { candidate, kind: "ready" as const, personLabel: assessment.record.personLabel }
+      : { candidate, ...assessment };
+  });
+}
+
 /**
  * Internal, atomic persistence step for a previously authorized and analyzed
  * exact Gmail message. Not a server action. No provider or model calls here;

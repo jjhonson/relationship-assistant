@@ -50,6 +50,11 @@ function knownEmail(record: RelationshipRecord, address: string) {
       normalized(fact.value) === address);
 }
 
+export function hasPersonImportAddressConflict(records: readonly RelationshipRecord[], personId: string, addresses: readonly string[]) {
+  return records.some((record) => record.id !== personId &&
+    addresses.some((address) => knownEmail(record, normalized(address))));
+}
+
 function sameProvenance(gmail: GmailProvenance | undefined, scope: PersonImportScope, candidate: PersonImportCandidate) {
   return !!gmail && gmail.providerKey === candidate.providerKey &&
     gmail.mailboxAddress === scope.mailboxAddress && gmail.messageId === candidate.messageId &&
@@ -141,8 +146,7 @@ export function assessPersonImportMemory(
     }
     return review("provider-conflict");
   }
-  if (records.some((person) => person.id !== record.id &&
-      scope.confirmedAddresses.some((address) => knownEmail(person, address)))) return review("identity-conflict");
+  if (hasPersonImportAddressConflict(records, record.id, scope.confirmedAddresses)) return review("identity-conflict");
   if (hasPossibleManualOverlap(record, captures, journeys, day)) return review("possible-manual-overlap");
 
   return { kind: "ready", record, scope, day, sourceId };

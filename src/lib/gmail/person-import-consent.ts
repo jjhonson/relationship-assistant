@@ -54,6 +54,12 @@ export function createPersonGmailApprovalStore() {
       const approved = approvals.get(token);
       if (approved && sameBinding(approved.binding, binding)) approvals.delete(token);
     },
+    cancelPerson(binding: PersonGmailApprovalBinding) {
+      for (const [id, value] of approvals) {
+        if (value.binding.profileBinding === binding.profileBinding &&
+            value.binding.sessionId === binding.sessionId && value.binding.personId === binding.personId) approvals.delete(id);
+      }
+    },
     cancelSession(profileBinding: string, sessionId: string) {
       for (const [id, value] of approvals) {
         if (value.binding.profileBinding === profileBinding && value.binding.sessionId === sessionId) approvals.delete(id);
