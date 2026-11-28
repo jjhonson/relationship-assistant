@@ -13,6 +13,20 @@ export type RelationshipSource = {
   label: string;
   // Hash of unsaved pasted transcript + dated/source metadata, solely for retry identity.
   submissionDigest?: string;
+  /** Only consented, body-backed, person-scoped imports use this provenance.
+   * observedAt above is the user's local calendar day, not the import date. */
+  gmailImport?: {
+    providerKey: string;
+    mailboxAddress: string;
+    messageId: string;
+    threadId: string;
+    observedInstant: string;
+    importedAt: string;
+    direction: "sent" | "received";
+    contactAddress: string;
+    // Structured conflicting observations, NOT current facts or raw email.
+    deferredFacts: Array<Pick<DurableRelationshipFact, "category" | "label" | "value">>;
+  };
 };
 
 export type RelationshipIdentity = {

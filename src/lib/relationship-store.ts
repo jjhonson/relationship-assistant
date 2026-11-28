@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { buildConnectionCandidates, dismissConnectionCandidate } from "./connection-subjects";
 import { applyCadencePreference, dismissCadenceCycle, relationshipToday } from "./relationship-cadence";
 import { looksLikePastedConversation } from "./conversational-capture";
+import { applyPersonImportMemory, type PersonImportMemoryInput } from "./gmail/person-import-memory";
 import {
   addConnectionEvent, makeConnectionJourney, type ConnectionJourney,
   type ConfirmedConnectionEvent,
@@ -546,6 +547,25 @@ export async function saveInferredConversation(
       store.relationships[index], extraction, source,
     );
     return { relationshipId, duplicate: false as const };
+  });
+}
+
+/**
+ * Internal, atomic persistence step for a previously authorized and analyzed
+ * exact Gmail message. Not a server action. No provider or model calls here;
+ * the future caller must enforce personal-profile and scoped consent first.
+ */
+export async function savePersonGmailMemory(input: PersonImportMemoryInput) {
+  return mutateStore((store) => {
+    const result = applyPersonImportMemory(store.relationships, store.captures,
+      store.connectionJourneys, input);
+    if (result.kind === "saved") {
+      const index = store.relationships.findIndex((item) => item.id === result.record.id);
+      store.relationships[index] = result.record;
+      return { kind: "saved" as const, relationshipId: result.record.id,
+        deferredFactCount: result.deferredFactCount };
+    }
+    return result;
   });
 }
 

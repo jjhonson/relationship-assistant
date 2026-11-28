@@ -4,7 +4,7 @@ import {
   correctSavedActionableMemory, getRelationship, listConnectionJourneys,
   saveRelationshipCadence, dismissSavedConnectionSuggestion,
   listPersonalMoments, saveConfirmedConnectionEvents,
-  savePersonalMoment, saveRelationship, startConnectionJourney,
+  savePersonalMoment, saveRelationship, startConnectionJourney, savePersonGmailMemory,
 } from "./relationship-store";
 
 const owner = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -102,6 +102,26 @@ describe("fictional Next.js domain operations with remote storage selected", () 
     await saveRelationshipCadence(p.id, undefined);
     expect((await getRelationship(p.id))?.contactCadenceDays).toBeUndefined();
     expect((await getRelationship(p.id))?.durableFacts).toEqual(p.durableFacts);
+  });
+
+  it("atomically saves structured Gmail provenance and skips a replay in the existing private document", async () => {
+    const person = createManualRelationshipRecord("Fictional Gmail contact");
+    await saveRelationship(person);
+    const input = {
+      scope: { personId: person.id, mailboxAddress: "owner@example.test", confirmedAddresses: ["alex@example.test"] },
+      candidate: { providerKey: "gmail:owner@example.test:message-fixture", messageId: "message-fixture",
+        threadId: "thread-fixture", observedAt: "2025-11-20T15:00:00.000Z",
+        direction: "received" as const, contactAddress: "alex@example.test" },
+      extraction: { durableFacts: [{ category: "Work" as const, label: "Company", value: "Example Software", existingFactId: "" }] },
+    };
+    expect(await savePersonGmailMemory(input)).toMatchObject({ kind: "saved", relationshipId: person.id, deferredFactCount: 0 });
+    expect(await savePersonGmailMemory(input)).toEqual({ kind: "duplicate", relationshipId: person.id });
+    const saved = (await getRelationship(person.id))!;
+    expect(saved.sources.filter((source) => source.gmailImport)).toHaveLength(1);
+    expect(saved.sources.at(-1)?.gmailImport?.providerKey).toBe(input.candidate.providerKey);
+    expect(saved.durableFacts.map((fact) => fact.value)).toEqual(["alex@example.test", "Example Software"]);
+    expect(saved.lastInteractionAt).toBe("2025-11-20");
+    expect(calls.every(url => url.includes("example.supabase.co/rest/v1/rpc/ra_store_"))).toBe(true);
   });
 
 });
