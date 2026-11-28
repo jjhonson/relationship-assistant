@@ -28,6 +28,7 @@ async function context(id: string) {
   if (!person) throw new Error("Relationship unavailable.");
   return { connected, records, person, binding: {
     profileBinding: connected.profileBinding, sessionId: connected.session.id, personId: person.id, personLabel: person.personLabel,
+    ...(person.gmailMemoryRevision === undefined ? {} : { memoryRevision: person.gmailMemoryRevision }),
   } };
 }
 
@@ -69,7 +70,8 @@ export async function preparePersonGmailReview(personId: string, addresses: stri
     const token = await freshPersonalGmailAccess(connected);
     const mailbox = await fetchOwnerAddress(token);
     if (!mailbox || !isLookupAddress(mailbox)) return error("The connected mailbox could not be verified.");
-    const scope = normalizePersonImportScope({ personId: person.id, mailboxAddress: mailbox, confirmedAddresses: aliases });
+    const scope = normalizePersonImportScope({ personId: person.id, mailboxAddress: mailbox, confirmedAddresses: aliases,
+      ...(person.gmailMemoryRevision === undefined ? {} : { memoryRevision: person.gmailMemoryRevision }) });
     const previouslyImportedKeys = person.sources.flatMap((source) => source.gmailImport ? [source.gmailImport.providerKey] : []);
     const plan = await lookupPersonImportPlan(token, scope, previouslyImportedKeys);
     const assessed = await inspectPersonGmailBatch(plan.scope, plan.candidates, person.personLabel);

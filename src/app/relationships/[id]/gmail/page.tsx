@@ -8,6 +8,8 @@ import { personalGmailSessionContext } from "@/lib/gmail/personal-connection";
 import { isLookupAddress } from "@/lib/gmail/messages";
 import { getDatasetMode } from "../../../../../scripts/dataset-profile.mjs";
 import GmailImportPanel from "./GmailImportPanel";
+import GmailMemoryPanel from "./GmailMemoryPanel";
+import { reviewPersonGmailMemory } from "@/lib/gmail/person-import-removal";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,7 @@ export default async function RelationshipGmailPage({ params, searchParams }: {
         <p className="mt-1 text-sm text-stone-600">Enrich {person.personLabel}&apos;s relationship record from selected correspondence.</p>
       </header>
       {importedCount > 0 && <p className="text-sm text-stone-600">{importedCount} Gmail messages already saved.{deferredCount > 0 ? " " + deferredCount + " conflicting observations remain held for review." : ""}</p>}
+      {importedCount > 0 && <GmailMemoryPanel personId={id} review={reviewPersonGmailMemory(person)} />}
       {error && <p role="alert" className="text-sm text-amber-900">Gmail authorization did not complete. You can reconnect below.</p>}
       {!config ? (
         <p className="rounded-xl border border-stone-200 p-4 text-sm text-stone-600">Personal Gmail is not enabled yet. Connecting requires the reviewed private loopback configuration and separate live-use approval. This page does not request Gmail data while disabled.</p>

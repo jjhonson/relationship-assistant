@@ -20,7 +20,7 @@ export type PersonImportMemoryInput = {
   extraction: Pick<InteractionExtraction, "durableFacts">;
 };
 
-type ReviewReason = "identity-conflict" | "provider-conflict" | "possible-manual-overlap" | "person-changed";
+type ReviewReason = "identity-conflict" | "provider-conflict" | "possible-manual-overlap" | "person-changed" | "memory-removed";
 export type PersonImportMemoryResult =
   | { kind: "saved"; record: RelationshipRecord; deferredFactCount: number }
   | { kind: "duplicate"; relationshipId: string }
@@ -137,6 +137,7 @@ export function assessPersonImportMemory(
   const review = (reason: ReviewReason): PersonImportAssessment =>
     ({ kind: "needs-review", relationshipId: record.id, reason });
   if (input.expectedPersonLabel !== undefined && record.personLabel !== input.expectedPersonLabel) return review("person-changed");
+  if (scope.memoryRevision !== record.gmailMemoryRevision) return review("memory-removed");
   const sourceId = "gmail-import:" + createHash("sha256").update(message.providerKey).digest("hex");
   const owners = records.flatMap((person) => person.sources
     .filter((source) => source.id === sourceId || source.gmailImport?.providerKey === message.providerKey)
@@ -234,6 +235,8 @@ export function applyPersonImportMemory(
     deferredFactCount: deferred.length,
     record: {
       ...record, updatedAt: now.toISOString(), lastInteractionAt: latest,
+      gmailBaselineContactDay: record.gmailBaselineContactDay !== undefined ? record.gmailBaselineContactDay :
+        record.sources.some((item) => item.gmailImport) ? null : record.lastInteractionAt,
       durableFacts: facts, sources: [...record.sources, savedSource],
     },
   };

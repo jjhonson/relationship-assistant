@@ -130,6 +130,11 @@ export type RelationshipRecord = {
   createdAt: string;
   updatedAt: string;
   lastInteractionAt: string | null;
+  /** Independent contact date before the first retained Gmail import.
+   * Used only for source-aware removal, never as a new contact event. */
+  gmailBaselineContactDay?: string | null;
+  /** Changes on explicit Gmail-memory removal, invalidating older approvals. */
+  gmailMemoryRevision?: string;
   classification: RelationshipInference["classification"]["value"];
   relationshipContexts: RelationshipContextValue[];
   relationshipRoles: RelationshipRoleValue[];

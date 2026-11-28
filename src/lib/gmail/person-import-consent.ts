@@ -6,14 +6,14 @@ import { validatePersonImportSelection } from "./person-import-content";
 export const PERSON_GMAIL_APPROVAL_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_APPROVALS = 64;
 export type PersonGmailApprovalBinding = {
-  profileBinding: string; sessionId: string; personId: string; personLabel: string;
+  profileBinding: string; sessionId: string; personId: string; personLabel: string; memoryRevision?: string;
 };
 type Selection = { scope: PersonImportScope; candidates: PersonImportCandidate[] };
 type Approval = Selection & { binding: PersonGmailApprovalBinding; issuedAt: number; expiresAt: number };
 
 function sameBinding(a: PersonGmailApprovalBinding, b: PersonGmailApprovalBinding) {
   return a.profileBinding === b.profileBinding && a.sessionId === b.sessionId &&
-    a.personId === b.personId && a.personLabel === b.personLabel;
+    a.personId === b.personId && a.personLabel === b.personLabel && a.memoryRevision === b.memoryRevision;
 }
 
 /** In-memory, single-use server-issued review handle. Actual affirmative
@@ -29,7 +29,7 @@ export function createPersonGmailApprovalStore() {
       prune(now);
       const scope = normalizePersonImportScope(selection.scope);
       if (!binding.profileBinding || !binding.sessionId || !binding.personLabel ||
-          binding.personId !== scope.personId) throw new Error("Invalid Gmail approval scope.");
+          binding.personId !== scope.personId || binding.memoryRevision !== scope.memoryRevision) throw new Error("Invalid Gmail approval scope.");
       validatePersonImportSelection(scope, selection.candidates);
       for (const [id, value] of approvals) {
         if (value.binding.profileBinding === binding.profileBinding &&

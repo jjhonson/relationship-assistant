@@ -12,6 +12,8 @@ export const PERSON_IMPORT_MESSAGE_LIMIT = 20;
 
 export type PersonImportScope = {
   personId: string;
+  /** Latest removal epoch when the user reviewed the import. */
+  memoryRevision?: string;
   /** The mailbox address verified using Gmail's profile endpoint. */
   mailboxAddress: string;
   /** Addresses explicitly confirmed as belonging to the selected person. */
@@ -51,7 +53,12 @@ export function normalizePersonImportScope(scope: PersonImportScope): PersonImpo
       confirmedAddresses.some((address) => !isLookupAddress(address) || address === mailboxAddress)) {
     throw new PersonImportError("A selected person, verified mailbox and confirmed distinct contact addresses are required.");
   }
-  return { personId, mailboxAddress, confirmedAddresses };
+  if (scope.memoryRevision !== undefined &&
+      (typeof scope.memoryRevision !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(scope.memoryRevision))) {
+    throw new PersonImportError("Invalid Gmail memory revision.");
+  }
+  return { personId, mailboxAddress, confirmedAddresses,
+    ...(scope.memoryRevision === undefined ? {} : { memoryRevision: scope.memoryRevision }) };
 }
 
 function headerValues(message: PilotMetadataMessage, name: string): string[] {

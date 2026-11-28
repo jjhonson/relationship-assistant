@@ -23,6 +23,7 @@ import { buildConnectionCandidates, dismissConnectionCandidate } from "./connect
 import { applyCadencePreference, dismissCadenceCycle, relationshipToday } from "./relationship-cadence";
 import { looksLikePastedConversation } from "./conversational-capture";
 import { applyPersonImportMemory, assessPersonImportMemory, type PersonImportMemoryInput } from "./gmail/person-import-memory";
+import { planGmailMemoryRemoval } from "./gmail/person-import-removal";
 import {
   addConnectionEvent, makeConnectionJourney, type ConnectionJourney,
   type ConfirmedConnectionEvent,
@@ -588,6 +589,26 @@ export async function savePersonGmailMemory(input: PersonImportMemoryInput) {
         deferredFactCount: result.deferredFactCount };
     }
     return result;
+  });
+}
+
+/** Atomic, explicitly confirmed source removal; no Gmail or model request. */
+export async function removePersonGmailSources(relationshipId: string, sourceIds: string[], reviewVersion: string) {
+  return mutateStore((store) => {
+    const index = store.relationships.findIndex((person) => person.id === relationshipId);
+    if (index < 0) throw new Error("Relationship unavailable.");
+    const result = planGmailMemoryRemoval(store.relationships[index], store.captures, store.connectionJourneys, sourceIds, reviewVersion);
+    // The importer never shares a source across people. Refuse a malformed or
+    // later cross-person reference rather than silently leave or delete it.
+    const selected = new Set(sourceIds);
+    if (store.relationships.some((person, i) => i !== index &&
+        (person.sources.some((source) => selected.has(source.id)) ||
+         person.durableFacts.some((fact) => fact.sourceIds.some((id) => selected.has(id))))) {
+      throw new Error("A selected source has another relationship reference.");
+    }
+    store.relationships[index] = result.record;
+    store.connectionJourneys = result.journeys;
+    return { removedMessages: result.removedMessages, removedFacts: result.removedFacts, preservedFacts: result.preservedFacts };
   });
 }
 
