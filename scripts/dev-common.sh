@@ -4,6 +4,9 @@
 
 RA_REPO="${RA_REPO:-jjhonson/relationship-assistant}"
 RA_PORT="${RA_PORT:-3000}"
+RA_MODE=dev
+RA_LOCAL_PORT="$RA_PORT"
+RA_FORWARD_PREFIX=forward
 RA_REMOTE_DIR="${RA_REMOTE_DIR:-/workspaces/relationship-assistant}"
 RA_STATE_DIR="${RA_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/relationship-assistant}"
 RA_CODESPACE="${RA_CODESPACE:-}"
@@ -25,11 +28,19 @@ parse_common_args() {
     case "$1" in
       --name) [ $# -ge 2 ] || fail "--name needs a value"; RA_CODESPACE="$2"; shift 2 ;;
       --dry-run) RA_DRY_RUN=1; shift ;;
+      --personal) RA_MODE=personal; shift ;;
       --force) RA_FORCE=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *) fail "unknown argument: $1 (try --help)" ;;
     esac
   done
+  if [ "$RA_MODE" = personal ]; then
+    [ "$RA_PORT" = 3000 ] || fail "personal mode requires the reviewed Codespace port 3000"
+    RA_LOCAL_PORT="${RA_PERSONAL_LOCAL_PORT:-3001}"
+    case "$RA_LOCAL_PORT" in ''|*[!0-9]*) fail "invalid personal local port" ;; esac
+    [ "$RA_LOCAL_PORT" -ge 1 ] && [ "$RA_LOCAL_PORT" -le 65535 ] || fail "invalid personal local port"
+    RA_FORWARD_PREFIX=personal-forward
+  fi
 }
 
 require_tools() {
@@ -88,7 +99,14 @@ resolve_codespace() {
 # `gh codespace ssh -c NAME -- CMD...` hands CMD to ssh as the remote command; the script is
 # piped on stdin to `bash -s`, so nothing needs to be installed in the Codespace.
 remote_run() {
-  gh codespace ssh -c "$RA_CODESPACE" -- bash -s -- "$1" "$RA_REMOTE_DIR" "$RA_PORT" "${RA_FORCE:-0}" "${2:-}" < "$RA_REMOTE_SCRIPT"
+  if [ "$RA_MODE" = personal ]; then
+    # SSH transports a command string, so an empty argument can disappear.
+    # Preserve the sixth (runtime mode) argument for Stop and other calls
+    # without an explicit run ID. stop-start still requires its exact run ID.
+    gh codespace ssh -c "$RA_CODESPACE" -- bash -s -- "$1" "$RA_REMOTE_DIR" "$RA_PORT" "${RA_FORCE:-0}" "${2:-no-run-id}" personal < "$RA_REMOTE_SCRIPT"
+  else
+    gh codespace ssh -c "$RA_CODESPACE" -- bash -s -- "$1" "$RA_REMOTE_DIR" "$RA_PORT" "${RA_FORCE:-0}" "${2:-}" < "$RA_REMOTE_SCRIPT"
+  fi
 }
 
 # Local port-forward ownership. A recorded forward is reused/signalled only if ALL hold:
@@ -96,7 +114,27 @@ remote_run() {
 # line ends with exactly "codespace ports forward PORT:PORT -c CODESPACE" for this Codespace/port.
 # Any live mismatch fails closed; only an unchanged, correctly scoped record for a
 # definitively exited process may be removed.
-forward_meta_file() { printf '%s/forward-%s.meta' "$RA_STATE_DIR" "$RA_CODESPACE"; }
+forward_meta_file() { printf '%s/%s-%s.meta' "$RA_STATE_DIR" "$RA_FORWARD_PREFIX" "$RA_CODESPACE"; }
+forward_log_file() { printf '%s/%s-%s.log' "$RA_STATE_DIR" "$RA_FORWARD_PREFIX" "$RA_CODESPACE"; }
+
+# No public or organization-visible web forwarding is permitted for personal use.
+# An absent web-forward registration is safe: the local gh tunnel binds loopback.
+personal_port_private() {
+  local visibility
+  visibility="$(gh codespace ports -c "$RA_CODESPACE" --json sourcePort,visibility \
+    --jq '[.[] | select(.sourcePort == 3000) | (.visibility // "unknown" | ascii_downcase)] | if length == 0 then "absent" elif all(. == "private") then "private" else "unsafe" end' 2>/dev/null)" || return 1
+  case "$visibility" in private|absent) return 0 ;; *) return 1 ;; esac
+}
+
+# macOS lsof confirms the expected gh process owns the loopback listener.
+# Never inspect or print the returned application page or its private contents.
+personal_forward_healthy() {
+  local pid="$1" listeners code
+  listeners="$(lsof -nP -a -iTCP:"$RA_LOCAL_PORT" -sTCP:LISTEN -Fp 2>/dev/null | sed -n 's/^p//p' | sort -u)"
+  [ "$listeners" = "$pid" ] || return 1
+  code="$(curl --noproxy '*' -s -o /dev/null -m 8 -w '%{http_code}' "http://127.0.0.1:$RA_LOCAL_PORT/" 2>/dev/null)" || return 1
+  [ "$code" = 200 ]
+}
 
 proc_start() { ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//; s/ *$//'; }
 proc_state() { ps -p "$1" -o stat= 2>/dev/null | tr -d '[:space:]'; }
@@ -129,7 +167,7 @@ forward_process_matches() {
   forward_owner_matches "$pid" "$run_id" || return 1
   cmd="$(ps -p "$pid" -o command= 2>/dev/null)" || return 1
   case "$cmd" in
-    "gh codespace ports forward $port:$port -c $codespace"|*/gh\ codespace\ ports\ forward\ "$port:$port"\ -c\ "$codespace")
+    "gh codespace ports forward $port:$RA_LOCAL_PORT -c $codespace"|*/gh\ codespace\ ports\ forward\ "$port:$RA_LOCAL_PORT"\ -c\ "$codespace")
       return 0 ;;
   esac
   return 1
@@ -142,7 +180,7 @@ forward_launch_process_matches() {
   forward_owner_matches "$pid" "$run_id" || return 1
   cmd="$(ps -p "$pid" -o command= 2>/dev/null)" || return 1
   case "$cmd" in
-    *"gh codespace ports forward $port:$port -c $codespace"*) return 0 ;;
+    *"gh codespace ports forward $port:$RA_LOCAL_PORT -c $codespace"*) return 0 ;;
   esac
   return 1
 }
@@ -317,5 +355,5 @@ cleanup_stale_forward_record() {
 }
 
 local_port_in_use() {
-  (exec 3<>"/dev/tcp/127.0.0.1/$RA_PORT") 2>/dev/null
+  (exec 3<>"/dev/tcp/127.0.0.1/$RA_LOCAL_PORT") 2>/dev/null
 }
