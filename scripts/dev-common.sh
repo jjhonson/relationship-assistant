@@ -100,7 +100,10 @@ resolve_codespace() {
 # piped on stdin to `bash -s`, so nothing needs to be installed in the Codespace.
 remote_run() {
   if [ "$RA_MODE" = personal ]; then
-    gh codespace ssh -c "$RA_CODESPACE" -- bash -s -- "$1" "$RA_REMOTE_DIR" "$RA_PORT" "${RA_FORCE:-0}" "${2:-}" personal < "$RA_REMOTE_SCRIPT"
+    # SSH transports a command string, so an empty argument can disappear.
+    # Preserve the sixth (runtime mode) argument for Stop and other calls
+    # without an explicit run ID. stop-start still requires its exact run ID.
+    gh codespace ssh -c "$RA_CODESPACE" -- bash -s -- "$1" "$RA_REMOTE_DIR" "$RA_PORT" "${RA_FORCE:-0}" "${2:-no-run-id}" personal < "$RA_REMOTE_SCRIPT"
   else
     gh codespace ssh -c "$RA_CODESPACE" -- bash -s -- "$1" "$RA_REMOTE_DIR" "$RA_PORT" "${RA_FORCE:-0}" "${2:-}" < "$RA_REMOTE_SCRIPT"
   fi

@@ -164,6 +164,15 @@ describe("dev-start / dev-stop (dry run)", () => {
     expect(existsSync(path.join(tmp, "state"))).toBe(false);
   });
 
+  it("preserves the personal Stop mode across SSH when no run ID is needed", () => {
+    fakeGh("cs-one\\tAvailable\\n");
+    const stopped = run("dev-stop.sh", ["--personal"], { RA_FAKE_GH_REMOTE_STUB: "1" });
+    expect(stopped.status, stopped.stderr).toBe(0);
+    // fakeGh logs the flattened command, matching the SSH transport boundary.
+    expect(ghCalls()).toContain("-- bash -s -- stop /workspaces/relationship-assistant 3000 0 no-run-id personal");
+    expect(stopped.stdout).toContain("Done.");
+  });
+
   it("refuses personal startup before launching anything if port visibility is unsafe", () => {
     fakeGh("cs-one\\tAvailable\\n");
     const lsof = path.join(bin, "lsof");
