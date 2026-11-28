@@ -1,13 +1,16 @@
 import type { CaptureEvent } from "./capture";
+import { captureLocalDay } from "./capture-calendar";
 import { connectionEventLabel, validPastDate, type ConnectionJourney } from "./connection-journey";
 import type { DurableRelationshipFact, RelationshipRecord, RelationshipSource } from "./relationship-record";
 import { homeInteractionDate } from "./home-view";
+import { locationMeaning, locationDisplayLabel } from "./location-meaning";
 
 /** Projection only: old and new facts stay in the original source-backed memory. */
 const fields = [
   { label: "Company", categories: ["Work"], aliases: ["company", "employer", "current company", "current employer", "workplace", "employer name"] },
   { label: "Title", categories: ["Work"], aliases: ["role", "title", "job title", "job role", "current role", "current title", "position", "current position", "job position"] },
-  { label: "Location", categories: ["Location"], aliases: ["city", "home", "home city", "home location", "location", "residence", "current location", "current city", "current residence", "place of residence", "where they live"] },
+  // Internal field key retained for callers; this slot means residence only.
+  { label: "Location", categories: ["Location"], aliases: [] },
   { label: "Email", categories: ["Personal", "Work", "Other"], aliases: ["email", "email address", "work email", "personal email"] },
   { label: "Phone", categories: ["Personal", "Work", "Other"], aliases: ["phone", "phone number", "mobile", "mobile number", "telephone", "cell phone"] },
   { label: "LinkedIn", categories: ["Personal", "Work", "Other"], aliases: ["linkedin", "linkedin url", "linkedin profile", "linkedin profile url"] },
@@ -47,6 +50,12 @@ export type RelationshipHistoryEntry = {
 
 function normalized(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function matchesContactField(fact: DurableRelationshipFact, field: typeof fields[number], known: ReadonlyMap<string, RelationshipSource>) {
+  if (field.label === "Location") return locationMeaning(fact, known) === "home";
+  return (field.aliases as readonly string[]).includes(normalized(fact.label)) &&
+    (field.categories as readonly string[]).includes(fact.category);
 }
 
 function dateLabel(value: string, today: string) {
@@ -104,12 +113,9 @@ function factValue(fact: DurableRelationshipFact, known: Map<string, Relationshi
 export function relationshipContactFields(record: RelationshipRecord, today: string): ContactField[] {
   const known = new Map(record.sources.map((source) => [source.id, source]));
   return fields.map((field) => {
-    const aliases: readonly string[] = field.aliases;
-    const categories: readonly string[] = field.categories;
     const values: ContactValue[] = [];
     for (const fact of record.durableFacts) {
-      if (!aliases.includes(normalized(fact.label)) || !categories.includes(fact.category) ||
-          !plausibleContactValue(field.label, fact.value)) continue;
+      if (!matchesContactField(fact, field, known) || !plausibleContactValue(field.label, fact.value)) continue;
       const value = factValue(fact, known, today);
       if (!value) continue;
       const observations = evidenceFor(value.sourceIds, known, today).map((source): ContactObservation => ({
@@ -196,9 +202,7 @@ export function lastContactDescription(record: RelationshipRecord, today: string
 export function relationshipContextSummary(record: RelationshipRecord, details: ContactDetail[], today: string): MemoryLine[] {
   const known = new Map(record.sources.map((source) => [source.id, source]));
   const shown = new Set(details.flatMap((field) => field.factIds));
-  const isContactFact = (fact: DurableRelationshipFact) => fields.some((field) =>
-    (field.aliases as readonly string[]).includes(normalized(fact.label)) &&
-    (field.categories as readonly string[]).includes(fact.category));
+  const isContactFact = (fact: DurableRelationshipFact) => fields.some((field) => matchesContactField(fact, field, known));
   const threads = record.activeThreads.flatMap((thread) =>
     thread.state.trim() && dateLabel(thread.lastObservedAt, today) &&
     evidenceFor(thread.sourceIds, known, today).length
@@ -206,7 +210,7 @@ export function relationshipContextSummary(record: RelationshipRecord, details: 
       : []);
   const facts = record.durableFacts.flatMap((fact) =>
     !shown.has(fact.id) && !isContactFact(fact) && fact.value.trim() && factValue(fact, known, today)
-      ? [{ id: "fact:" + fact.id, label: fact.label, value: fact.value, date: fact.lastObservedAt }]
+      ? [{ id: "fact:" + fact.id, label: locationMeaning(fact, known) ? locationDisplayLabel(locationMeaning(fact, known)!) : fact.label, value: fact.value, date: fact.lastObservedAt }]
       : []);
   // Prefer the strongest two recent threads; leave the remaining evidence available below.
   const byDate = (a: MemoryLine, b: MemoryLine) => b.date.localeCompare(a.date);
@@ -221,14 +225,15 @@ export function relationshipPortrait(record: RelationshipRecord, today: string):
   const groups = new Map<string, MemoryLine[]>();
   function add(group: string, item: MemoryLine) {
     const list = groups.get(group) ?? [];
-    if (!list.some((existing) => normalized(existing.value) === normalized(item.value))) list.push(item);
+    const typedLocation = ["Work location", "Profile location", "Location (meaning unclear)"].includes(item.label);
+    if (!list.some((existing) => normalized(existing.value) === normalized(item.value) &&
+      (!typedLocation || existing.label === item.label))) list.push(item);
     groups.set(group, list);
   }
   for (const fact of record.durableFacts) {
-    const isContactFact = fields.some((field) =>
-      (field.aliases as readonly string[]).includes(normalized(fact.label)) &&
-      (field.categories as readonly string[]).includes(fact.category));
+    const isContactFact = fields.some((field) => matchesContactField(fact, field, known));
     if (isContactFact || !factValue(fact, known, today) || !fact.value.trim()) continue;
+    const meaning = locationMeaning(fact, known);
     const label = normalized(fact.label);
     // Use explicit labels to group, never infer cessation from age of a fact.
     // Keep the actual wording intact, including "used to" or "no longer".
@@ -238,10 +243,10 @@ export function relationshipPortrait(record: RelationshipRecord, today: string):
         ? "Earlier chapters"
         : fact.category === "Family" ? "Family & life"
           : fact.category === "Interest" ? "Interests & activities"
-            : fact.category === "Work" ? "Work & projects"
+            : meaning === "work" || fact.category === "Work" ? "Work & projects"
               : fact.category === "Location" ? "Places & plans"
                 : "Other things to remember";
-    add(group, { id: "fact:" + fact.id, label: fact.label, value: fact.value, date: fact.lastObservedAt });
+    add(group, { id: "fact:" + fact.id, label: meaning ? locationDisplayLabel(meaning) : fact.label, value: fact.value, date: fact.lastObservedAt });
   }
   for (const thread of record.activeThreads) {
     if (!thread.state.trim() || !dateLabel(thread.lastObservedAt, today) ||
@@ -281,7 +286,7 @@ export function relationshipInteractionHistory(record: RelationshipRecord, captu
     if (!capture.people.some((person) => person.relationshipId === record.id) &&
         capture.contextRelationshipId !== record.id) continue;
     const reported = capture.reportedInteractionAt && dateLabel(capture.reportedInteractionAt, today);
-    const date = reported || dateLabel(capture.capturedAt.slice(0, 10), today);
+    const date = reported || dateLabel(captureLocalDay(capture.capturedAt), today);
     if (!date) continue;
     entries.push({ id: "capture:" + capture.id, date,
       label: reported ? "Reported conversation" : capture.source === "user-image" ? "Saved photo" : "Saved note",

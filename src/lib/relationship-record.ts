@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { locationMeaning } from "./location-meaning";
 import type {
   RelationshipContextValue,
   RelationshipInference,
@@ -557,7 +558,7 @@ export function mergeInteractionIntoRelationship(
     currentState: "Active",
     openLoops: mergeActiveOpenLoops(record, extraction.openLoops, source),
     unknowns: unique([...record.unknowns, ...extraction.unknowns]),
-    durableFacts: mergeFacts(record.durableFacts, extraction.durableFacts, source),
+    durableFacts: mergeFacts(record.durableFacts, extraction.durableFacts, source, record.sources),
     activeThreads: mergeThreads(record.activeThreads, extraction.activeThreads, source),
     stewardshipOpportunities: [
       ...record.stewardshipOpportunities.filter((item) => item.userConfirmed === true),
@@ -648,15 +649,25 @@ function mergeFacts(
   existing: DurableRelationshipFact[],
   incoming: InteractionExtraction["durableFacts"],
   source: RelationshipSource,
+  priorSources: RelationshipSource[],
 ) {
   const result = [...existing];
+  const known = new Map([...priorSources, source].map(item => [item.id, item]));
   for (const fact of incoming) {
+    const meaning = locationMeaning({...fact,sourceIds:[source.id],lastObservedAt:source.observedAt},known);
+    // A proposed existingFactId is not authority to overwrite a different
+    // location attribute. Retain distinct dated location values for review.
+    const compatible = (item: DurableRelationshipFact) => {
+      const prior = locationMeaning(item,known);
+      return (meaning === null && prior === null) ||
+        (meaning !== null && prior === meaning && normalize(item.value) === normalize(fact.value));
+    };
     const existingIndex = fact.existingFactId
-      ? result.findIndex((item) => item.id === fact.existingFactId)
+      ? result.findIndex((item) => item.id === fact.existingFactId && compatible(item))
       : -1;
     const key = normalize(fact.label) + "|" + normalize(fact.value);
     const fallbackIndex = result.findIndex(
-      (item) => normalize(item.label) + "|" + normalize(item.value) === key,
+      (item) => normalize(item.label) + "|" + normalize(item.value) === key && compatible(item),
     );
     const index = existingIndex >= 0 ? existingIndex : fallbackIndex;
     const factValue = {

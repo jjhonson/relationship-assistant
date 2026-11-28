@@ -3,7 +3,8 @@
 import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
 
 import { revalidatePath } from "next/cache";
-import { getRelationship, savePersonalMoment } from "@/lib/relationship-store";
+import { getCapture, getRelationship, savePersonalMoment } from "@/lib/relationship-store";
+import { savedCaptureDestination } from "@/lib/capture-return";
 import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { learnFromPastedConversation } from "./actions";
 import { saveQuickCaptureWithoutRedirect } from "./capture-actions";
@@ -33,6 +34,7 @@ type ReviewedInput = {
   source: CaptureSource;
   interactionDate: string;
   submissionId?: string;
+  returnToRelationship?: boolean;
 };
 
 /** Explicit human approval picks a retention path. Pasted conversations are NEVER saved raw. */
@@ -72,7 +74,7 @@ export async function saveReviewedPersonCapture(relationshipId: string, input: R
     if (input.interactionDate) form.set("reportedInteractionAt", input.interactionDate);
     // Explicitly user-authored notes preserve their wording as an intentional memory.
     const { captureId } = await saveQuickCaptureWithoutRedirect(relationshipId, form);
-    return { saved: true as const, destination: "/captures/" + encodeURIComponent(captureId) };
+    return { saved: true as const, destination: await savedCaptureDestination(captureId, input.returnToRelationship ? relationshipId : null, getCapture) };
   }
 
   if (input.kind === "moment") {

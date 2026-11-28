@@ -1,12 +1,12 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 const mocks=vi.hoisted(()=>({
-  listRelationships:vi.fn(),getRelationship:vi.fn(),savePersonalMoment:vi.fn(),
+  listRelationships:vi.fn(),getRelationship:vi.fn(),getCapture:vi.fn(),listCapturesForRelationship:vi.fn(),savePersonalMoment:vi.fn(),
   saveReviewedPersonCapture:vi.fn(),learnFromNewPastedConversation:vi.fn(),
   saveQuickCaptureWithoutRedirect:vi.fn(),saveUniversalCaptureWithoutRedirect:vi.fn(),
   revalidatePath:vi.fn(),
 }));
 vi.mock("@/lib/relationship-store",()=>({
-  listRelationships:mocks.listRelationships,getRelationship:mocks.getRelationship,
+  listRelationships:mocks.listRelationships,getRelationship:mocks.getRelationship,getCapture:mocks.getCapture,listCapturesForRelationship:mocks.listCapturesForRelationship,
   savePersonalMoment:mocks.savePersonalMoment,
 }));
 vi.mock("@/app/relationships/conversational-actions",()=>({saveReviewedPersonCapture:mocks.saveReviewedPersonCapture}));
@@ -49,6 +49,7 @@ describe("read-only person entry routing",()=>{
     vi.stubEnv("OPENAI_API_KEY","");
     const {p,other}=fixtures();
     mocks.listRelationships.mockResolvedValue([p,other]);
+    mocks.listCapturesForRelationship.mockResolvedValue([]);
     mocks.getRelationship.mockResolvedValue(p);
     mocks.saveReviewedPersonCapture.mockResolvedValue({saved:true,destination:"/relationships/rowan"});
   });
@@ -95,7 +96,7 @@ describe("read-only person entry routing",()=>{
     const r=await submitHomeText({text:"He enjoys pottery.",submissionId,contextRelationshipId:"rowan"});
     expect(r).toMatchObject({state:"saved",destination:"/relationships/rowan"});
     expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledOnce();
-    expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("rowan",expect.objectContaining({text:"He enjoys pottery.",kind:"note",interactionDate:""}));
+    expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("rowan",expect.objectContaining({text:"He enjoys pottery.",kind:"note",interactionDate:"",returnToRelationship:true}));
   });
   it("rejects a question with a photo before invoking the image write path",async()=>{
     const form=new FormData();
@@ -104,4 +105,59 @@ describe("read-only person entry routing",()=>{
     await expect(saveHomePhotoInput(form,"rowan")).rejects.toThrow("Questions or corrections");
     noWrites();
   });
+  it("returns a successfully linked screenshot to its relationship, with the memory accessible",async()=>{
+    const form=new FormData();
+    form.set("note","Professional profile screenshot");
+    form.set("photo",new File(["fixture"],"profile.png",{type:"image/png"}));
+    mocks.saveUniversalCaptureWithoutRedirect.mockResolvedValue({error:null,captureId:"capture-1"});
+    mocks.getCapture.mockResolvedValue({id:"capture-1",status:"interpreted",contextRelationshipId:"rowan",people:[{resolution:"linked",relationshipId:"rowan"}]});
+    const r=await saveHomePhotoInput(form,"rowan");
+    expect(r).toEqual({destination:"/relationships/rowan?memorySaved=capture-1"});
+    expect(mocks.getCapture).toHaveBeenCalledWith("capture-1");
+    expect(mocks.saveUniversalCaptureWithoutRedirect).toHaveBeenCalledOnce();
+  });
+  it("keeps an unresolved screenshot or a Home capture in saved-memory review",async()=>{
+    const form=new FormData();
+    form.set("note","Professional profile screenshot");
+    form.set("photo",new File(["fixture"],"profile.png",{type:"image/png"}));
+    mocks.saveUniversalCaptureWithoutRedirect.mockResolvedValue({error:null,captureId:"capture-1"});
+    mocks.getCapture.mockResolvedValue({id:"capture-1",status:"pending",contextRelationshipId:"rowan",people:[]});
+    expect(await saveHomePhotoInput(form,"rowan")).toEqual({destination:"/captures/capture-1"});
+    mocks.getCapture.mockClear();
+    expect(await saveHomePhotoInput(form)).toEqual({destination:"/captures/capture-1"});
+    expect(mocks.getCapture).not.toHaveBeenCalled();
+  });
+
+  it("routes a dated received email to structured conversation capture even when quoted text describes changes or asks questions",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    vi.stubEnv("RELATIONSHIP_USER_TIME_ZONE","America/Denver");
+    vi.useFakeTimers({toFake:["Date"]});
+    vi.setSystemTime(new Date("2026-11-28T00:53:00.000Z"));
+    try{
+      const message="Email from Rowan on Nov 20 following our meeting:\nHi,\nWe're no longer pursuing the old project. I think we can revisit later. Could we talk then? Avery Morgan is involved.";
+      const fetchMock=vi.fn(async()=>response("change"));
+      vi.stubGlobal("fetch",fetchMock);
+      const result=await submitHomeText({text:message,submissionId,contextRelationshipId:"rowan"});
+      expect(result).toMatchObject({state:"saved",destination:"/relationships/rowan"});
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledOnce();
+      expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("rowan",expect.objectContaining({text:message,kind:"conversation",source:"email",interactionDate:"2026-11-20",submissionId}));
+      expect(mocks.saveQuickCaptureWithoutRedirect).not.toHaveBeenCalled();
+    }finally{vi.useRealTimers();}
+  });
+  it("asks for the sent date, not a quoted relative date, if the date is unknown",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    const result=await submitHomeText({text:"Email from Rowan:\nI spoke with Avery yesterday. We should catch up.",submissionId,contextRelationshipId:"rowan"});
+    expect(result).toMatchObject({state:"clarify",field:"date",kind:"conversation"});
+    noWrites();
+  });
+  it("does not attach a different or unknown sender to the selected person",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    for(const sender of ["Avery Morgan","Rowan Differentperson","Unlisted Person"]){
+      const result=await submitHomeText({text:"Email from "+sender+" on Nov 20:\nA new update.",submissionId,contextRelationshipId:"rowan"});
+      expect(result).toMatchObject({state:"answer",retainInput:true});
+    }
+    noWrites();
+  });
+
 });

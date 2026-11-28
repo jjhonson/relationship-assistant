@@ -20,7 +20,9 @@ function PortraitItem({ item, chip }: { item: PortraitGroup["items"][number]; ch
         <summary title="Show saved wording and date"
           className={(canUseLabel ? "inline-flex rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 " : "block text-sm leading-relaxed text-stone-800 ") +
             "cursor-pointer list-none break-words hover:underline [&::-webkit-details-marker]:hidden"}>
-          {canUseLabel ? item.label : item.value}
+          {["Work location","Profile location","Location (meaning unclear)"].includes(item.label)
+            ? <><span className="text-xs text-stone-500">{item.label}: </span>{item.value}</>
+            : canUseLabel ? item.label : item.value}
         </summary>
         <div className="mt-1.5 rounded-lg bg-white px-2.5 py-2 text-xs text-stone-600">
           {canUseLabel && <p className="text-sm text-stone-800">{item.value}</p>}

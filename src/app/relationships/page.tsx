@@ -3,6 +3,7 @@ import { createManualRelationship } from "./actions";
 import { listRecentCaptures, listRelationships } from "@/lib/relationship-store";
 import { relationshipContactDetails, relationshipContextLabel, lastContactDescription } from "@/lib/relationship-overview";
 import RelationshipDirectory from "./RelationshipDirectory";
+import { captureLocalDay, localCaptureEvidence } from "@/lib/capture-calendar";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,7 @@ export default async function RelationshipsPage() {
     year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date());
   const people = relationships.map((relationship) => {
-    const fields = relationshipContactDetails(relationship, today);
+    const fields = relationshipContactDetails(localCaptureEvidence(relationship,recentCaptures), today);
     const title = fields.find((field) => field.label === "Title")?.value;
     const company = fields.find((field) => field.label === "Company")?.value;
     const context = relationshipContextLabel(relationship, today);
@@ -62,7 +63,7 @@ export default async function RelationshipsPage() {
             {recentCaptures.map((capture) => (
               <li key={capture.id}>
                 <Link href={"/captures/" + capture.id} className="block rounded-xl border border-stone-200 bg-white p-4 hover:border-indigo-300">
-                  <span className="text-xs text-stone-500">{capture.capturedAt.slice(0, 10)}</span>
+                  <span className="text-xs text-stone-500">{captureLocalDay(capture.capturedAt)}</span>
                   <p className="mt-1 text-sm font-medium text-stone-900">
                     {capture.summary || capture.note.slice(0, 180)}
                   </p>

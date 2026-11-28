@@ -1,5 +1,5 @@
 import type { CaptureInterpretation, CaptureKind, CaptureSource } from "./conversational-capture";
-import { looksLikePastedConversation } from "./conversational-capture";
+import { looksLikePastedConversation, introducedEmail } from "./conversational-capture";
 import type { HomePersonChoice } from "./home-identity";
 import { suggestHomePerson } from "./home-identity";
 
@@ -139,7 +139,8 @@ export function planHomeCapture(input: {
     }
   }
 
-  const textDay = reportedConversationDay(text, today);
+  // A first-person statement inside an email is not the owner reporting an encounter.
+  const textDay = introducedEmail(text) ? "" : reportedConversationDay(text, today);
   const date = choices.interactionDate || (
     kind === "conversation" ? interpretation.interactionDate || textDay : textDay
   );

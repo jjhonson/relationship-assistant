@@ -163,11 +163,21 @@ describe("universal text capture", () => {
     const updated=applied.relationships[0];
     expect(updated.id).toBe(existing.id);
     expect(updated.lastInteractionAt).toBe("2026-10-01");
-    expect(updated.durableFacts.map(fact=>[fact.label,fact.value])).toEqual(expect.arrayContaining([["Company","Prior Company"],["Company","Example Software"],["Role","Engineering Director"],["City","Fort Collins, Colorado"]]));
+    expect(updated.durableFacts.map(fact=>[fact.label,fact.value])).toEqual(expect.arrayContaining([["Company","Prior Company"],["Company","Example Software"],["Role","Engineering Director"],["Location (unspecified)","Fort Collins, Colorado"]]));
     expect(updated.durableFacts.find(fact=>fact.value==="Example Software")?.sourceIds).toContain("capture:"+event.id);
     expect(applied.event.reportedInteractionAt).toBeUndefined();
   });
 
+  it("stores a role location separately from a residence and does not duplicate the legacy city scalar",()=>{
+    const existing=createManualRelationshipRecord("Fictional Robin",undefined,undefined,now);
+    const source=existing.sources[0];
+    existing.durableFacts.push({id:"home",category:"Location",label:"Home city",value:"Home Town",sourceIds:[source.id],firstObservedAt:source.observedAt,lastObservedAt:source.observedAt});
+    const event=newImageCaptureEvent({note:"Professional profile",sourceText:"Current role at Example Software · Office Town",visualDetails:"Experience entry."},existing.id,now);
+    const result=applyCaptureExtraction(event,extraction([person("Fictional Robin",{city:"Office Town",facts:[{category:"Work",label:"Work location",value:"Office Town"},{category:"Location",label:"Profile location",value:"Metro Area"}]})]),[existing],now);
+    const facts=result.relationships[0].durableFacts;
+    expect(facts.map(fact=>[fact.label,fact.value])).toEqual([["Home city","Home Town"],["Work location","Office Town"],["Profile location","Metro Area"]]);
+    expect(result.relationships[0].lastInteractionAt).toBeNull();
+  });
   it("allows an image-only memory with no presumed relationship, but rejects empty photo results", () => {
     const event = newImageCaptureEvent({ note: "", sourceText: "", visualDetails: "An old team photo." }, null, now);
     const applied = applyCaptureExtraction(event, extraction([], { summary: "Team photograph." }), [], now);

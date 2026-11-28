@@ -15,6 +15,7 @@ export const PHOTO_SYSTEM_PROMPT = [
   "Do not identify people from faces. Do not infer relationships, pet names, jobs, or ages from appearance.",
   "For holiday cards, distinguish sender names and family details from printer, photographer, retailer, and design credits.",
   "For profile screenshots, preserve the clearly labeled primary profile header and experience entries with their visible dates. Distinguish a headline from a confirmed current position; distinguish the profile owner from recommendations, ads, and other profiles. Do not reconstruct a missing link or fetch the page.",
+  "Keep profile-header geography separate from locations within dated Experience or employer entries. Preserve their visible association and layout in the transcription. Do not interpret a role location as a residence.",
   "Return empty strings where there is no readable text or relevant visual context. Do not give recommendations.",
 ].join("\n");
 

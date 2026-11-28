@@ -48,7 +48,7 @@ function ContactSlot({ field }: { field: ContactField }) {
   return (
     <div className="min-w-0">
       <dt className="flex items-center gap-1.5 text-xs font-medium text-stone-500">
-        <InterfaceIcon name={fieldIcons[field.label]} className="size-3.5" />{field.label}
+        <InterfaceIcon name={fieldIcons[field.label]} className="size-3.5" />{field.label === "Location" ? "Lives in" : field.label}
       </dt>
       <dd className="mt-1 min-w-0">
         {values.length ? (
@@ -70,7 +70,7 @@ function ContactSlot({ field }: { field: ContactField }) {
                 className="mt-3 inline-flex items-center gap-1 text-xs font-medium underline underline-offset-2">Open profile <InterfaceIcon name="arrow" className="size-3" /></a>}
             </div>
           </details>
-        ) : <p className="text-sm text-stone-400">Not recorded</p>}
+        ) : <p className="text-sm text-stone-400">{field.label === "Location" ? "Home not recorded" : "Not recorded"}</p>}
       </dd>
     </div>
   );

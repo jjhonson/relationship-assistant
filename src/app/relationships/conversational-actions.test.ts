@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getRelationship: vi.fn(),
+  getCapture: vi.fn(),
   savePersonalMoment: vi.fn(),
   learnFromPastedConversation: vi.fn(),
   saveQuickCaptureWithoutRedirect: vi.fn(),
   revalidatePath: vi.fn(),
 }));
 vi.mock("@/lib/relationship-store", () => ({
-  getRelationship: mocks.getRelationship, savePersonalMoment: mocks.savePersonalMoment,
+  getRelationship: mocks.getRelationship, getCapture: mocks.getCapture, savePersonalMoment: mocks.savePersonalMoment,
 }));
 vi.mock("./actions", () => ({ learnFromPastedConversation: mocks.learnFromPastedConversation }));
 vi.mock("./capture-actions", () => ({ saveQuickCaptureWithoutRedirect: mocks.saveQuickCaptureWithoutRedirect }));
@@ -50,6 +51,15 @@ describe("reviewed capture saves without nested redirect exceptions", () => {
     const form = mocks.saveQuickCaptureWithoutRedirect.mock.calls[0][1] as FormData;
     expect(form.get("note")).toBe("I met Tom outside.");
     expect(mocks.learnFromPastedConversation).not.toHaveBeenCalled();
+  });
+
+  it("returns a scoped interpreted note to the person, but keeps unscoped notes in review", async () => {
+    const note={text:"Tom enjoys guitar.",kind:"note" as const,source:"unspecified" as const,interactionDate:""};
+    mocks.getCapture.mockResolvedValue({id:"note-1",status:"interpreted",contextRelationshipId:"tom",people:[{resolution:"linked",relationshipId:"tom"}]});
+    expect(await saveReviewedPersonCapture("tom",{...note,returnToRelationship:true})).toEqual({saved:true,destination:"/relationships/tom?memorySaved=note-1"});
+    expect(await saveReviewedPersonCapture("tom",note)).toEqual({saved:true,destination:"/captures/note-1"});
+    mocks.getCapture.mockRejectedValueOnce(new Error("read failed after write"));
+    expect(await saveReviewedPersonCapture("tom",{...note,returnToRelationship:true})).toEqual({saved:true,destination:"/captures/note-1"});
   });
 
   it("returns a successful private moment route after storage", async () => {

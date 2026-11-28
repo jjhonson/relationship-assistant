@@ -3,10 +3,12 @@
 import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
 
 import { revalidatePath } from "next/cache";
-import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
+import { interpretConversationalCapture, introducedEmail, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { suggestHomePerson } from "@/lib/home-identity";
 import { planHomeCapture, type HomeCaptureChoices } from "@/lib/home-direct-capture";
-import { getRelationship, listRelationships, savePersonalMoment } from "@/lib/relationship-store";
+import { getCapture, getRelationship, listRelationships, listCapturesForRelationship, savePersonalMoment } from "@/lib/relationship-store";
+import { localCaptureEvidence } from "@/lib/capture-calendar";
+import { savedCaptureDestination } from "@/lib/capture-return";
 import { saveReviewedPersonCapture } from "@/app/relationships/conversational-actions";
 import { learnFromNewPastedConversation } from "@/app/relationships/actions";
 import { saveQuickCaptureWithoutRedirect, saveUniversalCaptureWithoutRedirect } from "@/app/relationships/capture-actions";
@@ -47,6 +49,7 @@ export type ReviewedHomeInput = {
   relationshipId: string;
   newPersonLabel?: string;
   submissionId?: string;
+  fromRelationshipRecord?: boolean;
 };
 
 /** A confirmed input uses one existing retention path, never an automatic relationship merge. */
@@ -107,6 +110,7 @@ export async function saveHomeInput(input: ReviewedHomeInput) {
     source: input.source,
     interactionDate: input.interactionDate,
     submissionId: input.submissionId,
+    ...(input.fromRelationshipRecord === true ? { returnToRelationship: true } : {}),
   });
   revalidatePath("/");
   return result;
@@ -130,7 +134,7 @@ export async function saveHomePhotoInput(formData: FormData, contextRelationship
     throw new Error(result.error ?? "Photo save could not be confirmed.");
   }
   revalidatePath("/");
-  return { destination: "/captures/" + encodeURIComponent(result.captureId) };
+  return { destination: await savedCaptureDestination(result.captureId, contextRelationshipId, getCapture) };
 }
 
 /**
@@ -171,14 +175,20 @@ export async function submitHomeText(input: {
   // Person-page input must pass the intent gate before capture planning,
   // including retries after a previous capture clarification.
   let interpretation;
+  const introduced=introducedEmail(input.text);
   if (pageContext) {
-    const target = suggestHomePerson(input.text, known.map(person => ({ id:person.id,label:person.personLabel })));
+    const sender=introduced?.sender.toLowerCase().trim();
+    const exact=sender?known.filter(person=>person.personLabel.trim().toLowerCase()===sender):[];
+    const matches=sender?(exact.length?exact:sender.includes(" ")?[]:known.filter(person=>person.personLabel.trim().toLowerCase().split(/\s+/)[0]===sender)):[];
+    const target = introduced
+      ? {id:matches.length===1?matches[0].id:null,ambiguous:matches.length!==1}
+      : suggestHomePerson(input.text, known.map(person => ({ id:person.id,label:person.personLabel })));
     if (target.ambiguous || (target.id && target.id !== pageContext.id) ||
         (chosenId && chosenId !== pageContext.id)) {
       return { state:"answer" as const, message:"Open the relationship for the person you mean and try again. Nothing was changed.", evidence:[], offline:false, retainInput:true };
     }
     const result = await interpretRelationshipEntry({
-      text:input.text,record:pageContext,today,
+      text:input.text,record:localCaptureEvidence(pageContext,await listCapturesForRelationship(pageContext.id)),today,
       offlinePreview: !options.apiKey && process.env.NODE_ENV === "development" &&
         (!process.env.RA_DATASET_MODE || process.env.RA_DATASET_MODE === "fictional") &&
         (!process.env.RA_STORAGE_BACKEND || process.env.RA_STORAGE_BACKEND === "json"),
@@ -196,7 +206,7 @@ export async function submitHomeText(input: {
     interpretation,
     people: known.map((person) => ({ id: person.id, label: person.personLabel })),
     today,
-    choices: input.choices,
+    choices: introduced&&pageContext ? {...input.choices,relationshipId:pageContext.id} : input.choices,
     importedTextFile: input.importedTextFile === true,
     contextRelationshipId: input.contextRelationshipId,
   });
@@ -215,6 +225,7 @@ export async function submitHomeText(input: {
     newPersonLabel: plan.kind === "conversation" && !plan.relationshipId ? plan.choices.newPersonLabel : undefined,
     interactionDate: plan.interactionDate,
     submissionId: input.submissionId,
+    fromRelationshipRecord: !!pageContext,
   });
   return { state: "saved" as const, destination: saved.destination };
 }
