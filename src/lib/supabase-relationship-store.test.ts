@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualRelationshipRecord } from "./relationship-record";
+import { reviewPersonGmailMemory } from "./gmail/person-import-removal";
 import {
   correctSavedActionableMemory, getRelationship, listConnectionJourneys,
   saveRelationshipCadence, dismissSavedConnectionSuggestion,
   listPersonalMoments, saveConfirmedConnectionEvents,
-  savePersonalMoment, saveRelationship, startConnectionJourney, savePersonGmailMemory,
+  savePersonalMoment, saveRelationship, startConnectionJourney, savePersonGmailMemory, removePersonGmailSources,
 } from "./relationship-store";
 
 const owner = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -122,6 +123,40 @@ describe("fictional Next.js domain operations with remote storage selected", () 
     expect(saved.durableFacts.map((fact) => fact.value)).toEqual(["alex@example.test", "Example Software"]);
     expect(saved.lastInteractionAt).toBe("2025-11-20");
     expect(calls.every(url => url.includes("example.supabase.co/rest/v1/rpc/ra_store_"))).toBe(true);
+  });
+
+  it("removes reviewed Gmail sources atomically while retaining an independent person and manual facts", async () => {
+    const person = createManualRelationshipRecord("Fictional removal contact");
+    person.lastInteractionAt = "2025-10-01";
+    person.sources.push({ id: "pasted:manual-fixture", source: "transcript", observedAt: "2025-10-01", label: "Manual conversation" });
+    person.durableFacts.push({ id: "manual-fact", category: "Work", label: "Company", value: "Example Software",
+      firstObservedAt: "2025-10-01", lastObservedAt: "2025-10-01", sourceIds: ["pasted:manual-fixture"] });
+    const other = createManualRelationshipRecord("Fictional separate contact");
+    await saveRelationship(person);
+    await saveRelationship(other);
+    const input = {
+      scope: { personId: person.id, mailboxAddress: "owner@example.test", confirmedAddresses: ["alex@example.test"] },
+      candidate: { providerKey: "gmail:owner@example.test:message-removal", messageId: "message-removal",
+        threadId: "thread-fixture", observedAt: "2025-11-20T15:00:00.000Z",
+        direction: "received" as const, contactAddress: "alex@example.test" },
+      extraction: { durableFacts: [{ category: "Work" as const, label: "Company", value: "Example Software", existingFactId: "" }] },
+    };
+    await savePersonGmailMemory(input);
+    const saved = (await getRelationship(person.id))!;
+    const review = reviewPersonGmailMemory(saved);
+    expect(review.sources).toHaveLength(1);
+    const beforeRemoval = revision;
+    await expect(removePersonGmailSources(person.id, [review.sources[0].id], "stale-review")).rejects.toThrow("changed");
+    expect(revision).toBe(beforeRemoval);
+    expect(await removePersonGmailSources(person.id, [review.sources[0].id], review.version))
+      .toEqual({ removedMessages: 1, removedFacts: 1, preservedFacts: 1 });
+    const updated = (await getRelationship(person.id))!;
+    expect(updated.sources).toEqual(person.sources);
+    expect(updated.durableFacts).toEqual(person.durableFacts);
+    expect(updated.lastInteractionAt).toBe("2025-10-01");
+    expect(await getRelationship(other.id)).toMatchObject({ id: other.id, personLabel: other.personLabel, sources: other.sources });
+    expect(await savePersonGmailMemory(input)).toMatchObject({ kind: "needs-review", reason: "memory-removed" });
+    expect((await getRelationship(person.id))?.sources).toEqual(person.sources);
   });
 
 });

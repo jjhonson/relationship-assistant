@@ -601,9 +601,12 @@ export async function removePersonGmailSources(relationshipId: string, sourceIds
     // The importer never shares a source across people. Refuse a malformed or
     // later cross-person reference rather than silently leave or delete it.
     const selected = new Set(sourceIds);
-    if (store.relationships.some((person, i) => i !== index &&
-        (person.sources.some((source) => selected.has(source.id)) ||
-         person.durableFacts.some((fact) => fact.sourceIds.some((id) => selected.has(id))))) {
+    const crossPersonReference = store.relationships.some((person, i) => {
+      if (i === index) return false;
+      return person.sources.some((source) => selected.has(source.id)) ||
+        person.durableFacts.some((fact) => fact.sourceIds.some((id) => selected.has(id)));
+    });
+    if (crossPersonReference) {
       throw new Error("A selected source has another relationship reference.");
     }
     store.relationships[index] = result.record;
