@@ -35,7 +35,7 @@ export default async function RelationshipGmailPage({ params, searchParams }: {
       {importedCount > 0 && <p className="text-sm text-stone-600">{importedCount} Gmail messages already saved.{deferredCount > 0 ? " " + deferredCount + " conflicting observations remain held for review." : ""}</p>}
       {error && <p role="alert" className="text-sm text-amber-900">Gmail authorization did not complete. You can reconnect below.</p>}
       {!config ? (
-        <p className="rounded-xl border border-stone-200 p-4 text-sm text-stone-600">Personal Gmail is not enabled yet. Connecting requires the reviewed private loopback configuration and separate live-use approval. No email access has occurred.</p>
+        <p className="rounded-xl border border-stone-200 p-4 text-sm text-stone-600">Personal Gmail is not enabled yet. Connecting requires the reviewed private loopback configuration and separate live-use approval. This page does not request Gmail data while disabled.</p>
       ) : !connected ? (
         <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-5">
           <p className="text-sm text-stone-700">Connect read-only Gmail to this private personal alpha. Connection alone does not search, read or import your email.</p>
@@ -47,8 +47,8 @@ export default async function RelationshipGmailPage({ params, searchParams }: {
       ) : (
         <>
           <GmailImportPanel key={id} personId={id} personLabel={person.personLabel} initialAddresses={initialAddresses}
-            modelReady={process.env.RA_PERSONAL_GMAIL_MODEL_APPROVED === "yes" && Boolean(process.env.OPENAI_API_KEY)}
-            modelName={process.env.OPENAI_RELATIONSHIP_MODEL ?? "configured relationship model"} />
+            modelReady={process.env.RA_PERSONAL_GMAIL_MODEL_APPROVED === "yes" && Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_RELATIONSHIP_MODEL?.trim())}
+            modelName={process.env.OPENAI_RELATIONSHIP_MODEL?.trim() ?? "not yet configured"} />
           <form method="post" action="/api/gmail/personal/disconnect" className="pt-3">
             <input type="hidden" name="personId" value={id} />
             <button type="submit" className="text-sm text-stone-600 underline underline-offset-4">Disconnect Gmail</button>

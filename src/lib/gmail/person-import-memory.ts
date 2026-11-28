@@ -15,11 +15,12 @@ type GmailProvenance = NonNullable<RelationshipSource["gmailImport"]>;
 export type PersonImportMemoryInput = {
   scope: PersonImportScope;
   candidate: PersonImportCandidate;
+  expectedPersonLabel?: string;
   /** Extracted observations only. No message body, subject or raw transcript. */
   extraction: Pick<InteractionExtraction, "durableFacts">;
 };
 
-type ReviewReason = "identity-conflict" | "provider-conflict" | "possible-manual-overlap";
+type ReviewReason = "identity-conflict" | "provider-conflict" | "possible-manual-overlap" | "person-changed";
 export type PersonImportMemoryResult =
   | { kind: "saved"; record: RelationshipRecord; deferredFactCount: number }
   | { kind: "duplicate"; relationshipId: string }
@@ -112,7 +113,7 @@ export function assessPersonImportMemory(
   records: readonly RelationshipRecord[],
   captures: readonly CaptureEvent[],
   journeys: readonly ConnectionJourney[],
-  input: Pick<PersonImportMemoryInput, "scope" | "candidate">,
+  input: Pick<PersonImportMemoryInput, "scope" | "candidate" | "expectedPersonLabel">,
   now = new Date(),
   timeZone = process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver",
 ): PersonImportAssessment {
@@ -135,6 +136,7 @@ export function assessPersonImportMemory(
   if (!record) throw new Error("Relationship not found.");
   const review = (reason: ReviewReason): PersonImportAssessment =>
     ({ kind: "needs-review", relationshipId: record.id, reason });
+  if (input.expectedPersonLabel !== undefined && record.personLabel !== input.expectedPersonLabel) return review("person-changed");
   const sourceId = "gmail-import:" + createHash("sha256").update(message.providerKey).digest("hex");
   const owners = records.flatMap((person) => person.sources
     .filter((source) => source.id === sourceId || source.gmailImport?.providerKey === message.providerKey)

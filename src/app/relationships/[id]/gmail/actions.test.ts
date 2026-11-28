@@ -40,6 +40,7 @@ describe("person-scoped Gmail action boundaries", () => {
     vi.resetAllMocks();
     vi.stubEnv("RA_PERSONAL_GMAIL_MODEL_APPROVED", "yes");
     vi.stubEnv("OPENAI_API_KEY", "fixture");
+    vi.stubEnv("OPENAI_RELATIONSHIP_MODEL", "fixture-model");
     mocks.origin.mockReturnValue("http://localhost:3001");
     mocks.session.mockResolvedValue(connected);
     mocks.records.mockResolvedValue([{ id: "alex", personLabel: "Alex", sources: [] }]);

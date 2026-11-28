@@ -72,7 +72,7 @@ export async function preparePersonGmailReview(personId: string, addresses: stri
     const scope = normalizePersonImportScope({ personId: person.id, mailboxAddress: mailbox, confirmedAddresses: aliases });
     const previouslyImportedKeys = person.sources.flatMap((source) => source.gmailImport ? [source.gmailImport.providerKey] : []);
     const plan = await lookupPersonImportPlan(token, scope, previouslyImportedKeys);
-    const assessed = await inspectPersonGmailBatch(plan.scope, plan.candidates);
+    const assessed = await inspectPersonGmailBatch(plan.scope, plan.candidates, person.personLabel);
     const ready = assessed.filter((item) => item.kind === "ready" && item.personLabel === person.personLabel).map((item) => item.candidate);
     const selected = ready.slice(-PERSON_GMAIL_ALPHA_BATCH_LIMIT);
     const counts = {
@@ -105,15 +105,18 @@ export async function importPersonGmailReview(personId: string, approval: string
   bodyApproved: boolean, modelApproved: boolean): Promise<GmailImportResult> {
   if (bodyApproved !== true || modelApproved !== true) return error("Approve both email reading and AI processing first.");
   const apiKey = process.env.OPENAI_API_KEY;
-  if (process.env.RA_PERSONAL_GMAIL_MODEL_APPROVED !== "yes" || !apiKey) {
+  const model = process.env.OPENAI_RELATIONSHIP_MODEL?.trim();
+  if (process.env.RA_PERSONAL_GMAIL_MODEL_APPROVED !== "yes" || !apiKey || !model) {
     return error("Live Gmail AI processing has not been enabled.");
   }
   if (typeof approval !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(approval)) return error("Invalid or expired review. Search again.");
   let selection: ReturnType<typeof personGmailApprovals.consume>;
+  let approvedPersonLabel: string;
   let connected: NonNullable<Awaited<ReturnType<typeof personalGmailSessionContext>>>;
   try {
     const current = await context(personId);
     connected = current.connected;
+    approvedPersonLabel = current.person.personLabel;
     selection = personGmailApprovals.consume(approval, current.binding);
     if (selection.candidates.length > PERSON_GMAIL_ALPHA_BATCH_LIMIT ||
         hasPersonImportAddressConflict(current.records, current.person.id, selection.scope.confirmedAddresses)) {
@@ -123,7 +126,7 @@ export async function importPersonGmailReview(personId: string, approval: string
   const result = { kind: "complete" as const, saved: 0, duplicate: 0, reviewNeeded: 0, skippedContent: 0,
     deferredFacts: 0, unconfirmed: 0, notAttempted: 0 };
   try {
-    const assessed = await inspectPersonGmailBatch(selection.scope, selection.candidates);
+    const assessed = await inspectPersonGmailBatch(selection.scope, selection.candidates, approvedPersonLabel);
     result.duplicate += assessed.filter((item) => item.kind === "duplicate").length;
     result.reviewNeeded += assessed.filter((item) => item.kind === "needs-review").length;
     const ready = assessed.filter((item) => item.kind === "ready").map((item) => item.candidate);
@@ -134,7 +137,7 @@ export async function importPersonGmailReview(personId: string, approval: string
     for (let index = 0; index < content.messages.length; index++) {
       try {
         const outcome = await analyzeAndSavePersonGmailMessage(selection.scope, content.messages[index], {
-          apiKey, model: process.env.OPENAI_RELATIONSHIP_MODEL,
+          apiKey, model, expectedPersonLabel: approvedPersonLabel,
         });
         if (outcome.kind === "saved") { result.saved++; result.deferredFacts += outcome.deferredFactCount; }
         else if (outcome.kind === "duplicate") result.duplicate++;

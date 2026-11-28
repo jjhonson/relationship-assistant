@@ -552,7 +552,7 @@ export async function saveInferredConversation(
 
 /** Internal read-only check before paying for model extraction. Recheck the
  * latest dataset atomically when saving; this is not an authorization grant. */
-export async function inspectPersonGmailMemory(input: Pick<PersonImportMemoryInput, "scope" | "candidate">) {
+export async function inspectPersonGmailMemory(input: Pick<PersonImportMemoryInput, "scope" | "candidate" | "expectedPersonLabel">) {
   const store = await readStore();
   const assessment = assessPersonImportMemory(store.relationships, store.captures, store.connectionJourneys, input);
   return assessment.kind === "ready"
@@ -561,11 +561,11 @@ export async function inspectPersonGmailMemory(input: Pick<PersonImportMemoryInp
 }
 
 /** Read the latest dataset once for a bounded batch preflight. */
-export async function inspectPersonGmailBatch(scope: PersonImportMemoryInput["scope"], candidates: PersonImportMemoryInput["candidate"][]) {
+export async function inspectPersonGmailBatch(scope: PersonImportMemoryInput["scope"], candidates: PersonImportMemoryInput["candidate"][], expectedPersonLabel?: string) {
   if (candidates.length > 20) throw new Error("Too many Gmail messages.");
   const store = await readStore();
   return candidates.map((candidate) => {
-    const assessment = assessPersonImportMemory(store.relationships, store.captures, store.connectionJourneys, { scope, candidate });
+    const assessment = assessPersonImportMemory(store.relationships, store.captures, store.connectionJourneys, { scope, candidate, expectedPersonLabel });
     return assessment.kind === "ready"
       ? { candidate, kind: "ready" as const, personLabel: assessment.record.personLabel }
       : { candidate, ...assessment };

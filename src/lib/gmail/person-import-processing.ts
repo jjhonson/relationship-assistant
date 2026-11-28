@@ -13,12 +13,12 @@ import type { PersonImportScope } from "./person-import";
  */
 export async function analyzeAndSavePersonGmailMessage(
   scope: PersonImportScope, message: PersonImportMessage,
-  options: { apiKey: string; model?: string; fetchImpl?: typeof fetch },
+  options: { apiKey: string; model?: string; fetchImpl?: typeof fetch; expectedPersonLabel?: string },
 ) {
-  const assessment = await inspectPersonGmailMemory({ scope, candidate: message });
+  const assessment = await inspectPersonGmailMemory({ scope, candidate: message, expectedPersonLabel: options.expectedPersonLabel });
   if (assessment.kind !== "ready") return assessment;
   const prepared = await inferPersonGmailMemory({
     scope, personLabel: assessment.personLabel, message,
   }, options);
-  return savePersonGmailMemory(prepared);
+  return savePersonGmailMemory({ ...prepared, expectedPersonLabel: options.expectedPersonLabel });
 }
