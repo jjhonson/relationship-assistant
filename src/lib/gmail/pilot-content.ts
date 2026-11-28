@@ -12,17 +12,19 @@ export const MAX_REAL_PILOT_MESSAGE_CHARS = 12_000;
 export const MAX_REAL_PILOT_TOTAL_CHARS = 45_000;
 
 type Header = { name?: string; value?: string };
-type GmailPart = {
+export type GmailPart = {
   mimeType?: string;
   filename?: string;
   headers?: Header[];
   body?: { data?: string; attachmentId?: string; size?: number };
   parts?: GmailPart[];
 };
-type GmailMessage = {
+export type GmailMessage = {
   id?: string;
   threadId?: string;
   internalDate?: string;
+  labelIds?: string[];
+  sizeEstimate?: number;
   payload?: GmailPart;
 };
 type GmailThread = {
@@ -32,14 +34,38 @@ type GmailThread = {
 
 export class PilotContentError extends Error {}
 
-async function get<T>(path: string, token: string): Promise<T> {
+async function readBoundedJson<T>(response: Response, maxBytes: number): Promise<T> {
+  if (!response.body) throw new PilotContentError("Gmail response had no body.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let value = "";
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel();
+        throw new PilotContentError("Gmail response exceeds the bounded import size.");
+      }
+      value += decoder.decode(chunk.value, { stream: true });
+    }
+    value += decoder.decode();
+    return JSON.parse(value) as T;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function get<T>(path: string, token: string, maxBytes?: number): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch(`${API}${path}`, {
       headers: { Authorization: ["Bearer", token].join(" ") },
       cache: "no-store",
     });
     if (res.status === 401) throw new AuthError("Unauthorized");
-    if (res.ok) return (await res.json()) as T;
+    if (res.ok) return maxBytes ? readBoundedJson<T>(res, maxBytes) : (await res.json()) as T;
 
     let rateLimited = res.status === 429;
     if (res.status === 403) {
@@ -173,6 +199,38 @@ function messageAddresses(message: GmailMessage): string[] {
 function threadIncludesIdentity(thread: GmailThread, identityKeys: Set<string>): boolean {
   return (thread.messages ?? []).some((message) =>
     messageAddresses(message).some((address) => identityKeys.has(address)),
+  );
+}
+
+/**
+ * Low-level retrieval for the person-import adapter. Callers must enforce a
+ * server-authorized scope and revalidate the exact message before reading full
+ * content. The older pilot thread path is intentionally unchanged.
+ */
+export async function fetchIndividualGmailMessage(
+  token: string,
+  messageId: string,
+  format: "metadata" | "full",
+): Promise<GmailMessage> {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(messageId)) {
+    throw new PilotContentError("Invalid Gmail message identity.");
+  }
+  const params = new URLSearchParams({
+    format,
+    fields: format === "metadata"
+      ? "id,threadId,internalDate,labelIds,sizeEstimate,payload(headers)"
+      : "id,threadId,internalDate,labelIds,sizeEstimate,payload",
+  });
+  if (format === "metadata") {
+    for (const name of ["From", "To", "Cc", "Bcc", "Date", "Subject",
+      "List-Id", "List-Unsubscribe", "Precedence", "Auto-Submitted",
+      "X-Auto-Response-Suppress", "Content-Type"]) {
+      params.append("metadataHeaders", name);
+    }
+  }
+  return get<GmailMessage>(
+    `/messages/${encodeURIComponent(messageId)}?${params}`, token,
+    format === "metadata" ? 128 * 1024 : 1024 * 1024,
   );
 }
 

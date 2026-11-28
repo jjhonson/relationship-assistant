@@ -40,7 +40,7 @@ export type PersonImportPlan = {
 
 export class PersonImportError extends Error {}
 
-function checkedScope(scope: PersonImportScope): PersonImportScope {
+export function normalizePersonImportScope(scope: PersonImportScope): PersonImportScope {
   const personId = scope.personId.trim();
   const mailboxAddress = scope.mailboxAddress.trim().toLowerCase();
   const confirmedAddresses = [...new Set(scope.confirmedAddresses.map(
@@ -71,7 +71,7 @@ function singleAddress(values: string[]): string | null {
   return isLookupAddress(address) ? address : null;
 }
 
-function providerId(value: string | undefined): value is string {
+export function isPersonImportProviderId(value: string | undefined): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
 
@@ -79,7 +79,7 @@ function classify(
   scope: PersonImportScope,
   message: PilotMetadataMessage,
 ): PersonImportCandidate | null {
-  if (!providerId(message.id) || !providerId(message.threadId)) return null;
+  if (!isPersonImportProviderId(message.id) || !isPersonImportProviderId(message.threadId)) return null;
   const labels = message.labelIds ?? [];
   if (["DRAFT", "TRASH", "SPAM"].some((label) => labels.includes(label))) return null;
   if (["Cc", "Bcc"].some((name) => headerValues(message, name).some((value) => value.trim()))) return null;
@@ -119,14 +119,14 @@ export function planPersonImport(
   metadata: BoundedMetadataResult,
   previouslyImportedKeys: readonly string[] = [],
 ): PersonImportPlan {
-  const scope = checkedScope(rawScope);
+  const scope = normalizePersonImportScope(rawScope);
   if (metadata.messages.length > PERSON_IMPORT_METADATA_LIMIT) {
     throw new PersonImportError("Metadata exceeds the bounded import limit.");
   }
   const byId = new Map<string, PersonImportCandidate | null>();
   let unidentifiedCount = 0;
   for (const message of metadata.messages) {
-    if (!providerId(message.id)) {
+    if (!isPersonImportProviderId(message.id)) {
       unidentifiedCount++;
       continue;
     }
@@ -168,7 +168,7 @@ export async function lookupPersonImportPlan(
   rawScope: PersonImportScope,
   previouslyImportedKeys: readonly string[] = [],
 ): Promise<PersonImportPlan> {
-  const scope = checkedScope(rawScope);
+  const scope = normalizePersonImportScope(rawScope);
   const actualMailbox = await fetchOwnerAddress(token);
   if (actualMailbox?.trim().toLowerCase() !== scope.mailboxAddress) {
     throw new PersonImportError("The connected Gmail mailbox does not match the approved scope.");
