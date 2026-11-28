@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { suggestHomePerson } from "@/lib/home-identity";
 import { planHomeCapture, type HomeCaptureChoices } from "@/lib/home-direct-capture";
-import { getCapture, getRelationship, listRelationships, savePersonalMoment } from "@/lib/relationship-store";
+import { getCapture, getRelationship, listRelationships, listCapturesForRelationship, savePersonalMoment } from "@/lib/relationship-store";
+import { localCaptureEvidence } from "@/lib/capture-calendar";
 import { savedCaptureDestination } from "@/lib/capture-return";
 import { saveReviewedPersonCapture } from "@/app/relationships/conversational-actions";
 import { learnFromNewPastedConversation } from "@/app/relationships/actions";
@@ -181,7 +182,7 @@ export async function submitHomeText(input: {
       return { state:"answer" as const, message:"Open the relationship for the person you mean and try again. Nothing was changed.", evidence:[], offline:false, retainInput:true };
     }
     const result = await interpretRelationshipEntry({
-      text:input.text,record:pageContext,today,
+      text:input.text,record:localCaptureEvidence(pageContext,await listCapturesForRelationship(pageContext.id)),today,
       offlinePreview: !options.apiKey && process.env.NODE_ENV === "development" &&
         (!process.env.RA_DATASET_MODE || process.env.RA_DATASET_MODE === "fictional") &&
         (!process.env.RA_STORAGE_BACKEND || process.env.RA_STORAGE_BACKEND === "json"),

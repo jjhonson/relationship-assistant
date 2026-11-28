@@ -23,6 +23,7 @@ import { relationshipCadence } from "@/lib/relationship-cadence";
 import { relationshipConnectionStats } from "@/lib/relationship-connection-stats";
 import ConnectionStats from "./ConnectionStats";
 import { captureAppliedToPerson } from "@/lib/capture-return";
+import { captureLocalDay, localCaptureEvidence } from "@/lib/capture-calendar";
 
 export const dynamic = "force-dynamic";
 
@@ -55,9 +56,10 @@ export default async function RelationshipDetailPage({
 }) {
   const { id } = await params;
   const { updated, labels, intention, name, memorySaved } = await searchParams;
-  const relationship = await getRelationship(id);
-  if (!relationship) notFound();
+  const storedRelationship = await getRelationship(id);
+  if (!storedRelationship) notFound();
   const capturedNotes = await listCapturesForRelationship(id);
+  const relationship = localCaptureEvidence(storedRelationship, capturedNotes);
   // Never render a success receipt or link from an arbitrary query parameter.
   const savedMemory = capturedNotes.find((capture) => capture.id === memorySaved && captureAppliedToPerson(capture, id));
   const journeys = await listConnectionJourneys(id);
@@ -582,7 +584,7 @@ export default async function RelationshipDetailPage({
             {capturedNotes.map((capture) => (
               <li key={capture.id} className="rounded-xl border border-stone-200 p-4">
                 <Link href={"/captures/" + capture.id} className="font-medium text-indigo-700 hover:underline">
-                  {capture.capturedAt.slice(0, 10)} · {capture.summary || (capture.source === "user-image" ? "Saved photo" : "Saved note")}
+                  {captureLocalDay(capture.capturedAt)} · {capture.summary || (capture.source === "user-image" ? "Saved photo" : "Saved note")}
                 </Link>
                 <p className="mt-1 line-clamp-2 text-sm text-stone-600">
                   {capture.source === "user-image" ? "Photo" : "Note"}

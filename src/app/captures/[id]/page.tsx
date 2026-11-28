@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { linkCapturedPerson, retryQuickCapture } from "@/app/relationships/capture-actions";
 import { getCapture, listRelationships } from "@/lib/relationship-store";
+import { captureLocalDay } from "@/lib/capture-calendar";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function SavedCapturePage({ params }: { params: Promise<{ i
           {capture.summary || "A note you wanted to remember"}
         </h1>
         <p className="mt-2 text-sm text-stone-500">
-          {capture.source === "user-image" ? "Photo selected" : "Note recorded"} {capture.capturedAt.slice(0, 10)}
+          {capture.source === "user-image" ? "Photo selected" : "Note recorded"} {captureLocalDay(capture.capturedAt)}
           {capture.source === "user-image" ? " (not necessarily the date of the event)" : ""}
         </p>
         {capture.note && (

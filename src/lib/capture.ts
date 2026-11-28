@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { explicitLocationMeaning } from "./location-meaning";
+import { captureLocalDay } from "./capture-calendar";
 import {
   createManualRelationshipRecord,
   type DurableRelationshipFact,
@@ -162,7 +163,7 @@ function capturedSource(event: CaptureEvent): RelationshipSource {
   return {
     id: "capture:" + event.id,
     source: "capture",
-    observedAt: event.reportedInteractionAt ?? event.capturedAt.slice(0, 10),
+    observedAt: event.reportedInteractionAt ?? captureLocalDay(event.capturedAt),
     label: event.source === "user-image" ? "Photo you chose (image not retained)" :
       event.reportedInteractionAt ? "Your note about a reported conversation" : "Your saved note",
   };

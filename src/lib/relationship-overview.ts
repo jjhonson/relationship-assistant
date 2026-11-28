@@ -1,4 +1,5 @@
 import type { CaptureEvent } from "./capture";
+import { captureLocalDay } from "./capture-calendar";
 import { connectionEventLabel, validPastDate, type ConnectionJourney } from "./connection-journey";
 import type { DurableRelationshipFact, RelationshipRecord, RelationshipSource } from "./relationship-record";
 import { homeInteractionDate } from "./home-view";
@@ -285,7 +286,7 @@ export function relationshipInteractionHistory(record: RelationshipRecord, captu
     if (!capture.people.some((person) => person.relationshipId === record.id) &&
         capture.contextRelationshipId !== record.id) continue;
     const reported = capture.reportedInteractionAt && dateLabel(capture.reportedInteractionAt, today);
-    const date = reported || dateLabel(capture.capturedAt.slice(0, 10), today);
+    const date = reported || dateLabel(captureLocalDay(capture.capturedAt), today);
     if (!date) continue;
     entries.push({ id: "capture:" + capture.id, date,
       label: reported ? "Reported conversation" : capture.source === "user-image" ? "Saved photo" : "Saved note",

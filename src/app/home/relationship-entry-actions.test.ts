@@ -1,12 +1,12 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 const mocks=vi.hoisted(()=>({
-  listRelationships:vi.fn(),getRelationship:vi.fn(),getCapture:vi.fn(),savePersonalMoment:vi.fn(),
+  listRelationships:vi.fn(),getRelationship:vi.fn(),getCapture:vi.fn(),listCapturesForRelationship:vi.fn(),savePersonalMoment:vi.fn(),
   saveReviewedPersonCapture:vi.fn(),learnFromNewPastedConversation:vi.fn(),
   saveQuickCaptureWithoutRedirect:vi.fn(),saveUniversalCaptureWithoutRedirect:vi.fn(),
   revalidatePath:vi.fn(),
 }));
 vi.mock("@/lib/relationship-store",()=>({
-  listRelationships:mocks.listRelationships,getRelationship:mocks.getRelationship,getCapture:mocks.getCapture,
+  listRelationships:mocks.listRelationships,getRelationship:mocks.getRelationship,getCapture:mocks.getCapture,listCapturesForRelationship:mocks.listCapturesForRelationship,
   savePersonalMoment:mocks.savePersonalMoment,
 }));
 vi.mock("@/app/relationships/conversational-actions",()=>({saveReviewedPersonCapture:mocks.saveReviewedPersonCapture}));
@@ -49,6 +49,7 @@ describe("read-only person entry routing",()=>{
     vi.stubEnv("OPENAI_API_KEY","");
     const {p,other}=fixtures();
     mocks.listRelationships.mockResolvedValue([p,other]);
+    mocks.listCapturesForRelationship.mockResolvedValue([]);
     mocks.getRelationship.mockResolvedValue(p);
     mocks.saveReviewedPersonCapture.mockResolvedValue({saved:true,destination:"/relationships/rowan"});
   });
