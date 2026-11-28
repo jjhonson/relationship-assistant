@@ -96,8 +96,49 @@ export function validateCaptureInterpretation(raw: unknown, currentDate: string)
  * dialogue as the user's original note. Obvious third-party material must not
  * be stored verbatim on that basis.
  */
+/** Explicit received-email preface followed by a separate nonempty body.
+ * The quoted body is evidence, not a command or an owner-authored note. */
+export function introducedEmail(value:string):{sender:string;dateText:string}|null {
+  const match=/^(?:(?:here(?:'s| is) (?:the|an?)|pasted|copied)\s+)?email\s+from\s+([^\r\n:]{1,180}):[ \t]*\r?\n([\s\S]+)$/i.exec(value.trim());
+  if(!match||!match[2].trim())return null;
+  const header=/^(.+?)(?:\s+on\s+(.+))?$/i.exec(match[1].trim());
+  if(!header)return null;
+  const sender=header[1].trim();
+  if(!/^[\p{L}][\p{L}\p{M} .'-]{0,119}$/u.test(sender))return null;
+  return {sender,dateText:header[2]?.trim()??""};
+}
+const months:Record<string,number>={
+  jan:1,january:1,feb:2,february:2,mar:3,march:3,apr:4,april:4,may:5,jun:6,june:6,
+  jul:7,july:7,aug:8,august:8,sep:9,sept:9,september:9,oct:10,october:10,nov:11,november:11,dec:12,december:12,
+};
+/** Only use the header date; infer a missing year for a recent same-year
+ * date (<=90 days), otherwise use the existing date clarification. */
+export function introducedEmailDay(dateText:string,today:string):string {
+  const text=dateText.trim();
+  if(!validDate(today))return "";
+  const qualifier="(?:\\s+(?:following|after)\\s+(?:our|the)\\s+(?:meeting|call|conversation))?";
+  const iso=new RegExp("^(\\d{4}-\\d{2}-\\d{2})"+qualifier+"$","i").exec(text);
+  if(iso)return validDate(iso[1])&&iso[1]<=today?iso[1]:"";
+  const match=new RegExp("^([A-Za-z]+)\\.?\\s+(\\d{1,2})(?:,?\\s+(\\d{4}))?"+qualifier+"$","i").exec(text);
+  if(!match)return "";
+  const month=months[match[1].toLowerCase()];
+  if(!month)return "";
+  const day=(match[3]??today.slice(0,4))+"-"+String(month).padStart(2,"0")+"-"+match[2].padStart(2,"0");
+  if(!validDate(day)||day>today)return "";
+  if(!match[3]&&(Date.parse(today+"T00:00:00Z")-Date.parse(day+"T00:00:00Z"))/86400000>90)return "";
+  return day;
+}
+export function introducedEmailInterpretation(value:string,today:string):CaptureInterpretation|null {
+  const email=introducedEmail(value);
+  if(!email)return null;
+  const date=introducedEmailDay(email.dateText,today);
+  return {kind:"conversation",source:"email",interactionDate:date,dateEvidence:date?"explicit":"unknown",
+    summary:"Pasted received email",question:date?"":"When was this email sent?"};
+}
+
 export function looksLikePastedConversation(value: string): boolean {
   const text = value.trim();
+  if(introducedEmail(text))return true;
   const intro = text.slice(0, 600);
   const pastedCue = /\b(?:here(?:'s| is)|pasting|pasted|copied|copy of|below is)\b[\s\S]{0,120}\b(?:transcript|email thread|chat(?:\s+log|\s+thread|\s+transcript)?|message thread|conversation)\b/i.test(intro);
   if (pastedCue) return true;
@@ -114,6 +155,8 @@ export function looksLikePastedConversation(value: string): boolean {
 export function protectTranscriptInterpretation(
   text: string, proposed: CaptureInterpretation, currentDate: string,
 ): CaptureInterpretation {
+  const email=introducedEmailInterpretation(text,currentDate);
+  if(email)return email;
   if (proposed.kind === "conversation" || !looksLikePastedConversation(text)) return proposed;
   const intro = text.slice(0, 350);
   const source: CaptureSource =

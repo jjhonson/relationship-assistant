@@ -128,4 +128,36 @@ describe("read-only person entry routing",()=>{
     expect(mocks.getCapture).not.toHaveBeenCalled();
   });
 
+  it("routes a dated received email to structured conversation capture even when quoted text describes changes or asks questions",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    vi.stubEnv("RELATIONSHIP_USER_TIME_ZONE","America/Denver");
+    vi.useFakeTimers({toFake:["Date"]});
+    vi.setSystemTime(new Date("2026-11-28T00:53:00.000Z"));
+    try{
+      const message="Email from Rowan on Nov 20 following our meeting:\nHi,\nWe're no longer pursuing the old project. I think we can revisit later. Could we talk then? Avery Morgan is involved.";
+      const fetchMock=vi.fn(async()=>response("change"));
+      vi.stubGlobal("fetch",fetchMock);
+      const result=await submitHomeText({text:message,submissionId,contextRelationshipId:"rowan"});
+      expect(result).toMatchObject({state:"saved",destination:"/relationships/rowan"});
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledOnce();
+      expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("rowan",expect.objectContaining({text:message,kind:"conversation",source:"email",interactionDate:"2026-11-20",submissionId}));
+      expect(mocks.saveQuickCaptureWithoutRedirect).not.toHaveBeenCalled();
+    }finally{vi.useRealTimers();}
+  });
+  it("asks for the sent date, not a quoted relative date, if the date is unknown",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    const result=await submitHomeText({text:"Email from Rowan:\nI spoke with Avery yesterday. We should catch up.",submissionId,contextRelationshipId:"rowan"});
+    expect(result).toMatchObject({state:"clarify",field:"date",kind:"conversation"});
+    noWrites();
+  });
+  it("does not attach a different or unknown sender to the selected person",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    for(const sender of ["Avery Morgan","Rowan Differentperson","Unlisted Person"]){
+      const result=await submitHomeText({text:"Email from "+sender+" on Nov 20:\nA new update.",submissionId,contextRelationshipId:"rowan"});
+      expect(result).toMatchObject({state:"answer",retainInput:true});
+    }
+    noWrites();
+  });
+
 });

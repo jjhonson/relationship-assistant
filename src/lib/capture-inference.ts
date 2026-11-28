@@ -14,7 +14,7 @@ export const CAPTURE_SYSTEM_PROMPT = [
   "Use empty strings for unknown optional fields. A first name alone is valid. An empty participants list is valid if no person can be confidently identified.",
   "Location has different meanings. Leave the legacy city scalar empty. Put clearly stated current residence in facts as Home city (Location), a specific job or office location as Work location (Work), a professional profile header region as Profile location (Location), and an unclear location as Location (unspecified) (Location). Never infer a home city from a workplace, employer headquarters or profile region. Preserve historical places separately; do not invent a move.",
   "When an existing person page identifies the intended contact, explicitly supplied contact details alone are valid memory. Populate that participant's structured email, linkedin, phone, company and jobTitle fields when supplied, even if the user gives only labeled values without repeating their name. Do not merely mention these values in the summary. Never infer a missing address or a URL.",
-  "Keep the summary short, factual, and faithful to the note. Do not embellish or recommend outreach."
+  "Keep the summary short, factual, and faithful to the note. Do not embellish or recommend outreach.",
   "A commitment must be an actual promise or agreed action; a friendly expression of intent is not one. Empty commitments are valid.",
   "Use only the allowed durable fact categories. Do not speculate about sensitive personal details.",
   "The provided capture time is when the note was saved, not proof of when the encounter took place.",

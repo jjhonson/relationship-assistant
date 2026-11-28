@@ -3,7 +3,7 @@
 import { requirePrivateAlphaRuntime } from "@/lib/private-alpha-runtime";
 
 import { revalidatePath } from "next/cache";
-import { interpretConversationalCapture, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
+import { interpretConversationalCapture, introducedEmail, looksLikePastedConversation, type CaptureKind, type CaptureSource } from "@/lib/conversational-capture";
 import { suggestHomePerson } from "@/lib/home-identity";
 import { planHomeCapture, type HomeCaptureChoices } from "@/lib/home-direct-capture";
 import { getCapture, getRelationship, listRelationships, listCapturesForRelationship, savePersonalMoment } from "@/lib/relationship-store";
@@ -175,8 +175,14 @@ export async function submitHomeText(input: {
   // Person-page input must pass the intent gate before capture planning,
   // including retries after a previous capture clarification.
   let interpretation;
+  const introduced=introducedEmail(input.text);
   if (pageContext) {
-    const target = suggestHomePerson(input.text, known.map(person => ({ id:person.id,label:person.personLabel })));
+    const sender=introduced?.sender.toLowerCase().trim();
+    const exact=sender?known.filter(person=>person.personLabel.trim().toLowerCase()===sender):[];
+    const matches=sender?(exact.length?exact:sender.includes(" ")?[]:known.filter(person=>person.personLabel.trim().toLowerCase().split(/\s+/)[0]===sender)):[];
+    const target = introduced
+      ? {id:matches.length===1?matches[0].id:null,ambiguous:matches.length!==1}
+      : suggestHomePerson(input.text, known.map(person => ({ id:person.id,label:person.personLabel })));
     if (target.ambiguous || (target.id && target.id !== pageContext.id) ||
         (chosenId && chosenId !== pageContext.id)) {
       return { state:"answer" as const, message:"Open the relationship for the person you mean and try again. Nothing was changed.", evidence:[], offline:false, retainInput:true };
@@ -200,7 +206,7 @@ export async function submitHomeText(input: {
     interpretation,
     people: known.map((person) => ({ id: person.id, label: person.personLabel })),
     today,
-    choices: input.choices,
+    choices: introduced&&pageContext ? {...input.choices,relationshipId:pageContext.id} : input.choices,
     importedTextFile: input.importedTextFile === true,
     contextRelationshipId: input.contextRelationshipId,
   });
