@@ -516,6 +516,8 @@ function mergeActiveOpenLoops(
 ): RelationshipRecord["openLoops"] {
   const confirmed = record.openLoops.filter((item) => item.userConfirmed === true);
   const earlierInferred = record.openLoops.filter((item) => !item.userConfirmed);
+  const knownSources = new Map(record.sources.map(item => [item.id,item]));
+  const newerInferred = earlierInferred.filter(item => item.sourceIds.some(id => (knownSources.get(id)?.observedAt ?? "") > source.observedAt));
   const inferred = reconcileOpenLoops(earlierInferred, incoming, source)
     .filter((item) => !wasActionableMemoryRetired(
       record, actionableKey("open-loop", item.commitment, item.owner), source.id))
@@ -532,7 +534,11 @@ function mergeActiveOpenLoops(
       actionableKey("open-loop", candidate.commitment, candidate.owner) ===
       actionableKey("open-loop", item.commitment, item.owner)));
 
-  return [...confirmed, ...reestablishedAfterCompletion, ...inferred];
+  // An older imported email may show fulfillment of an earlier promise, but
+  // it cannot remove or change a commitment established by later evidence.
+  const newerKeys = new Set(newerInferred.map(item => actionableKey("open-loop",item.commitment,item.owner)));
+  return [...confirmed, ...newerInferred,
+    ...[...reestablishedAfterCompletion,...inferred].filter(item=>!newerKeys.has(actionableKey("open-loop",item.commitment,item.owner)))];
 }
 
 export function mergeInteractionIntoRelationship(

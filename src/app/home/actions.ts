@@ -177,7 +177,7 @@ export async function submitHomeText(input: {
   let interpretation;
   const introduced=introducedEmail(input.text);
   if (pageContext) {
-    const sender=introduced?.sender.toLowerCase().trim();
+    const sender=introduced?.counterparty.toLowerCase().trim();
     const exact=sender?known.filter(person=>person.personLabel.trim().toLowerCase()===sender):[];
     const matches=sender?(exact.length?exact:sender.includes(" ")?[]:known.filter(person=>person.personLabel.trim().toLowerCase().split(/\s+/)[0]===sender)):[];
     const target = introduced

@@ -19,6 +19,10 @@ describe("manual conversation paste", () => {
     }
   });
 
+  it("preserves user-reported direction of explicitly sent email without claiming verified import",()=>{
+    expect(parsePastedConversation({transcript:"Email I sent on Nov 19th to Robin:\nCould we discuss the proposal?",interactionDate:"2026-11-19",source:"email"}).sourceLabel).toBe("Manually pasted sent email");
+    expect(parsePastedConversation({transcript:"Email from Robin on Nov 20:\nThanks.",interactionDate:"2026-11-20",source:"email"}).sourceLabel).toBe("Manually pasted email conversation");
+  });
   it("rejects unknown or forged sources instead of presenting them as verified", () => {
     for (const source of ["gmail", "LinkedIn imported", "<script>", "", null]) {
       expect(() => parsePastedConversation({ ...base, source })).toThrow("Choose where");

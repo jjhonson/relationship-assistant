@@ -1,3 +1,5 @@
+import { introducedEmail } from "./conversational-capture";
+
 /**
  * A user-selected label for a manually pasted conversation, not a verified
  * provider integration. This material is ephemeral: only the extraction and
@@ -38,5 +40,9 @@ export function parsePastedConversation(input: {
 
   const choice = PASTED_CONVERSATION_SOURCES.find((item) => item.value === input.source);
   if (!choice) throw new Error("Choose where this conversation came from.");
-  return { transcript, interactionDate, sourceLabel: choice.provenanceLabel };
+  // Direction is user-reported, not verified provider metadata. Retain the
+  // existing received/generic label for compatibility with previous retries.
+  const sourceLabel = choice.value === "email" && introducedEmail(transcript)?.direction === "sent"
+    ? "Manually pasted sent email" : choice.provenanceLabel;
+  return { transcript, interactionDate, sourceLabel };
 }
