@@ -5,9 +5,14 @@ import { unseal } from "@/lib/gmail/crypto";
 import { exchangeCode } from "@/lib/gmail/oauth";
 import { CRED_COOKIE, FLOW_COOKIE, cookieOptions, sealCreds } from "@/lib/gmail/session";
 
+import { legacyGmailAllowed, personalGmailConfig } from "@/lib/gmail/personal-session";
+import { finishPersonalGmailConnection } from "@/lib/gmail/personal-connection";
+
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  if (personalGmailConfig()) return finishPersonalGmailConnection(req);
+  if (!legacyGmailAllowed()) return new NextResponse("Gmail connection unavailable.", { status: 403 });
   const url = new URL(req.url);
   const back = (error?: string) => {
     const res = NextResponse.redirect(new URL(error ? `/gmail?error=${error}` : "/gmail", req.url));

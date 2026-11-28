@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { legacyGmailAllowed } from "@/lib/gmail/personal-session";
 import { DiagnosticPanel } from "@/components/DiagnosticPanel";
 import { DiscoveryResults } from "@/components/DiscoveryResults";
 import { SpecificPersonLookup } from "@/components/SpecificPersonLookup";
@@ -21,6 +22,7 @@ export default async function DiscoverPage({
 }: {
   searchParams: Promise<{ fresh?: string }>;
 }) {
+  if (!legacyGmailAllowed()) notFound();
   const { fresh } = await searchParams;
   const forceFresh = fresh === "1";
   const cfg = loadConfig();
