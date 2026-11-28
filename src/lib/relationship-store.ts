@@ -22,6 +22,8 @@ import { randomUUID } from "node:crypto";
 import { buildConnectionCandidates, dismissConnectionCandidate } from "./connection-subjects";
 import { applyCadencePreference, dismissCadenceCycle, relationshipToday } from "./relationship-cadence";
 import { looksLikePastedConversation } from "./conversational-capture";
+import { applyPersonImportMemory, assessPersonImportMemory, type PersonImportMemoryInput } from "./gmail/person-import-memory";
+import { planGmailMemoryRemoval } from "./gmail/person-import-removal";
 import {
   addConnectionEvent, makeConnectionJourney, type ConnectionJourney,
   type ConfirmedConnectionEvent,
@@ -546,6 +548,70 @@ export async function saveInferredConversation(
       store.relationships[index], extraction, source,
     );
     return { relationshipId, duplicate: false as const };
+  });
+}
+
+/** Internal read-only check before paying for model extraction. Recheck the
+ * latest dataset atomically when saving; this is not an authorization grant. */
+export async function inspectPersonGmailMemory(input: Pick<PersonImportMemoryInput, "scope" | "candidate" | "expectedPersonLabel">) {
+  const store = await readStore();
+  const assessment = assessPersonImportMemory(store.relationships, store.captures, store.connectionJourneys, input);
+  return assessment.kind === "ready"
+    ? { kind: "ready" as const, personLabel: assessment.record.personLabel }
+    : assessment;
+}
+
+/** Read the latest dataset once for a bounded batch preflight. */
+export async function inspectPersonGmailBatch(scope: PersonImportMemoryInput["scope"], candidates: PersonImportMemoryInput["candidate"][], expectedPersonLabel?: string) {
+  if (candidates.length > 20) throw new Error("Too many Gmail messages.");
+  const store = await readStore();
+  return candidates.map((candidate) => {
+    const assessment = assessPersonImportMemory(store.relationships, store.captures, store.connectionJourneys, { scope, candidate, expectedPersonLabel });
+    return assessment.kind === "ready"
+      ? { candidate, kind: "ready" as const, personLabel: assessment.record.personLabel }
+      : { candidate, ...assessment };
+  });
+}
+
+/**
+ * Internal, atomic persistence step for a previously authorized and analyzed
+ * exact Gmail message. Not a server action. No provider or model calls here;
+ * the future caller must enforce personal-profile and scoped consent first.
+ */
+export async function savePersonGmailMemory(input: PersonImportMemoryInput) {
+  return mutateStore((store) => {
+    const result = applyPersonImportMemory(store.relationships, store.captures,
+      store.connectionJourneys, input);
+    if (result.kind === "saved") {
+      const index = store.relationships.findIndex((item) => item.id === result.record.id);
+      store.relationships[index] = result.record;
+      return { kind: "saved" as const, relationshipId: result.record.id,
+        deferredFactCount: result.deferredFactCount };
+    }
+    return result;
+  });
+}
+
+/** Atomic, explicitly confirmed source removal; no Gmail or model request. */
+export async function removePersonGmailSources(relationshipId: string, sourceIds: string[], reviewVersion: string) {
+  return mutateStore((store) => {
+    const index = store.relationships.findIndex((person) => person.id === relationshipId);
+    if (index < 0) throw new Error("Relationship unavailable.");
+    const result = planGmailMemoryRemoval(store.relationships[index], store.captures, store.connectionJourneys, sourceIds, reviewVersion);
+    // The importer never shares a source across people. Refuse a malformed or
+    // later cross-person reference rather than silently leave or delete it.
+    const selected = new Set(sourceIds);
+    const crossPersonReference = store.relationships.some((person, i) => {
+      if (i === index) return false;
+      return person.sources.some((source) => selected.has(source.id)) ||
+        person.durableFacts.some((fact) => fact.sourceIds.some((id) => selected.has(id)));
+    });
+    if (crossPersonReference) {
+      throw new Error("A selected source has another relationship reference.");
+    }
+    store.relationships[index] = result.record;
+    store.connectionJourneys = result.journeys;
+    return { removedMessages: result.removedMessages, removedFacts: result.removedFacts, preservedFacts: result.preservedFacts };
   });
 }
 

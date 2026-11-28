@@ -4,9 +4,12 @@ import { loadConfig } from "@/lib/gmail/config";
 import { AuthError, refresh } from "@/lib/gmail/oauth";
 import { CRED_COOKIE, cookieOptions, readCreds, sealCreds } from "@/lib/gmail/session";
 
+import { legacyGmailAllowed } from "@/lib/gmail/personal-session";
+
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  if (!legacyGmailAllowed()) return new NextResponse("Gmail experiment unavailable.", { status: 403 });
   const url = new URL(req.url);
   const returnTo = url.searchParams.get("returnTo") === "/discover" ? "/discover" : "/gmail";
   const cfg = loadConfig();

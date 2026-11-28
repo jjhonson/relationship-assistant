@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { legacyGmailAllowed } from "@/lib/gmail/personal-session";
 import { loadConfig } from "@/lib/gmail/config";
 import { fetchSample, type GmailSummary } from "@/lib/gmail/messages";
 import { AuthError } from "@/lib/gmail/oauth";
@@ -41,6 +42,7 @@ export default async function GmailPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  if (!legacyGmailAllowed()) notFound();
   const { error } = await searchParams;
   const view = await load(error);
   const messages: Record<string, string> = {

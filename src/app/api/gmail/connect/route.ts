@@ -4,9 +4,12 @@ import { buildAuthUrl, newState } from "@/lib/gmail/oauth";
 import { FLOW_COOKIE, cookieOptions } from "@/lib/gmail/session";
 import { seal } from "@/lib/gmail/crypto";
 
+import { legacyGmailAllowed } from "@/lib/gmail/personal-session";
+
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  if (!legacyGmailAllowed()) return new NextResponse("Gmail experiment unavailable.", { status: 403 });
   const cfg = loadConfig();
   if (!cfg.ok) return NextResponse.redirect(new URL("/gmail?error=not_configured", req.url));
   const { state, verifier } = newState();

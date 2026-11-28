@@ -13,6 +13,20 @@ export type RelationshipSource = {
   label: string;
   // Hash of unsaved pasted transcript + dated/source metadata, solely for retry identity.
   submissionDigest?: string;
+  /** Only consented, body-backed, person-scoped imports use this provenance.
+   * observedAt above is the user's local calendar day, not the import date. */
+  gmailImport?: {
+    providerKey: string;
+    mailboxAddress: string;
+    messageId: string;
+    threadId: string;
+    observedInstant: string;
+    importedAt: string;
+    direction: "sent" | "received";
+    contactAddress: string;
+    // Structured conflicting observations, NOT current facts or raw email.
+    deferredFacts: Array<Pick<DurableRelationshipFact, "category" | "label" | "value">>;
+  };
 };
 
 export type RelationshipIdentity = {
@@ -116,6 +130,11 @@ export type RelationshipRecord = {
   createdAt: string;
   updatedAt: string;
   lastInteractionAt: string | null;
+  /** Independent contact date before the first retained Gmail import.
+   * Used only for source-aware removal, never as a new contact event. */
+  gmailBaselineContactDay?: string | null;
+  /** Changes on explicit Gmail-memory removal, invalidating older approvals. */
+  gmailMemoryRevision?: string;
   classification: RelationshipInference["classification"]["value"];
   relationshipContexts: RelationshipContextValue[];
   relationshipRoles: RelationshipRoleValue[];

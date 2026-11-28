@@ -58,6 +58,13 @@ function matchesContactField(fact: DurableRelationshipFact, field: typeof fields
     (field.categories as readonly string[]).includes(fact.category);
 }
 
+/** Shared contact attribute semantics for non-destructive source ingestion. */
+export function relationshipContactFieldForFact(
+  fact: DurableRelationshipFact, known: ReadonlyMap<string, RelationshipSource>,
+): ContactDetail["label"] | undefined {
+  return fields.find((field) => matchesContactField(fact, field, known))?.label;
+}
+
 function dateLabel(value: string, today: string) {
   return validPastDate(value, today) ? value : "";
 }
@@ -268,7 +275,8 @@ export function relationshipInteractionHistory(record: RelationshipRecord, captu
   journeys: ConnectionJourney[], today: string): RelationshipHistoryEntry[] {
   const entries: RelationshipHistoryEntry[] = [];
   for (const source of record.sources) {
-    if (!(source.id.startsWith("pasted:") || source.source === "transcript") ||
+    if (!(source.id.startsWith("pasted:") || source.source === "transcript" ||
+        (source.source === "gmail" && source.gmailImport)) ||
         !dateLabel(source.observedAt, today)) continue;
     // A merged fact may have changed since an older conversation. Only show
     // current extracted context whose latest observation matches this source.

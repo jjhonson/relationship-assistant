@@ -11,6 +11,7 @@ import type { PilotMetadataSamplingStats } from "./pilot-sampling";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
 export const PILOT_ALIAS_MESSAGE_LIMIT = 24;
+export const PERSON_IMPORT_METADATA_LIMIT = 40;
 export const PILOT_THREAD_MESSAGE_LIMIT = 60;
 export const MAX_PILOT_ALIASES = 5;
 export const PILOT_THREAD_LIST_REQUEST_LIMIT = 60;
@@ -97,7 +98,7 @@ function header(message: PilotMetadataMessage, name: string): string {
   )?.value ?? "";
 }
 
-function isCalendarArtifactSubject(subject: string): boolean {
+export function isCalendarArtifactSubject(subject: string): boolean {
   const normalized = subject.replace(/^(?:(?:re|fwd?)\s*:\s*)+/i, "");
   return /^(?:(?:accepted|declined|canceled|cancelled|tentative)\s*:|(?:updated\s+)?invitation\s*:|event\s+(?:updated|cancelled|canceled)\s*:)/i.test(normalized);
 }
@@ -233,6 +234,28 @@ async function boundedMetadataSearch(
     messages: await fetchDetails(token, found, headers),
     truncated: Boolean(page.nextPageToken) || (page.messages ?? []).length > limit,
   };
+}
+
+/** One bounded, person-scoped metadata page. No bodies, snippets or attachments.
+ * The caller must establish the current mailbox and explicit lookup consent.
+ * This is independent of the mailbox-wide discovery/pilot sampling strategy.
+ */
+export async function fetchPersonImportMetadata(
+  token: string,
+  confirmedAddresses: string[],
+): Promise<BoundedMetadataResult> {
+  const addresses = [...new Set(confirmedAddresses.map(normalizeEmailAddress))];
+  if (addresses.length === 0 || addresses.length > MAX_PILOT_ALIASES ||
+      addresses.some((address) => !isLookupAddress(address))) {
+    throw new PilotMetadataError("A bounded set of confirmed email addresses is required.");
+  }
+  const clauses = addresses.flatMap((address) => [`from:${address}`, `to:${address}`]);
+  return boundedMetadataSearch(
+    token,
+    `{${clauses.join(" ")}} -in:drafts -in:trash -in:spam`,
+    PERSON_IMPORT_METADATA_LIMIT,
+    [...THREAD_METADATA_HEADERS, "Bcc", "Content-Type"],
+  );
 }
 
 export async function fetchPilotAliasMetadata(
