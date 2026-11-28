@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import { buildConnectionCandidates, dismissConnectionCandidate } from "./connection-subjects";
 import { applyCadencePreference, dismissCadenceCycle, relationshipToday } from "./relationship-cadence";
 import { looksLikePastedConversation } from "./conversational-capture";
-import { applyPersonImportMemory, type PersonImportMemoryInput } from "./gmail/person-import-memory";
+import { applyPersonImportMemory, assessPersonImportMemory, type PersonImportMemoryInput } from "./gmail/person-import-memory";
 import {
   addConnectionEvent, makeConnectionJourney, type ConnectionJourney,
   type ConfirmedConnectionEvent,
@@ -548,6 +548,16 @@ export async function saveInferredConversation(
     );
     return { relationshipId, duplicate: false as const };
   });
+}
+
+/** Internal read-only check before paying for model extraction. Recheck the
+ * latest dataset atomically when saving; this is not an authorization grant. */
+export async function inspectPersonGmailMemory(input: Pick<PersonImportMemoryInput, "scope" | "candidate">) {
+  const store = await readStore();
+  const assessment = assessPersonImportMemory(store.relationships, store.captures, store.connectionJourneys, input);
+  return assessment.kind === "ready"
+    ? { kind: "ready" as const, personLabel: assessment.record.personLabel }
+    : assessment;
 }
 
 /**

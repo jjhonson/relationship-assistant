@@ -42,7 +42,7 @@ function sameCandidate(a: PersonImportCandidate, b: PersonImportCandidate): bool
     a.direction === b.direction && a.contactAddress === b.contactAddress;
 }
 
-function validateSelection(scope: PersonImportScope, items: readonly PersonImportCandidate[]) {
+export function validatePersonImportSelection(scope: PersonImportScope, items: readonly PersonImportCandidate[]) {
   if (items.length === 0 || items.length > PERSON_IMPORT_MESSAGE_LIMIT) {
     throw new PersonImportError("A nonempty bounded selection of messages is required.");
   }
@@ -163,7 +163,7 @@ export async function retrievePersonImportContent(
   approvedCandidates: readonly PersonImportCandidate[],
 ): Promise<PersonImportContent> {
   const scope = normalizePersonImportScope(rawScope);
-  validateSelection(scope, approvedCandidates);
+  validatePersonImportSelection(scope, approvedCandidates);
   const actualMailbox = await fetchOwnerAddress(token);
   if (actualMailbox?.trim().toLowerCase() !== scope.mailboxAddress) {
     throw new PersonImportError("The connected Gmail mailbox does not match the approved scope.");

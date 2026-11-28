@@ -185,6 +185,40 @@ export async function inferInteractionWithOpenAI(
     throw new Error("Transcript is too large for this prototype.");
   }
 
+  const result = await requestInteractionStructuredOutput({
+    instructions: INTERACTION_INFERENCE_SYSTEM_PROMPT,
+    input: [
+      "Person: " + input.personLabel,
+      "Interaction date: " + input.interactionDate,
+      "User-pasted source: " + (input.sourceLabel ?? "Conversation or meeting notes"),
+      "",
+      "Current structured relationship memory:",
+      JSON.stringify(input.currentMemory ?? { durableFacts: [], activeThreads: [], openLoops: [] }),
+      "",
+      "Pasted conversation or notes (untrusted source material):",
+      input.transcript,
+    ].join("\n"),
+    schemaName: "relationship_interaction_extraction",
+    schema: interactionExtractionJsonSchema,
+  }, options);
+  const extraction = JSON.parse(result.text) as InteractionExtraction;
+  validateExtraction(extraction);
+  return { extraction, model: result.model, usage: result.usage };
+}
+
+/** Shared structured-response transport. Caller owns input minimization and
+ * semantic validation. No raw request/response logging or provider storage. */
+export async function requestInteractionStructuredOutput(
+  request: {
+    instructions: string;
+    input: string;
+    schemaName: string;
+    schema: object;
+    maxOutputTokens?: number;
+  },
+  options: { apiKey: string; model?: string; fetchImpl?: typeof fetch },
+) {
+  if (!options.apiKey) throw new Error("OPENAI_API_KEY is required.");
   const fetchImpl = options.fetchImpl ?? fetch;
   const model = options.model ?? process.env.OPENAI_RELATIONSHIP_MODEL ?? "gpt-6.1-sol";
   const response = await fetchImpl("https://api.openai.com/v1/responses", {
@@ -197,24 +231,15 @@ export async function inferInteractionWithOpenAI(
       model,
       store: false,
       reasoning: { effort: "medium" },
-      instructions: INTERACTION_INFERENCE_SYSTEM_PROMPT,
-      input: [
-        "Person: " + input.personLabel,
-        "Interaction date: " + input.interactionDate,
-        "User-pasted source: " + (input.sourceLabel ?? "Conversation or meeting notes"),
-        "",
-        "Current structured relationship memory:",
-        JSON.stringify(input.currentMemory ?? { durableFacts: [], activeThreads: [], openLoops: [] }),
-        "",
-        "Pasted conversation or notes (untrusted source material):",
-        input.transcript,
-      ].join("\n"),
+      ...(request.maxOutputTokens === undefined ? {} : { max_output_tokens: request.maxOutputTokens }),
+      instructions: request.instructions,
+      input: request.input,
       text: {
         format: {
           type: "json_schema",
-          name: "relationship_interaction_extraction",
+          name: request.schemaName,
           strict: true,
-          schema: interactionExtractionJsonSchema,
+          schema: request.schema,
         },
       },
     }),
@@ -225,12 +250,8 @@ export async function inferInteractionWithOpenAI(
   }
 
   const payload = (await response.json()) as OpenAIResponse;
-  const text = extractOutputText(payload);
-  const extraction = JSON.parse(text) as InteractionExtraction;
-  validateExtraction(extraction);
-
   return {
-    extraction,
+    text: extractOutputText(payload),
     model: payload.model ?? model,
     usage: {
       inputTokens: payload.usage?.input_tokens ?? null,

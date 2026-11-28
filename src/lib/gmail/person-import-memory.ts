@@ -25,6 +25,10 @@ export type PersonImportMemoryResult =
   | { kind: "duplicate"; relationshipId: string }
   | { kind: "needs-review"; relationshipId: string; reason: ReviewReason };
 
+type PersonImportAssessment =
+  | { kind: "ready"; record: RelationshipRecord; scope: PersonImportScope; day: string; sourceId: string }
+  | Exclude<PersonImportMemoryResult, { kind: "saved" }>;
+
 function normalized(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -40,7 +44,8 @@ function attribute(fact: DurableRelationshipFact, sources: ReadonlyMap<string, R
 
 function knownEmail(record: RelationshipRecord, address: string) {
   const sources = new Map(record.sources.map((item) => [item.id, item]));
-  return record.identities.some((item) => item.kind === "email" && normalized(item.value) === address) ||
+  return record.sources.some((source) => source.gmailImport?.contactAddress === address) ||
+    record.identities.some((item) => item.kind === "email" && normalized(item.value) === address) ||
     record.durableFacts.some((fact) => relationshipContactFieldForFact(fact, sources) === "Email" &&
       normalized(fact.value) === address);
 }
@@ -98,14 +103,14 @@ function hasNonGmailEvidence(fact: DurableRelationshipFact, sources: ReadonlyMap
  * from this first historical import path. Defer manual overlaps and conflicts
  * instead of manufacturing a match or silently replacing current memory.
  */
-export function applyPersonImportMemory(
+export function assessPersonImportMemory(
   records: readonly RelationshipRecord[],
   captures: readonly CaptureEvent[],
   journeys: readonly ConnectionJourney[],
-  input: PersonImportMemoryInput,
+  input: Pick<PersonImportMemoryInput, "scope" | "candidate">,
   now = new Date(),
   timeZone = process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver",
-): PersonImportMemoryResult {
+): PersonImportAssessment {
   const scope = normalizePersonImportScope(input.scope);
   const message = input.candidate;
   const instant = Date.parse(message.observedAt);
@@ -123,7 +128,7 @@ export function applyPersonImportMemory(
   }
   const record = records.find((item) => item.id === scope.personId);
   if (!record) throw new Error("Relationship not found.");
-  const review = (reason: ReviewReason): PersonImportMemoryResult =>
+  const review = (reason: ReviewReason): PersonImportAssessment =>
     ({ kind: "needs-review", relationshipId: record.id, reason });
   const sourceId = "gmail-import:" + createHash("sha256").update(message.providerKey).digest("hex");
   const owners = records.flatMap((person) => person.sources
@@ -140,6 +145,21 @@ export function applyPersonImportMemory(
       scope.confirmedAddresses.some((address) => knownEmail(person, address)))) return review("identity-conflict");
   if (hasPossibleManualOverlap(record, captures, journeys, day)) return review("possible-manual-overlap");
 
+  return { kind: "ready", record, scope, day, sourceId };
+}
+
+export function applyPersonImportMemory(
+  records: readonly RelationshipRecord[],
+  captures: readonly CaptureEvent[],
+  journeys: readonly ConnectionJourney[],
+  input: PersonImportMemoryInput,
+  now = new Date(),
+  timeZone = process.env.RELATIONSHIP_USER_TIME_ZONE ?? "America/Denver",
+): PersonImportMemoryResult {
+  const assessment = assessPersonImportMemory(records, captures, journeys, input, now, timeZone);
+  if (assessment.kind !== "ready") return assessment;
+  const { record, scope, day, sourceId } = assessment;
+  const message = input.candidate;
   const source: RelationshipSource = {
     id: sourceId,
     source: "gmail",
