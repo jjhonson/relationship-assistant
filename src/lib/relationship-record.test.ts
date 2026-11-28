@@ -382,4 +382,32 @@ describe("relationship record interaction merge", () => {
     expect(second.stewardshipOpportunities).toHaveLength(1);
     expect(second.stewardshipOpportunities[0].reason).toContain("moved into construction");
   });
+  it("does not let an inferred existing fact ID conflate home, office, or ambiguous location observations",()=>{
+    const initial=mergeInteractionIntoRelationship(createManualRelationshipRecord("Fictional person"),{
+      ...extraction,
+      durableFacts:[{existingFactId:"",category:"Location",label:"City",value:"Home Town"}],
+      activeThreads:[],openLoops:[],stewardshipOpportunities:[],
+    },{id:"pasted:home",source:"manual",observedAt:"2026-11-20",label:"Conversation"});
+    const home=initial.durableFacts[0];
+    const updated=mergeInteractionIntoRelationship(initial,{
+      ...extraction,
+      durableFacts:[
+        {existingFactId:home.id,category:"Work",label:"Work location",value:"Office Town"},
+        {existingFactId:home.id,category:"Location",label:"Profile location",value:"Metro Area"},
+        {existingFactId:home.id,category:"Location",label:"Location (unspecified)",value:"Other Town"},
+      ],
+      activeThreads:[],openLoops:[],stewardshipOpportunities:[],
+    },{id:"pasted:later",source:"manual",observedAt:"2026-11-27",label:"Conversation"});
+    expect(updated.durableFacts.find(fact=>fact.id===home.id)).toEqual(home);
+    expect(updated.durableFacts.map(fact=>[fact.label,fact.value])).toEqual([
+      ["City","Home Town"],["Work location","Office Town"],["Profile location","Metro Area"],["Location (unspecified)","Other Town"],
+    ]);
+    const move=mergeInteractionIntoRelationship(updated,{
+      ...extraction,durableFacts:[{existingFactId:home.id,category:"Location",label:"City",value:"New Home Town"}],
+      activeThreads:[],openLoops:[],stewardshipOpportunities:[],
+    },{id:"pasted:move",source:"manual",observedAt:"2026-11-28",label:"Conversation"});
+    expect(move.durableFacts.find(fact=>fact.id===home.id)).toEqual(home);
+    expect(move.durableFacts).toEqual(expect.arrayContaining([expect.objectContaining({label:"City",value:"New Home Town"})]));
+  });
+
 });

@@ -224,7 +224,9 @@ export function relationshipPortrait(record: RelationshipRecord, today: string):
   const groups = new Map<string, MemoryLine[]>();
   function add(group: string, item: MemoryLine) {
     const list = groups.get(group) ?? [];
-    if (!list.some((existing) => normalized(existing.value) === normalized(item.value))) list.push(item);
+    const typedLocation = ["Work location", "Profile location", "Location (meaning unclear)"].includes(item.label);
+    if (!list.some((existing) => normalized(existing.value) === normalized(item.value) &&
+      (!typedLocation || existing.label === item.label))) list.push(item);
     groups.set(group, list);
   }
   for (const fact of record.durableFacts) {

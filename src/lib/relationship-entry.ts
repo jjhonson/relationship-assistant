@@ -164,7 +164,9 @@ export function summarizeEvidenceAnswer(text:string,evidence:AnswerEvidence[]):A
 }
 function asksWhereTheyLive(text:string):boolean {
   // Simple explicit residence requests, not all ambiguous location questions.
-  return /\bwhere\s+(?:(?:does|do|did|is|are)\s+)?[^?\n]{0,65}\b(?:live|lives|living|reside|resides)\b/i.test(text) || /\b(?:home city|home location|home address|residence)\b/i.test(text);
+  if (/\b(?:did|was|were|before|moved|would|will|used to|and|or)\b/i.test(text)) return false;
+  return /\bwhere\s+(?:(?:does|do|is|are)\s+)?[^?\n]{0,65}\b(?:live|lives|living|reside|resides)\s*[?.!]*$/i.test(text.trim()) ||
+    /\b(?:home city|home location|home address|residence)\s*[?.!]*$/i.test(text.trim());
 }
 
 function offlineLookup(text:string,evidence:AnswerEvidence[],personLabel:string):PersonEntryAnswer{

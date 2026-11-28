@@ -27,6 +27,10 @@ export function locationMeaning(fact:DatedLocationFact,sources:ReadonlyMap<strin
   const meaning=explicitLocationMeaning(fact);
   if(meaning!=="unspecified")return meaning;
   const label=fact.label.trim().toLowerCase();
+  // A legacy general label may contain an explicit residence statement.
+  // Do not infer this from an unqualified city name or "based in".
+  if (/^(?:(?:he|she|they)\s+)?(?:lives?|resides?)\s+in\s+\S/i.test(fact.value.trim()) &&
+      !/\b(?:used to|formerly|previously|no longer|moving|plans to|might|may|used|until)\b/i.test(fact.value)) return "home";
   if(label==="city"){
     const observations=fact.sourceIds.map(id=>sources.get(id)).filter(source=>source?.observedAt===fact.lastObservedAt);
     if(observations.length&&observations.every(source=>source?.source==="transcript"||source?.id.startsWith("pasted:")))return "home";
