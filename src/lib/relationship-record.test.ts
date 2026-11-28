@@ -410,4 +410,18 @@ describe("relationship record interaction merge", () => {
     expect(move.durableFacts).toEqual(expect.arrayContaining([expect.objectContaining({label:"City",value:"New Home Town"})]));
   });
 
+  it("allows a fulfilled earlier inferred commitment to disappear without erasing a newer one on historical email import",()=>{
+    const p=createManualRelationshipRecord("Fictional Robin");
+    const early=mergeInteractionIntoRelationship(p,{...extraction,durableFacts:[],activeThreads:[],stewardshipOpportunities:[],
+      openLoops:[{commitment:"Send the project overview.",owner:"User",status:"Open"}]},
+      {id:"pasted:meeting",source:"manual",observedAt:"2026-11-18",label:"Manually pasted meeting or call"});
+    const recent=mergeInteractionIntoRelationship(early,{...extraction,durableFacts:[],activeThreads:[],stewardshipOpportunities:[],
+      openLoops:[...early.openLoops.map(({commitment,owner,status})=>({commitment,owner,status})),{commitment:"Review the next version.",owner:"User",status:"Open"}]},
+      {id:"pasted:later",source:"manual",observedAt:"2026-11-23",label:"Manually pasted email conversation"});
+    const reconciled=mergeInteractionIntoRelationship(recent,{...extraction,durableFacts:[],activeThreads:[],stewardshipOpportunities:[],openLoops:[]},
+      {id:"pasted:followup",source:"manual",observedAt:"2026-11-19",label:"Manually pasted sent email"});
+    expect(reconciled.openLoops.map(item=>item.commitment)).toEqual(["Review the next version."]);
+    expect(reconciled.lastInteractionAt).toBe("2026-11-23");
+  });
+
 });

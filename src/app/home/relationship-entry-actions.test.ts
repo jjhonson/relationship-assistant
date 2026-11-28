@@ -160,4 +160,28 @@ describe("read-only person entry routing",()=>{
     noWrites();
   });
 
+  it("captures a dated sent follow-up even when its body contains questions, hypothetical plans and other names",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    vi.stubEnv("RELATIONSHIP_USER_TIME_ZONE","America/Denver");
+    vi.useFakeTimers({toFake:["Date"]});
+    vi.setSystemTime(new Date("2026-11-28T01:24:00.000Z"));
+    try{
+      const message="Email I sent on Nov 19th to Rowan - following up from our meeting. Their email address is: rowan@example.com\nRowan,\nI think we could revisit the fictional project. What would a sensible plan look like? Avery Morgan may be involved. I would prefer to test it before agreeing to a date.";
+      const fetchMock=vi.fn(async()=>response("question"));
+      vi.stubGlobal("fetch",fetchMock);
+      const r=await submitHomeText({text:message,submissionId,contextRelationshipId:"rowan"});
+      expect(r).toMatchObject({state:"saved",destination:"/relationships/rowan"});
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledOnce();
+      expect(mocks.saveReviewedPersonCapture).toHaveBeenCalledWith("rowan",expect.objectContaining({text:message,kind:"conversation",source:"email",interactionDate:"2026-11-19",submissionId}));
+      expect(mocks.saveQuickCaptureWithoutRedirect).not.toHaveBeenCalled();
+    }finally{vi.useRealTimers();}
+  });
+  it("does not attach correspondence sent to another person or invent a missing sent date",async()=>{
+    vi.stubEnv("OPENAI_API_KEY","fixture");
+    expect(await submitHomeText({text:"Email I sent to Avery Morgan on Nov 19th:\nCan we talk?",submissionId,contextRelationshipId:"rowan"})).toMatchObject({state:"answer",retainInput:true});
+    expect(await submitHomeText({text:"Email I sent to Rowan:\nI spoke with someone yesterday.",submissionId,contextRelationshipId:"rowan"})).toMatchObject({state:"clarify",field:"date",kind:"conversation"});
+    noWrites();
+  });
+
 });
